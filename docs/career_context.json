@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "updated": "2026-09-05",
+  "career_goal": "为硕士毕业后的大厂 AI/大模型岗位做准备，学习路线围绕真实招聘 JD 需求，而不是为了学习技术而学习技术。",
+  "target_roles": {
+    "primary": [
+      "大模型算法工程师 / LLM 算法工程师",
+      "大模型应用算法工程师",
+      "AI 算法工程师（大模型/NLP）",
+      "Agent / 智能体算法工程师",
+      "大模型研发工程师 / AI 应用研发工程师"
+    ],
+    "secondary": [
+      "AI 系统 / 大模型推理工程师"
+    ]
+  },
+  "jd_evidence": {
+    "companies": [
+      "华为",
+      "蔚来",
+      "安徽模式识别相关岗位",
+      "中国电信量子相关岗位",
+      "长鑫存储",
+      "艾克斯工业相关岗位",
+      "微拓控股",
+      "银翼科技",
+      "深圳富联",
+      "科大讯飞"
+    ],
+    "tech_frequency": {
+      "Python": { "count": 9, "total": 10, "priority": "最高" },
+      "PyTorch": { "count": 7, "total": 10, "priority": "最高" },
+      "LLM 理论/应用": { "count": 7, "total": 10, "priority": "最高" },
+      "Linux / 系统能力": { "count": 6, "total": 10, "priority": "高" },
+      "VLM / VLA": { "count": 5, "total": 10, "priority": "中高" },
+      "Agent": { "count": 5, "total": 10, "priority": "中高" },
+      "SFT / LoRA / QLoRA": { "count": 4, "total": 10, "priority": "中高" }
+    },
+    "other_common": [
+      "Transformer",
+      "Hugging Face",
+      "RAG",
+      "模型训练与部署",
+      "模型评测",
+      "vLLM",
+      "Docker",
+      "C/C++",
+      "推理优化",
+      "数据处理",
+      "多模态"
+    ],
+    "conclusions": [
+      "Python、PyTorch、LLM、Linux 是核心基础",
+      "Agent、RAG、SFT/LoRA 是重要应用/训练能力",
+      "vLLM、Docker、模型部署是后续工程能力",
+      "VLM/VLA 是后续扩展方向",
+      "C/C++、CUDA、DDP、DeepSpeed、ZeRO 等暂不作为当前阶段重点"
+    ]
+  },
+  "skill_roadmap": {
+    "stages": [
+      {
+        "name": "阶段一：工程底座",
+        "items": [
+          "Python", "Linux", "Git", "pytest / Ruff / Black", "Pydantic",
+          "必要时 asyncio / httpx"
+        ]
+      },
+      {
+        "name": "阶段二：深度学习与 LLM 基础",
+        "items": [
+          "PyTorch", "Tensor / autograd", "Dataset / DataLoader", "nn.Module",
+          "Transformer", "Attention / MHA / FFN", "LayerNorm / RMSNorm",
+          "Tokenizer", "RoPE", "KV Cache", "Hugging Face Transformers",
+          "generate / sampling", "Qwen / LLaMA / GQA / SwiGLU"
+        ]
+      },
+      {
+        "name": "阶段三：LLM 应用",
+        "items": [
+          "LLM API", "Structured Output", "Function Calling / Tool Calling",
+          "ReAct", "Planning", "Memory / State", "RAG", "Chunking",
+          "Embedding", "BM25", "Hybrid Search", "RRF", "Reranker",
+          "Evaluation / Badcase / LLM-as-Judge", "Agent"
+        ]
+      },
+      {
+        "name": "阶段四：模型训练与部署",
+        "items": [
+          "LoRA", "QLoRA", "PEFT", "SFT", "LLaMA-Factory", "vLLM",
+          "PagedAttention", "Continuous Batching", "Docker"
+        ]
+      },
+      {
+        "name": "阶段五：后续扩展",
+        "items": [
+          "VLM", "多模态", "DDP / ZeRO / DeepSpeed（先理解）", "推理优化",
+          "C/C++ / CUDA（确定走 AI 系统/推理方向再深入）",
+          "VLA / World Model 等高级方向"
+        ]
+      }
+    ],
+    "priority": {
+      "must_master": [
+        "Python", "Linux", "Git", "PyTorch", "Transformer", "LLM", "RAG",
+        "Agent", "LoRA / SFT"
+      ],
+      "should_master": [
+        "asyncio", "pytest", "Hugging Face", "Reranker", "LLM Evaluation",
+        "vLLM", "Docker", "VLM"
+      ],
+      "understand_only": [
+        "传统机器学习", "知识图谱", "C++", "CUDA", "DDP", "DeepSpeed",
+        "ZeRO", "世界模型", "VLA"
+      ]
+    }
+  },
+  "current_skill_state": {
+    "mastered": [
+      "Python OOP", "Class / 继承 / ABC / abstractmethod", "Type Hints",
+      "dataclass", "异常处理", "pathlib", "JSON", "虚拟环境",
+      "requirements.txt", "分层架构", "依赖注入", "pytest", "fixtures",
+      "monkeypatch", "parametrize", "pytest-qt", "subprocess 集成测试",
+      "LLM API 基础调用", "Structured Output", "手写 LLM 输出校验",
+      "AI Planner 基础", "AI 失败规则回退", "Linux 常用命令与工具链",
+      "Git 基础版本控制流程", "GitHub 远程仓库", "SSH GitHub 认证",
+      "commit / log / diff / tag / push"
+    ],
+    "weak": [
+      "Pydantic", "Ruff / Black", "asyncio / httpx", "Linux 系统化能力",
+      "PyTorch", "Transformer", "Hugging Face", "LLM 深层原理",
+      "Tool / Function Calling", "ReAct", "Memory / State", "RAG",
+      "Evaluation", "LoRA / QLoRA / SFT", "vLLM", "Docker", "VLM"
+    ],
+    "deferred": [
+      "CUDA 深入", "C++ 深入", "DDP", "DeepSpeed", "ZeRO", "VLA",
+      "World Model", "复杂知识图谱", "其他与当前目标岗位距离较远的技术"
+    ]
+  },
+  "learning_principles": [
+    "不因为某个技术热门就提前学习。",
+    "不为了“技术覆盖率”强行往 Study Agent 中塞技术。",
+    "优先学习真实 JD 高频技能。",
+    "必须考虑当前已有基础。",
+    "必须考虑前置依赖。",
+    "每次只给下一阶段最有价值的一个学习任务，不一次生成几个月的课程。",
+    "今天的任务全部完成后，再根据当前状态重新规划。",
+    "不要因为完成了一个任务就自动跳到下一个知识点；先判断当天剩余任务。",
+    "已经掌握的知识不要重复安排基础教学，除非发现薄弱点。",
+    "新知识优先通过独立练习 + Study Agent 合理落地，而不是为了项目而项目。",
+    "Study Agent 是长期主项目，但不是所有技术都必须进入 Study Agent。",
+    "学习任务应尽可能形成“理论 → 阅读代码 → 动手编码 → 验收”的闭环。"
+  ],
+  "project_state": {
+    "name": "Study Agent",
+    "role_in_learning": "长期主项目，随学习不断升级，最终形成可放入简历/GitHub/面试展示的完整 LLM Agent 项目",
+    "repo": "planet798/Study-agent",
+    "version": "v0.1.0",
+    "implemented": [
+      "PySide6 GUI", "SQLite", "任务 CRUD", "每日/每周/月度学习任务",
+      "日期注入/日期模拟", "AI 任务规划", "AI 任务复核", "AI Summary",
+      "LLM Structured Output", "AI 失败规则回退", "Windows 一键启动",
+      "DeepSeek API 接入", "305 个测试", "Git 版本控制",
+      "GitHub 私有仓库", "v0.1.0 Tag"
+    ],
+    "tests_count": 305
+  }
+}

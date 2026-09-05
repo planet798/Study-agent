@@ -556,6 +556,7 @@ class MainWindow(QMainWindow):
     def main() -> int:
         """便捷入口：从零启动整个应用（仅供调试/快速运行）。"""
         from ..ai.client import DeepSeekClient
+        from ..ai.long_term_context import load_long_term_context
         from ..ai.planner import AIPlanner
         from ..database.connection import get_connection
         from ..database.repository import TaskRepository
@@ -576,7 +577,10 @@ class MainWindow(QMainWindow):
         daily_planner = DailyPlannerService(
             repo,
             StudyPlanRepository(conn),
-            planner=AIPlanner(ai_client),
+            planner=AIPlanner(
+                ai_client,
+                long_term_context=load_long_term_context(),
+            ),
             study_plan_service=study_plan_service,
         )
         window = MainWindow(

@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PySide6.QtWidgets import QApplication
 
 from app.ai.client import DeepSeekClient
+from app.ai.long_term_context import load_long_term_context
 from app.ai.planner import AIPlanner
 from app.ai.summary import AISummaryGenerator
 from app.database.connection import get_connection
@@ -99,10 +100,16 @@ def main() -> int:
 
     # AI 配置读取环境变量；未配置时 GUI 正常运行（本地功能不受影响）
     ai_client = DeepSeekClient()
+    # 长期学习上下文（职业目标/JD/技能路线/能力状态）：作为 AI 规划的长期依据；
+    # 文件缺失/非法时返回 None，Planner 自动降级为旧行为，不影响启动。
+    long_term_context = load_long_term_context()
     daily_planner = DailyPlannerService(
         repo,
         plan_repo,
-        planner=AIPlanner(ai_client),
+        planner=AIPlanner(
+            ai_client,
+            long_term_context=long_term_context,
+        ),
         study_plan_service=study_plan_service,
     )
     date_service = DateService(

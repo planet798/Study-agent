@@ -8,6 +8,7 @@ from __future__ import annotations
 from ..database.repository import Task
 from ..database.schema import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_MEDIUM
 from ..utils.date_utils import to_display
+from .long_term_context import LongTermContext, make_long_term_summary
 
 SYSTEM_PROMPT = """你是一个学习计划辅助助手。
 
@@ -108,8 +109,11 @@ def build_planner_system_prompt(daily_limit: int = 180) -> str:
     return PLANNER_SYSTEM_PROMPT_TEMPLATE.format(daily_limit=daily_limit)
 
 
-def build_planner_user_prompt(context: "object") -> str:
-    """根据 PlanningContext 构造用户提示。"""
+def build_planner_user_prompt(context: "object", long_term: "object | None" = None) -> str:
+    """根据 PlanningContext 构造用户提示；可选附带长期学习上下文。
+
+    :param long_term: LongTermContext 或已渲染好的摘要字符串；None 表示不带。
+    """
     import json
 
     ctx_data = context.to_dict()
@@ -118,10 +122,25 @@ def build_planner_user_prompt(context: "object") -> str:
         "",
         "上下文 JSON：",
         json.dumps(ctx_data, ensure_ascii=False, indent=2),
-        "",
-        PLANNER_OUTPUT_INSTRUCTION.format(daily_limit=context.current_daily_limit),
     ]
+    long_term_section = build_long_term_context_section(long_term)
+    if long_term_section:
+        lines.extend(["", long_term_section])
+    lines.extend(
+        ["", PLANNER_OUTPUT_INSTRUCTION.format(daily_limit=context.current_daily_limit)]
+    )
     return "\n".join(lines)
+
+
+def build_long_term_context_section(long_term: "object | None") -> str:
+    """把长期学习上下文转成一个 Prompt 段落；无上下文返回空串。"""
+    if long_term is None:
+        return ""
+    if isinstance(long_term, str):
+        return "\n\n" + long_term
+    if isinstance(long_term, LongTermContext):
+        return "\n\n" + make_long_term_summary(long_term)
+    return ""
 
 
 PLANNER_OUTPUT_INSTRUCTION = """

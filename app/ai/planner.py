@@ -8,15 +8,23 @@
 from __future__ import annotations
 
 from .interface import AIClient, AIServiceError
+from .long_term_context import LongTermContext
 from .planner_context import PlanningContext
 from .prompts import build_planner_system_prompt, build_planner_user_prompt
 from .schemas import DailyPlan, parse_daily_plan_from_json
 
 
 class AIPlanner:
-    def __init__(self, client: AIClient, daily_limit: int = 180):
+    def __init__(
+        self,
+        client: AIClient,
+        daily_limit: int = 180,
+        long_term_context: LongTermContext | None = None,
+    ):
         self.client = client
         self.daily_limit = daily_limit
+        # 长期学习上下文（职业目标/JD/技能路线/能力状态）；None 时不注入，保持旧行为
+        self.long_term_context = long_term_context
 
     def is_configured(self) -> bool:
         return self.client.is_configured()
@@ -27,7 +35,9 @@ class AIPlanner:
             raise AIServiceError("AI 未配置，无法规划")
 
         system_prompt = build_planner_system_prompt(self.daily_limit)
-        user_prompt = build_planner_user_prompt(context)
+        user_prompt = build_planner_user_prompt(
+            context, long_term=self.long_term_context
+        )
         try:
             content = self.client.chat(system_prompt, user_prompt)
         except AIServiceError:
