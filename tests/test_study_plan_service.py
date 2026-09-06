@@ -10,8 +10,8 @@ from app.services.task_service import TaskService
 
 # 默认计划的各阶段边界（与 service 内种子保持一致）
 PHASE1_START = "2026-09-01"
-PHASE1_END = "2026-10-15"
-PHASE2_START = "2026-10-16"
+PHASE1_END = "2026-09-05"
+PHASE2_START = "2026-09-06"
 PLAN_START = "2026-09-01"
 PLAN_END = "2027-08-31"
 
@@ -42,15 +42,16 @@ class TestDefaultPlan:
         assert plan.start_date == PLAN_START
         assert plan.end_date == PLAN_END
 
-    def test_default_plan_has_8_phases(self, sps):
+    def test_default_plan_has_career_phases(self, sps):
         plan = sps.get_active_plan_full()
         assert plan is not None
-        assert len(plan.phases) == 8
+        assert len(plan.phases) == 5
         names = [p.name for p in plan.phases]
         assert "Python + Linux + Git" in names
-        assert "Transformer" in names
-        assert "RAG" in names
-        assert "Agent" in names
+        assert "阶段二：深度学习与 LLM 基础" in names
+        assert "阶段三：LLM 应用" in names
+        assert "阶段四：模型训练与部署" in names
+        assert "阶段五：后续扩展" in names
 
     def test_ensure_default_plan_idempotent(self, sps, plan_repo):
         # 再次调用不产生重复
@@ -82,7 +83,7 @@ class TestCurrentPhase:
     def test_next_phase_start(self, sps):
         phase = sps.get_current_phase(PHASE2_START)
         assert phase is not None
-        assert phase.name == "NumPy + Pandas + 数据处理"
+        assert phase.name == "阶段二：深度学习与 LLM 基础"
 
     def test_date_before_plan_returns_none(self, sps):
         assert sps.get_current_phase("2026-08-31") is None

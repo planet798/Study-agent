@@ -168,9 +168,11 @@ class DailyPlannerService:
         """
         plan_date = add_days(date_str, 1)
 
-        # 幂等：同一天已有计划直接返回
+        # 幂等：同一天已有计划且当天确实已有任务时，直接返回（不重复生成）。
+        # 只存在决策但当天没有任何任务（例如上次因阶段全部完成而生成为空），
+        # 则允许重新生成，避免“当天永远空任务”的卡死。
         existing = self.latest_plan_for_date(plan_date)
-        if existing is not None:
+        if existing is not None and len(self.repo.list_by_date(plan_date)) > 0:
             return {
                 "date": plan_date,
                 "existing": True,

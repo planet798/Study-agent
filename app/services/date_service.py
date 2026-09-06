@@ -67,11 +67,17 @@ class DateService:
             "last_processed_date": last,
             "current_date": current_date,
             "archived": [],
+            "generated": [],
         }
 
-        # 情况1：今天已经处理过 —— 幂等，不做任何事
+        # 情况1：今天已经处理过 —— 幂等，不做日期切换
         if last == current_date:
             result["reason"] = "already_processed"
+            # 恢复：若今天已处理过但没有任何任务（例如上次生成因阶段全部完成而为空），
+            # 则再尝试生成一次；当天已有任务时此分支不做任何事，保证幂等。
+            if not self.repo.list_by_date(current_date):
+                generated = self._generate_tasks_for_day(current_date)
+                result["generated"] = [t.id for t in generated]
             return result
 
         # 情况2：首次运行 —— 记录今天作为处理基准，无历史遗留

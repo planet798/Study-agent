@@ -20,6 +20,99 @@ from ..database.study_plan_repository import StudyPlan, StudyPlanRepository
 # 默认每日自主学习时间预算（分钟）
 MAX_DAILY_STUDY_MINUTES = 180
 
+# 长期学习路线的默认阶段/主题种子（与 docs/career_context.json 的 skill_roadmap 对齐）。
+# Phase1 保留历史名称与主题，以兼容已有完成任务的主题关联；
+# 后续阶段按 career_context 的“阶段二~五”展开为可跟踪主题。
+_DEFAULT_PHASES = [
+    {
+        "name": "Python + Linux + Git",
+        "desc": "编程与开发环境基础（工程底座）",
+        "start": "2026-09-01", "end": "2026-09-05",
+        "priority": 3,
+        "goals": "能熟练用 Python 写脚本、用 Git 协作、Linux 下工作",
+        "topics": [
+            ("Python 语法与基础练习", 45, 3),
+            ("Python 面向对象与常用库", 45, 2),
+            ("Linux 常用命令与工具链", 30, 2),
+            ("Git 版本控制与协作流程", 30, 1),
+        ],
+    },
+    {
+        "name": "阶段二：深度学习与 LLM 基础",
+        "desc": "从 PyTorch 到 Transformer 再到 LLM 基础机制",
+        "start": "2026-09-06", "end": "2026-12-31",
+        "priority": 2,
+        "goals": "能独立训练最小模型，理解 Transformer 与 LLM 核心机制",
+        "topics": [
+            ("PyTorch 张量与自动求导（Tensor / autograd）", 60, 3),
+            ("最小线性回归训练闭环（y=2x+1）", 60, 3),
+            ("Dataset 与 DataLoader", 60, 2),
+            ("nn.Module 与模型搭建", 60, 2),
+            ("Transformer：Attention / MHA / FFN", 60, 3),
+            ("LayerNorm / RMSNorm", 45, 2),
+            ("Tokenizer 与分词", 45, 2),
+            ("RoPE 位置编码", 45, 2),
+            ("KV Cache", 45, 2),
+            ("Hugging Face Transformers", 60, 2),
+            ("generate / sampling 解码策略", 45, 2),
+            ("Qwen / LLaMA 架构：GQA / SwiGLU", 60, 1),
+        ],
+    },
+    {
+        "name": "阶段三：LLM 应用",
+        "desc": "LLM 应用开发、RAG 与 Agent",
+        "start": "2027-01-01", "end": "2027-03-31",
+        "priority": 2,
+        "goals": "能搭建可用的 RAG 与简单 Agent 应用",
+        "topics": [
+            ("Function Calling / Tool Calling", 60, 3),
+            ("ReAct 推理与行动", 45, 3),
+            ("Planning 任务规划", 45, 2),
+            ("Memory / State 状态管理", 45, 2),
+            ("RAG 全流程搭建", 60, 3),
+            ("Chunking 分块策略", 45, 2),
+            ("Embedding 与向量检索", 45, 2),
+            ("BM25 与混合检索", 45, 2),
+            ("RRF 排序融合", 30, 1),
+            ("Reranker 重排序", 45, 2),
+            ("Evaluation / Badcase / LLM-as-Judge", 45, 2),
+            ("Agent 实现与多步编排", 60, 3),
+        ],
+    },
+    {
+        "name": "阶段四：模型训练与部署",
+        "desc": "高效微调与生产部署",
+        "start": "2027-04-01", "end": "2027-06-30",
+        "priority": 2,
+        "goals": "掌握 LoRA/SFT 微调与 vLLM 部署基础",
+        "topics": [
+            ("LoRA / QLoRA", 60, 3),
+            ("PEFT", 45, 2),
+            ("SFT 指令微调", 60, 3),
+            ("LLaMA-Factory", 45, 2),
+            ("vLLM 与 PagedAttention", 60, 2),
+            ("Continuous Batching", 45, 2),
+            ("Docker", 60, 1),
+        ],
+    },
+    {
+        "name": "阶段五：后续扩展",
+        "desc": "多模态与推理优化（按方向选择深入）",
+        "start": "2027-07-01", "end": "2027-08-31",
+        "priority": 1,
+        "goals": "了解多模态与推理优化方向，按需深入",
+        "topics": [
+            ("VLM / 多模态基础", 60, 2),
+            ("DDP / ZeRO / DeepSpeed（先理解）", 60, 1),
+            ("推理优化基础", 45, 2),
+            ("C/C++ / CUDA（方向确定后深入）", 60, 1),
+            ("VLA / World Model（了解）", 60, 1),
+        ],
+    },
+]
+
+_EXPECTED_PHASE_NAMES = tuple(p["name"] for p in _DEFAULT_PHASES)
+
 
 class StudyPlanService:
     def __init__(
@@ -37,146 +130,126 @@ class StudyPlanService:
     # ================= 默认研一计划 =================
 
     def ensure_default_plan(self) -> StudyPlan:
-        """若不存在默认研一计划，则创建（幂等）。返回计划主体（不带阶段）。"""
-        existing = self.plan_repo.get_active_plan()
-        if existing is not None:
-            self._default_plan_created = False
-            return existing
+        """确保默认计划存在并与长期学习路线一致（幂等）。
 
+        首次运行：创建计划 + 全量种子。
+        之后每次运行：对已有计划就地同步（更新/补齐阶段与主题，并移除
+        没有任务引用的过期阶段），绝不触碰历史任务。
+        """
+        existing = self.plan_repo.get_active_plan()
+        if existing is None:
+            self._default_plan_created = True
+            return self._create_default_plan()
+        self._default_plan_created = False
+        self._reconcile_plan(existing)
+        return self.plan_repo.get_active_plan() or existing
+
+    def _create_default_plan(self) -> StudyPlan:
         plan = self.plan_repo.create_plan(
             name="USTC AI 研一大厂算法路线",
             description=(
-                "研一系统学习路线：从编程/工具基础，到数据科学、深度学习、"
-                "Transformer、LLM、RAG、Agent，再到 AI 工程化与项目实践。"
+                "基于真实 JD 与 docs/career_context.json 的长期算法学习路线："
+                "工程底座 → 深度学习与 LLM 基础 → LLM 应用 → 模型训练与部署 → 扩展。"
             ),
             start_date="2026-09-01",
             end_date="2027-08-31",
         )
         self._seed_phases_and_topics(plan.id)
-        self._default_plan_created = True
         return plan
 
     def _seed_phases_and_topics(self, plan_id: int) -> None:
-        """写入 8 个阶段的默认主题（主题具体内容可后续逐步完善）。"""
-        phases = [
-            {
-                "name": "Python + Linux + Git",
-                "desc": "编程与开发环境基础",
-                "start": "2026-09-01", "end": "2026-10-15",
-                "priority": 3,
-                "goals": "能熟练用 Python 写脚本、用 Git 协作、Linux 下工作",
-                "topics": [
-                    ("Python 语法与基础练习", 45, 3),
-                    ("Python 面向对象与常用库", 45, 2),
-                    ("Linux 常用命令与工具链", 30, 2),
-                    ("Git 版本控制与协作流程", 30, 1),
-                ],
-            },
-            {
-                "name": "NumPy + Pandas + 数据处理",
-                "desc": "数据处理与可视化入门",
-                "start": "2026-10-16", "end": "2026-11-30",
-                "priority": 3,
-                "goals": "能完成数据的读取、清洗、分析与简单可视化",
-                "topics": [
-                    ("NumPy 数组运算与广播", 45, 3),
-                    ("Pandas DataFrame 处理", 45, 3),
-                    ("数据清洗与缺失值处理", 30, 2),
-                    ("Matplotlib 基础可视化", 30, 1),
-                ],
-            },
-            {
-                "name": "PyTorch + 深度学习基础",
-                "desc": "深度学习框架与核心概念",
-                "start": "2026-12-01", "end": "2027-01-31",
-                "priority": 3,
-                "goals": "能搭建并训练基础神经网络",
-                "topics": [
-                    ("张量与自动求导", 45, 3),
-                    ("线性层与多层感知机", 45, 3),
-                    ("损失函数与优化器", 30, 2),
-                    ("训练循环与评估流程", 45, 2),
-                ],
-            },
-            {
-                "name": "Transformer",
-                "desc": "现代大模型的核心架构",
-                "start": "2027-02-01", "end": "2027-03-31",
-                "priority": 3,
-                "goals": "理解并实现 Transformer 关键组件",
-                "topics": [
-                    ("自注意力机制原理", 45, 3),
-                    ("多头注意力与位置编码", 45, 3),
-                    ("编码器-解码器结构", 45, 2),
-                ],
-            },
-            {
-                "name": "LLM 基础",
-                "desc": "大语言模型的工作原理与训练",
-                "start": "2027-04-01", "end": "2027-05-15",
-                "priority": 3,
-                "goals": "理解大模型的训练、对其与解码生成",
-                "topics": [
-                    ("语言模型与预训练任务", 45, 3),
-                    ("指令微调与 RLHF 简介", 45, 2),
-                    ("Prompt 与解码策略", 30, 2),
-                ],
-            },
-            {
-                "name": "RAG",
-                "desc": "检索增强生成与知识库",
-                "start": "2027-05-16", "end": "2027-06-30",
-                "priority": 3,
-                "goals": "能搭建一个可用的 RAG 应用",
-                "topics": [
-                    ("向量检索与嵌入", 45, 3),
-                    ("RAG 全流程搭建", 60, 3),
-                ],
-            },
-            {
-                "name": "Agent",
-                "desc": "智能体与工具调用",
-                "start": "2027-07-01", "end": "2027-08-15",
-                "priority": 3,
-                "goals": "理解 Agent 架构并实现简单 Agent",
-                "topics": [
-                    ("Agent 架构与思维链", 45, 3),
-                    ("工具调用与函数式接口", 45, 3),
-                    ("多步任务编排", 45, 2),
-                ],
-            },
-            {
-                "name": "AI 工程化 + 项目",
-                "desc": "部署、优化与综合项目",
-                "start": "2027-08-16", "end": "2027-08-31",
-                "priority": 2,
-                "goals": "完成可展示的完整项目并掌握工程化要点",
-                "topics": [
-                    ("模型推理与部署", 60, 3),
-                    ("综合项目开发", 60, 3),
-                    ("性能优化与评测", 30, 1),
-                ],
-            },
-        ]
-        for ph in phases:
+        """按 _DEFAULT_PHASES 写入阶段与主题（仅新建计划时使用）。"""
+        for spec in _DEFAULT_PHASES:
             phase = self.plan_repo.create_phase(
                 plan_id=plan_id,
-                name=ph["name"],
-                description=ph["desc"],
-                start_date=ph["start"],
-                end_date=ph["end"],
-                priority=ph["priority"],
-                goals=ph["goals"],
+                name=spec["name"],
+                description=spec["desc"],
+                start_date=spec["start"],
+                end_date=spec["end"],
+                priority=spec["priority"],
+                goals=spec["goals"],
             )
-            for idx, (name, minutes, priority) in enumerate(ph["topics"]):
+            self._upsert_topics(phase.id, spec["topics"])
+
+    # ---------- 计划同步（把旧 DB 计划对齐到长期学习路线） ----------
+
+    def _reconcile_plan(self, plan: StudyPlan) -> None:
+        """把已有计划就地同步到 _DEFAULT_PHASES（幂等，不触碰任务历史）。
+
+        - 对每个预期阶段/主题按 name 做 upsert（不存在创建、存在更新）；
+        - 移除“预期之外”且没有任何任务引用的过期阶段（如旧的八阶段计划）。
+        """
+        for spec in _DEFAULT_PHASES:
+            phase = self._find_phase_by_name(plan.id, spec["name"])
+            if phase is None:
+                phase = self.plan_repo.create_phase(
+                    plan_id=plan.id,
+                    name=spec["name"],
+                    description=spec["desc"],
+                    start_date=spec["start"],
+                    end_date=spec["end"],
+                    priority=spec["priority"],
+                    goals=spec["goals"],
+                )
+            else:
+                self.plan_repo.update_phase(
+                    phase.id,
+                    description=spec["desc"],
+                    start_date=spec["start"],
+                    end_date=spec["end"],
+                    priority=spec["priority"],
+                    goals=spec["goals"],
+                )
+            self._upsert_topics(phase.id, spec["topics"])
+
+        for phase in self.plan_repo.list_phases(plan.id):
+            if phase.name in _EXPECTED_PHASE_NAMES:
+                continue
+            self._delete_phase_if_unused(phase)
+
+    def _find_phase_by_name(self, plan_id: int, name: str):
+        for phase in self.plan_repo.list_phases(plan_id):
+            if phase.name == name:
+                return phase
+        return None
+
+    def _upsert_topics(self, phase_id: int, topics) -> None:
+        """按主题名 upsert；只新增/更新，不删除（保留历史主题关联）。"""
+        existing = {t.name: t for t in self.plan_repo.list_topics(phase_id)}
+        for idx, (name, minutes, priority) in enumerate(topics):
+            topic = existing.get(name)
+            if topic is None:
                 self.plan_repo.create_topic(
-                    phase_id=phase.id,
+                    phase_id=phase_id,
                     name=name,
                     description=name,
                     estimated_minutes=minutes,
                     priority=priority,
                     order_index=idx,
                 )
+            else:
+                self.plan_repo.update_topic(
+                    topic.id,
+                    description=name,
+                    estimated_minutes=minutes,
+                    priority=priority,
+                    order_index=idx,
+                )
+
+    def _delete_phase_if_unused(self, phase) -> None:
+        """仅当阶段下所有主题都没有任务引用时才删除（保护历史任务）。"""
+        for topic in self.plan_repo.list_topics(phase.id):
+            if self._topic_has_tasks(topic.id):
+                return
+        for topic in self.plan_repo.list_topics(phase.id):
+            self.plan_repo.delete_topic(topic.id)
+        self.plan_repo.delete_phase(phase.id)
+
+    def _topic_has_tasks(self, topic_id: int) -> bool:
+        row = self.repo.conn.execute(
+            "SELECT COUNT(*) AS n FROM tasks WHERE topic_id = ?", (topic_id,)
+        ).fetchone()
+        return (row["n"] or 0) > 0
 
     # ================= 当前阶段 =================
 
@@ -188,17 +261,47 @@ class StudyPlanService:
         return self.plan_repo.get_plan_with_phases(plan.id)
 
     def get_current_phase(self, date_str: str):
-        """根据日期返回当前 StudyPhase；无匹配返回 None。
+        """返回当前应学习的阶段；无匹配返回 None。
 
-        规则：start_date <= date <= end_date（含边界）。
+        规则：
+        - 先按日期锚定阶段（start_date <= date <= end_date）；
+        - 若锚定阶段及其后续阶段的所有主题都已完成，则自动推进到下一个
+          还有未完成任务主题的阶段（即使日期窗口尚未开始），避免“阶段完成
+          后每天无任务可生成”的卡死；
+        - 计划期之外（早于开始或晚于结束）仍返回 None。
         """
         plan = self.get_active_plan_full()
-        if plan is None:
+        if plan is None or not plan.phases:
             return None
-        for phase in plan.phases:
+        phases = sorted(plan.phases, key=lambda p: p.start_date)
+        if date_str < phases[0].start_date:
+            return None
+        if date_str > phases[-1].end_date:
+            return None
+
+        anchor_index = None
+        for idx, phase in enumerate(phases):
             if phase.start_date <= date_str <= phase.end_date:
+                anchor_index = idx
+                break
+        if anchor_index is None:
+            # 落在阶段间隙：取后续第一个阶段
+            anchor_index = next(
+                (i for i, p in enumerate(phases) if p.start_date > date_str),
+                None,
+            )
+            if anchor_index is None:
+                return None
+
+        done_ids = self._done_topic_ids()
+        for phase in phases[anchor_index:]:
+            if self._phase_has_remaining_topics(phase, done_ids):
                 return phase
         return None
+
+    def _phase_has_remaining_topics(self, phase, done_topic_ids: set[int]) -> bool:
+        """阶段内是否还存在未完成（未生成过 done 任务）的主题。"""
+        return any(t.id not in done_topic_ids for t in phase.topics)
 
     # ================= 每日任务生成 =================
 

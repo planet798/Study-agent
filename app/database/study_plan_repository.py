@@ -170,6 +170,57 @@ class StudyPlanRepository:
         ).fetchall()
         return [self._topic_from_row(r) for r in rows]
 
+    # ---------- 就地更新（迁移 / 同步长期学习路线用） ----------
+
+    _PHASE_UPDATABLE = ("name", "description", "start_date", "end_date",
+                        "priority", "goals")
+    _TOPIC_UPDATABLE = ("name", "description", "estimated_minutes",
+                        "priority", "order_index")
+
+    def update_phase(self, phase_id: int, **fields) -> StudyPhase | None:
+        allowed = {k: v for k, v in fields.items() if k in self._PHASE_UPDATABLE}
+        if not allowed:
+            return self.get_phase(phase_id)
+        set_clause = ", ".join(f"{k} = ?" for k in allowed)
+        self.conn.execute(
+            f"UPDATE study_phases SET {set_clause} WHERE id = ?",
+            (*allowed.values(), phase_id),
+        )
+        self.conn.commit()
+        return self.get_phase(phase_id)
+
+    def update_topic(self, topic_id: int, **fields) -> StudyTopic | None:
+        allowed = {k: v for k, v in fields.items() if k in self._TOPIC_UPDATABLE}
+        if not allowed:
+            row = self.conn.execute(
+                "SELECT * FROM study_topics WHERE id = ?", (topic_id,)
+            ).fetchone()
+            return self._topic_from_row(row) if row else None
+        set_clause = ", ".join(f"{k} = ?" for k in allowed)
+        self.conn.execute(
+            f"UPDATE study_topics SET {set_clause} WHERE id = ?",
+            (*allowed.values(), topic_id),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT * FROM study_topics WHERE id = ?", (topic_id,)
+        ).fetchone()
+        return self._topic_from_row(row) if row else None
+
+    def delete_topic(self, topic_id: int) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM study_topics WHERE id = ?", (topic_id,)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def delete_phase(self, phase_id: int) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM study_phases WHERE id = ?", (phase_id,)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
     # ---------- 组合读取 ----------
 
     def get_phases_with_topics(self, plan_id: int) -> list[StudyPhase]:
