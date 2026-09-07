@@ -21,6 +21,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+from typing import Callable
+
 # 状态常量
 STATUS_ACTIVE = "active"
 STATUS_DONE = "done"
@@ -142,3 +145,77 @@ def create_schema(conn) -> None:
     """在给定的 sqlite3 连接上执行建表语句（幂等）。"""
     conn.executescript(SCHEMA_SQL)
     conn.commit()
+
+
+# ============================================================
+# 数据库迁移机制
+# ============================================================
+
+# 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
+# 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
+# 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
+SCHEMA_VERSION = 1
+
+# 迁移动态表：{目标版本: 迁移函数}。
+# 以后新增表/字段时：
+#   1) 新增一个迁移函数并登记到 _MIGRATIONS[v]；
+#   2) 把 SCHEMA_VERSION 提到 v；
+#   3) 迁移函数自身必须幂等（IF NOT EXISTS / add_column_if_not_exists）。
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+
+
+def get_schema_version(conn) -> int:
+    """读取当前数据库结构版本（PRAGMA user_version）。"""
+    return int(conn.execute("PRAGMA user_version").fetchone()[0])
+
+
+def _set_user_version(conn, version: int) -> None:
+    """写入数据库结构版本；内部版本号，避免 SQL 注入。"""
+    conn.execute(f"PRAGMA user_version = {int(version)}")
+    conn.commit()
+
+
+def add_column_if_not_exists(conn, table: str, column: str, ddl: str) -> bool:
+    """幂等加列：列不存在时执行 ALTER TABLE ADD COLUMN。
+
+    返回 True 表示本次确实执行了迁移，False 表示列已存在。
+    注意：table/column 只允许来自内部常量，不做用户输入。
+    """
+    # table_info 返回 (cid, name, type, notnull, dflt_value, pk)，用下标避免依赖 row_factory
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column in existing:
+        return False
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    conn.commit()
+    return True
+
+
+def migrate(conn) -> int:
+    """把数据库结构升级到 SCHEMA_VERSION（幂等、可安全重复调用）。
+
+    顺序：
+    1. 先执行基础建表（IF NOT EXISTS，保证 v1 表存在）；
+    2. 旧库（user_version=0）标记为 v1；
+    3. 按序执行 v(current+1) .. v(SCHEMA_VERSION) 的迁移；
+    4. 返回最终版本。
+
+    迁移失败时 user_version 停留在失败前版本，下次启动会因幂等迁移自动重试。
+    """
+    create_schema(conn)
+
+    current = get_schema_version(conn)
+    if current == 0:
+        # 兼容旧数据库：旧的 create_schema 不写版本号，但表已由 IF NOT EXISTS 保证
+        current = 1
+        _set_user_version(conn, current)
+
+    for version in range(current + 1, SCHEMA_VERSION + 1):
+        fn = _MIGRATIONS.get(version)
+        if fn is None:
+            raise RuntimeError(
+                f"缺少数据库迁移：目标版本 v{version}（当前 SCHEMA_VERSION={SCHEMA_VERSION}）"
+            )
+        fn(conn)
+        _set_user_version(conn, version)
+
+    return get_schema_version(conn)

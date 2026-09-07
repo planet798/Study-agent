@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from .schema import create_schema
+from .schema import migrate
 
 # 项目根目录：app/database -> .. -> .. 为 study-agent/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +34,6 @@ def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     # WAL 提升并发读写体验；对单机桌面应用足够
     conn.execute("PRAGMA journal_mode = WAL")
 
-    # 幂等创建表结构
-    create_schema(conn)
+    # 幂等建表 + 按序迁移（兼容旧数据库，不破坏历史数据）
+    migrate(conn)
     return conn
