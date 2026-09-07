@@ -453,3 +453,137 @@ def parse_assessment_questions_from_json(text: str) -> AssessmentQuestionSet:
     except json.JSONDecodeError as e:
         raise AIServiceError(f"验收题返回的不是合法 JSON：{e}") from e
     return parse_assessment_questions(data)
+
+
+# ============================================================
+# AI 验收判题（Assessment grading）输出结构
+# ============================================================
+
+# 每题判定结果
+ASSESSMENT_VERDICTS = ("correct", "partial", "incorrect")
+
+# 整体验收等级（由 AI 根据实际作答推断）
+ASSESSMENT_RESULT_LEVELS = ("excellent", "good", "ok", "poor")
+
+MAX_ASSESSMENT_JUDGMENTS = 10
+MAX_WEAK_POINTS = 20
+
+
+@dataclass(frozen=True)
+class QuestionJudgment:
+    """单题的判题结果。"""
+
+    question_index: int
+    verdict: str       # correct / partial / incorrect
+    reason: str        # 简要理由
+
+
+@dataclass(frozen=True)
+class AssessmentJudgment:
+    """一组验收题的 AI 判题结果。"""
+
+    question_judgments: tuple[QuestionJudgment, ...]
+    weak_points: tuple[str, ...]
+    result_level: str   # excellent / good / ok / poor
+    mastery_estimate: float  # 0~1，由 AI 基于证据推断
+
+    def to_dict(self) -> dict:
+        return {
+            "questions": [
+                {
+                    "question_index": j.question_index,
+                    "verdict": j.verdict,
+                    "reason": j.reason,
+                }
+                for j in self.question_judgments
+            ],
+            "weak_points": list(self.weak_points),
+            "result_level": self.result_level,
+            "mastery_estimate": self.mastery_estimate,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+
+def parse_assessment_judgment(raw: object) -> AssessmentJudgment:
+    """把 dict 解析并校验为判题结果；任何问题抛 AIServiceError。"""
+    if not isinstance(raw, dict):
+        raise AIServiceError(
+            f"判题输出必须是 JSON 对象，实际为 {type(raw).__name__}"
+        )
+    for field_name in (
+        "questions",
+        "weak_points",
+        "result_level",
+        "mastery_estimate",
+    ):
+        if field_name not in raw:
+            raise AIServiceError(f"判题输出缺少字段：{field_name}")
+
+    items = raw["questions"]
+    if not isinstance(items, list):
+        raise AIServiceError("字段 questions 必须是数组")
+    if not (1 <= len(items) <= MAX_ASSESSMENT_JUDGMENTS):
+        raise AIServiceError(
+            f"questions 数量必须在 1~{MAX_ASSESSMENT_JUDGMENTS} 之间"
+        )
+
+    judgments: list[QuestionJudgment] = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise AIServiceError(f"questions[{i}] 必须是对象")
+        for field_name in ("question_index", "verdict", "reason"):
+            if field_name not in item:
+                raise AIServiceError(f"questions[{i}] 缺少字段：{field_name}")
+        idx = item["question_index"]
+        if isinstance(idx, bool) or not isinstance(idx, (int, float)):
+            raise AIServiceError(f"questions[{i}].question_index 必须是数字下标")
+        idx = int(idx)
+        if idx < 0:
+            raise AIServiceError(f"questions[{i}].question_index 不能为负")
+        verdict = _require_str(item["verdict"], f"questions[{i}].verdict", max_len=20)
+        if verdict not in ASSESSMENT_VERDICTS:
+            raise AIServiceError(
+                f"questions[{i}].verdict 非法：{verdict}，"
+                f"允许值：{', '.join(ASSESSMENT_VERDICTS)}"
+            )
+        reason = _require_str(item["reason"], f"questions[{i}].reason", max_len=1000)
+        judgments.append(
+            QuestionJudgment(question_index=idx, verdict=verdict, reason=reason)
+        )
+
+    weak_list = raw["weak_points"]
+    if not isinstance(weak_list, list):
+        raise AIServiceError("字段 weak_points 必须是数组")
+    if len(weak_list) > MAX_WEAK_POINTS:
+        raise AIServiceError(f"weak_points 数量不能超过 {MAX_WEAK_POINTS}")
+    weak_points: list[str] = []
+    for i, w in enumerate(weak_list):
+        weak_points.append(_require_str(w, f"weak_points[{i}]", max_len=200))
+
+    result_level = _require_str(raw["result_level"], "result_level", max_len=20)
+    if result_level not in ASSESSMENT_RESULT_LEVELS:
+        raise AIServiceError(
+            f"result_level 非法：{result_level}，"
+            f"允许值：{', '.join(ASSESSMENT_RESULT_LEVELS)}"
+        )
+
+    mastery = _require_number_in_range(
+        raw["mastery_estimate"], "mastery_estimate", 0.0, 1.0
+    )
+    return AssessmentJudgment(
+        question_judgments=tuple(judgments),
+        weak_points=tuple(weak_points),
+        result_level=result_level,
+        mastery_estimate=round(float(mastery), 4),
+    )
+
+
+def parse_assessment_judgment_from_json(text: str) -> AssessmentJudgment:
+    """字符串 -> JSON -> 校验。"""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise AIServiceError(f"判题返回的不是合法 JSON：{e}") from e
+    return parse_assessment_judgment(data)

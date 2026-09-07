@@ -11,6 +11,8 @@ from ..utils.date_utils import to_display
 from .long_term_context import LongTermContext, make_long_term_summary
 from .schemas import (
     ASSESSMENT_QUESTION_TYPES,
+    ASSESSMENT_RESULT_LEVELS,
+    ASSESSMENT_VERDICTS,
     MAX_ASSESSMENT_QUESTIONS,
     MAX_ASSESSMENT_POINTS,
 )
@@ -246,6 +248,61 @@ def build_assessment_prompt(
         max_questions=MAX_ASSESSMENT_QUESTIONS,
         types=", ".join(ASSESSMENT_QUESTION_TYPES),
         max_points=MAX_ASSESSMENT_POINTS,
+    )
+
+
+# ============================================================
+# AI 验收判题（Assessment grading）Prompt
+# ============================================================
+
+ASSESSMENT_JUDGE_SYSTEM_PROMPT = """你是严格的学习验收判题助手。
+
+你会收到“题目 + 用户实际作答”，你的任务是：
+- 对每道题给出判定：correct（正确）/ partial（部分正确）/ incorrect（错误），并给简要理由；
+- 只依据作答证据判断，绝不采信用户自评；
+- 识别答错/理解薄弱的具体知识点，写入 weak_points；
+- 给出整体 result_level 与 mastery_estimate（0~1 浮点数，是对“真实掌握程度”的估计）。
+
+你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
+
+ASSESSMENT_JUDGE_OUTPUT_INSTRUCTION = """
+请输出严格 JSON：
+{{
+  "questions": [
+    {{"question_index": 0, "verdict": "correct", "reason": "简要理由"}}
+  ],
+  "weak_points": ["如：零梯度清理", "如：梯度累积"],
+  "result_level": "good",
+  "mastery_estimate": 0.72
+}}
+
+约束：
+- questions 必须与题目逐题对应（question_index 从 0 开始，数量必须等于题目数）
+- verdict 只能是：{verdicts}
+- weak_points 是字符串数组，可为空数组
+- result_level 只能是：{levels}
+- mastery_estimate 是 0~1 之间的数字
+"""
+
+
+def build_assessment_judge_prompt(
+    questions: list[dict],
+    answers: list[str],
+) -> str:
+    """根据题目 + 用户答案构造判题 Prompt。"""
+    import json as _json
+
+    return (
+        "请根据以下题目与用户作答进行判断。\n\n"
+        "【题目】\n"
+        + _json.dumps(questions, ensure_ascii=False, indent=2)
+        + "\n\n【用户答案】\n"
+        + _json.dumps(answers, ensure_ascii=False, indent=2)
+        + "\n\n"
+        + ASSESSMENT_JUDGE_OUTPUT_INSTRUCTION.format(
+            verdicts=", ".join(ASSESSMENT_VERDICTS),
+            levels=", ".join(ASSESSMENT_RESULT_LEVELS),
+        )
     )
 
 

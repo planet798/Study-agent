@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -220,6 +220,32 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[2] = _migrate_v2
+
+
+# ============================================================
+# v3：验收判题状态（Phase 3D）
+# ============================================================
+#
+# 在 assessment_attempts 上增加判题状态，区分：
+#   pending 等待判题 / judged 已判题 / failed 判题失败（可稍后重判）。
+
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    """v3：adding judge_status / judge_error（幂等）。"""
+    add_column_if_not_exists(
+        conn,
+        "assessment_attempts",
+        "judge_status",
+        "TEXT NOT NULL DEFAULT 'pending'",
+    )
+    add_column_if_not_exists(
+        conn,
+        "assessment_attempts",
+        "judge_error",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+
+
+_MIGRATIONS[3] = _migrate_v3
 
 
 def get_schema_version(conn) -> int:

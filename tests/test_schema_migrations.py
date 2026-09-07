@@ -93,7 +93,7 @@ def test_v2_tables_exist_in_new_db(tmp_path):
 
 
 def test_v1_db_upgrade_creates_v2_tables_without_touching_tasks(tmp_path):
-    """从 v1 升级到 v2：新增两张表，历史任务不受影响。"""
+    """从 v1 升级到最新：新增两张表 + v3 判题列，历史任务不受影响。"""
     path = tmp_path / "v1.db"
     raw = sqlite3.connect(str(path))
     try:
@@ -113,7 +113,7 @@ def test_v1_db_upgrade_creates_v2_tables_without_touching_tasks(tmp_path):
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == 2
+        assert get_schema_version(conn) == SCHEMA_VERSION
         tables = {
             row[0] for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -128,6 +128,32 @@ def test_v1_db_upgrade_creates_v2_tables_without_touching_tasks(tmp_path):
         assert row["title"] == "v1 任务"
         assert row["status"] == "active"
         assert row["scheduled_date"] == "2026-09-06"
+    finally:
+        conn.close()
+
+
+def test_v3_adds_judge_columns_to_assessment_attempts(tmp_path):
+    conn = get_connection(tmp_path / "v3.db")
+    try:
+        assert get_schema_version(conn) == SCHEMA_VERSION
+        cols = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(assessment_attempts)"
+            )
+        }
+        assert "judge_status" in cols
+        assert "judge_error" in cols
+        # 默认值正确
+        conn.execute(
+            "INSERT INTO assessment_attempts (knowledge_point_id, questions_json,"
+            " created_at) VALUES (1, '[]', '2026-09-06T10:00:00')"
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT judge_status, judge_error FROM assessment_attempts LIMIT 1"
+        ).fetchone()
+        assert row["judge_status"] == "pending"
+        assert row["judge_error"] == ""
     finally:
         conn.close()
 
@@ -149,30 +175,30 @@ def test_migrate_is_idempotent(tmp_path):
 
 
 def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
-    """模拟未来 v3 迁移：能按序执行，且重复 migrate 不重复执行。"""
+    """模拟未来 v4 迁移：能按序执行，且重复 migrate 不重复执行。"""
     path = tmp_path / "future.db"
-    # 先建一个 v2 库（使用真实 v1 + v2），手动写版本号模拟旧库
+    # 先建到真实最新版本（v1 + v2 + v3）
     raw = sqlite3.connect(str(path))
     try:
         migrate(raw)
-        assert get_schema_version(raw) == 2
+        assert get_schema_version(raw) == SCHEMA_VERSION
     finally:
         raw.close()
 
     calls = []
 
-    def _v3(conn):
+    def _v4(conn):
         calls.append(1)
         add_column_if_not_exists(
             conn, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'new'"
         )
 
-    monkeypatch.setitem(schema_module._MIGRATIONS, 3, _v3)
-    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", 3)
+    monkeypatch.setitem(schema_module._MIGRATIONS, 4, _v4)
+    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", 4)
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == 3
+        assert get_schema_version(conn) == 4
         cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
         assert "task_type" in cols
         # 手动插一行，验证默认值生效
@@ -186,9 +212,9 @@ def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
         row = conn.execute("SELECT task_type FROM tasks WHERE title='t'").fetchone()
         assert row["task_type"] == "new"
 
-        # 再次迁移：版本不变，真实 v3 迁移函数不再执行
-        assert migrate(conn) == 3
-        assert migrate(conn) == 3
+        # 再次迁移：版本不变，真实 v4 迁移函数不再执行
+        assert migrate(conn) == 4
+        assert migrate(conn) == 4
         assert len(calls) == 1
     finally:
         conn.close()
