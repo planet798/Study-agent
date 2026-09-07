@@ -34,6 +34,7 @@ from ..ai.schemas import (
 )
 from ..database.assessment_repository import AssessmentRepository
 from ..utils.date_utils import now_iso
+from .review_service import ReviewService
 
 # 掌握度平滑策略：旧估计 70% + 本次估计 30%，防止单次结果直接覆盖成极端值
 _PREVIOUS_WEIGHT = 0.7
@@ -61,9 +62,12 @@ class AssessmentService:
         self,
         client: AIClient,
         assessment_repo: AssessmentRepository | None = None,
+        review_service: ReviewService | None = None,
     ):
         self.client = client
         self.assessment_repo = assessment_repo
+        # 可选注入：判题成功后联动复习调度（Phase 4）
+        self.review_service = review_service
 
     def is_configured(self) -> bool:
         """AI 是否已配置（未配置时上层应给出明确提示而非崩溃）。"""
@@ -133,7 +137,9 @@ class AssessmentService:
         attempt["questions"] = list(question_set.questions)
         return attempt
 
-    def submit_answers(self, attempt_id: int, answers) -> dict:
+    def submit_answers(
+        self, attempt_id: int, answers, today: str | None = None
+    ) -> dict:
         """提交用户答案并（尽力）AI 判题，最后回写知识点掌握度。
 
         流程：
@@ -181,6 +187,11 @@ class AssessmentService:
         self._update_knowledge_point_mastery(
             attempt["knowledge_point_id"], judgment.mastery_estimate
         )
+        # 判题成功后联动复习调度（若注入了 ReviewService）
+        if self.review_service is not None:
+            self.review_service.record_assessment_result(
+                repo.get_attempt(attempt_id), today=today
+            )
         return repo.get_attempt(attempt_id)
 
     # ---------- 内部 ----------

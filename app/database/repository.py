@@ -51,6 +51,9 @@ class Task:
     not_done_at: str | None = None
     source: str = "manual"
     topic_id: int | None = None
+    # v4 起：区分任务性质（new / review / extra），并关联知识点
+    task_type: str = "new"
+    knowledge_point_id: int | None = None
 
     @property
     def is_done(self) -> bool:
@@ -151,11 +154,16 @@ class TaskRepository:
         priority: int = 1,
         source: str = "manual",
         topic_id: int | None = None,
+        task_type: str = "new",
+        knowledge_point_id: int | None = None,
     ) -> Task:
         """新增一条任务，返回带 id 的 Task。
 
-        :param source: 任务来源（manual=手动 / generated=学习计划自动生成）
+        :param source: 任务来源（manual=手动 / generated=学习计划自动生成 /
+            review=复习任务 / extra=额外学习）
         :param topic_id: 关联的 study_topics 主题 id（自动生成任务使用）
+        :param task_type: 任务性质（new / review / extra）
+        :param knowledge_point_id: 关联的知识点 id（复习任务使用）
         """
         if not title.strip():
             raise ValueError("任务标题不能为空")
@@ -165,10 +173,11 @@ class TaskRepository:
             "INSERT INTO tasks "
             "(title, description, category, estimated_minutes, priority, "
             " status, scheduled_date, postpone_count, created_at, updated_at, "
-            " source, topic_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+            " source, topic_id, task_type, knowledge_point_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
             (title.strip(), description, category, estimated_minutes,
-             priority, STATUS_ACTIVE, date_str, ts, ts, source, topic_id),
+             priority, STATUS_ACTIVE, date_str, ts, ts, source, topic_id,
+             task_type, knowledge_point_id),
         )
         self.conn.commit()
         return self.get(cur.lastrowid)
@@ -178,6 +187,15 @@ class TaskRepository:
         cur = self.conn.execute(
             "SELECT * FROM tasks WHERE topic_id = ? ORDER BY scheduled_date ASC, id ASC",
             (topic_id,),
+        )
+        return self._rows_to_tasks(cur.fetchall())
+
+    def list_by_knowledge_point(self, knowledge_point_id: int) -> list[Task]:
+        """按知识点 id 查找所有关联任务（复习任务用）。"""
+        cur = self.conn.execute(
+            "SELECT * FROM tasks WHERE knowledge_point_id = ? "
+            "ORDER BY scheduled_date ASC, id ASC",
+            (knowledge_point_id,),
         )
         return self._rows_to_tasks(cur.fetchall())
 

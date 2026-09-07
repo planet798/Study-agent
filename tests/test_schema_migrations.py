@@ -158,6 +158,36 @@ def test_v3_adds_judge_columns_to_assessment_attempts(tmp_path):
         conn.close()
 
 
+def test_v4_adds_review_schedule_and_task_columns(tmp_path):
+    conn = get_connection(tmp_path / "v4.db")
+    try:
+        assert get_schema_version(conn) == SCHEMA_VERSION
+        tables = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "review_schedule" in tables
+        task_cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+        assert "task_type" in task_cols
+        assert "knowledge_point_id" in task_cols
+        # 旧数据默认 task_type='new'，knowledge_point_id 为 NULL
+        conn.execute(
+            "INSERT INTO tasks (title, description, category, estimated_minutes,"
+            " priority, status, scheduled_date, postpone_count, created_at,"
+            " updated_at, source) VALUES ('t','','学习',1,1,'active','2026-09-06',0,"
+            " '2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT task_type, knowledge_point_id FROM tasks WHERE title='t'"
+        ).fetchone()
+        assert row["task_type"] == "new"
+        assert row["knowledge_point_id"] is None
+    finally:
+        conn.close()
+
+
 def test_migrate_is_idempotent(tmp_path):
     conn = get_connection(tmp_path / "idem.db")
     try:
@@ -170,14 +200,20 @@ def test_migrate_is_idempotent(tmp_path):
             "AND name IN ('knowledge_points', 'assessment_attempts')"
         ).fetchone()[0]
         assert count == 2
+        # v4 的 review_schedule 表只有一份
+        rs = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+            "AND name='review_schedule'"
+        ).fetchone()[0]
+        assert rs == 1
     finally:
         conn.close()
 
 
 def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
-    """模拟未来 v4 迁移：能按序执行，且重复 migrate 不重复执行。"""
+    """模拟未来 v5 迁移：能按序执行，且重复 migrate 不重复执行。"""
     path = tmp_path / "future.db"
-    # 先建到真实最新版本（v1 + v2 + v3）
+    # 先建到真实最新版本（v1 + v2 + v3 + v4）
     raw = sqlite3.connect(str(path))
     try:
         migrate(raw)
@@ -187,34 +223,23 @@ def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
 
     calls = []
 
-    def _v4(conn):
+    def _v5(conn):
         calls.append(1)
         add_column_if_not_exists(
-            conn, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'new'"
+            conn, "tasks", "extra_flag", "TEXT NOT NULL DEFAULT 'x'"
         )
 
-    monkeypatch.setitem(schema_module._MIGRATIONS, 4, _v4)
-    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", 4)
+    monkeypatch.setitem(schema_module._MIGRATIONS, 5, _v5)
+    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", 5)
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == 4
+        assert get_schema_version(conn) == 5
         cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
-        assert "task_type" in cols
-        # 手动插一行，验证默认值生效
-        conn.execute(
-            "INSERT INTO tasks (title, description, category, estimated_minutes,"
-            " priority, status, scheduled_date, postpone_count, created_at,"
-            " updated_at, source) VALUES ('t','','学习',1,1,'active','2026-09-06',0,"
-            " '2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
-        )
-        conn.commit()
-        row = conn.execute("SELECT task_type FROM tasks WHERE title='t'").fetchone()
-        assert row["task_type"] == "new"
-
-        # 再次迁移：版本不变，真实 v4 迁移函数不再执行
-        assert migrate(conn) == 4
-        assert migrate(conn) == 4
+        assert "extra_flag" in cols
+        # 再次迁移：版本不变，真实 v5 迁移函数不再执行
+        assert migrate(conn) == 5
+        assert migrate(conn) == 5
         assert len(calls) == 1
     finally:
         conn.close()
@@ -224,12 +249,12 @@ def test_add_column_if_not_exists_idempotent(tmp_path):
     conn = get_connection(tmp_path / "col.db")
     try:
         assert add_column_if_not_exists(
-            conn, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'new'"
+            conn, "tasks", "extra_flag", "TEXT NOT NULL DEFAULT 'x'"
         ) is True
         assert add_column_if_not_exists(
-            conn, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'new'"
+            conn, "tasks", "extra_flag", "TEXT NOT NULL DEFAULT 'x'"
         ) is False
         cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
-        assert "task_type" in cols
+        assert "extra_flag" in cols
     finally:
         conn.close()

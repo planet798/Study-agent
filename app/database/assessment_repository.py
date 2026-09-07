@@ -165,3 +165,80 @@ class AssessmentRepository:
         )
         self.conn.commit()
         return self.get_attempt(attempt_id)
+
+    # ---------- review_schedule ----------
+
+    _REVIEW_UPDATABLE = (
+        "scheduled_date",
+        "interval_days",
+        "status",
+        "task_id",
+        "source_attempt_id",
+        "completed_at",
+    )
+
+    def create_review_schedule(
+        self,
+        knowledge_point_id: int,
+        scheduled_date: str,
+        interval_days: int,
+        task_id: int | None = None,
+        source_attempt_id: int | None = None,
+        status: str = "pending",
+    ) -> dict:
+        ts = now_iso()
+        cur = self.conn.execute(
+            "INSERT INTO review_schedule "
+            "(knowledge_point_id, scheduled_date, interval_days, status, task_id,"
+            " source_attempt_id, created_at, completed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+            (knowledge_point_id, scheduled_date, interval_days, status,
+             task_id, source_attempt_id, ts),
+        )
+        self.conn.commit()
+        return self.get_review_schedule(cur.lastrowid)
+
+    def get_review_schedule(self, schedule_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM review_schedule WHERE id = ?", (schedule_id,)
+        ).fetchone()
+        return _row(row)
+
+    def list_review_schedules_for_kp(self, knowledge_point_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM review_schedule WHERE knowledge_point_id = ? "
+            "ORDER BY id ASC",
+            (knowledge_point_id,),
+        ).fetchall()
+        return _rows(rows)
+
+    def list_review_schedules_by_date(self, date_str: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM review_schedule WHERE scheduled_date = ? "
+            "ORDER BY id ASC",
+            (date_str,),
+        ).fetchall()
+        return _rows(rows)
+
+    def find_pending_review_for_task(self, task_id: int) -> dict | None:
+        """查找某复习任务对应的未完成调度（用于完成后关闭）。"""
+        row = self.conn.execute(
+            "SELECT * FROM review_schedule WHERE task_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        return _row(row)
+
+    def update_review_schedule(self, schedule_id: int, **fields) -> dict | None:
+        allowed = {
+            k: v for k, v in fields.items() if k in self._REVIEW_UPDATABLE
+        }
+        if not allowed:
+            return self.get_review_schedule(schedule_id)
+        set_clause = ", ".join(f"{k} = ?" for k in allowed)
+        self.conn.execute(
+            f"UPDATE review_schedule SET {set_clause} WHERE id = ?",
+            (*allowed.values(), schedule_id),
+        )
+        self.conn.commit()
+        return self.get_review_schedule(schedule_id)

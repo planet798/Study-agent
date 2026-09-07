@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -246,6 +246,45 @@ def _migrate_v3(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[3] = _migrate_v3
+
+
+# ============================================================
+# v4：复习调度（Phase 4）
+# ============================================================
+#
+# - tasks 增加 knowledge_point_id / task_type，区分新知识任务与复习任务；
+# - review_schedule 记录“某知识点某天到期需要复习”及其间隔/状态。
+
+_V4_SQL = """
+CREATE TABLE IF NOT EXISTS review_schedule (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    knowledge_point_id INTEGER NOT NULL,
+    scheduled_date     TEXT    NOT NULL,
+    interval_days      INTEGER NOT NULL,
+    status             TEXT    NOT NULL DEFAULT 'pending',
+    task_id            INTEGER,
+    source_attempt_id  INTEGER,
+    created_at         TEXT    NOT NULL,
+    completed_at       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_review_schedule_kp
+    ON review_schedule(knowledge_point_id);
+CREATE INDEX IF NOT EXISTS idx_review_schedule_date
+    ON review_schedule(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_review_schedule_status
+    ON review_schedule(status);
+"""
+
+
+def _migrate_v4(conn: sqlite3.Connection) -> None:
+    """v4：tasks 加列 + 新建 review_schedule（幂等）。"""
+    add_column_if_not_exists(conn, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'new'")
+    add_column_if_not_exists(conn, "tasks", "knowledge_point_id", "INTEGER")
+    conn.executescript(_V4_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[4] = _migrate_v4
 
 
 def get_schema_version(conn) -> int:
