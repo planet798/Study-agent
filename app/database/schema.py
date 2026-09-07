@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -162,6 +162,64 @@ SCHEMA_VERSION = 1
 #   2) 把 SCHEMA_VERSION 提到 v；
 #   3) 迁移函数自身必须幂等（IF NOT EXISTS / add_column_if_not_exists）。
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+
+
+# ============================================================
+# v2：知识点 + 验收记录（Phase 3B）
+# ============================================================
+#
+# knowledge_points：知识点级档案（比 study_topics 更细）。
+#   mastery_estimate 是系统根据真实验收证据计算的内部估计，不是用户自评。
+#
+# assessment_attempts：一次验收的题目 + 用户原始答案 + AI 判定结果。
+#   questions/answers/ai_result 均以 JSON 保存，保证可审计。
+
+_V2_SQL = """
+CREATE TABLE IF NOT EXISTS knowledge_points (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id          INTEGER,
+    name              TEXT    NOT NULL UNIQUE,
+    description       TEXT    NOT NULL DEFAULT '',
+    first_learned_at  TEXT,
+    last_assessed_at  TEXT,
+    mastery_estimate  REAL    NOT NULL DEFAULT 0.0,
+    review_count      INTEGER NOT NULL DEFAULT 0,
+    next_review_date  TEXT,
+    interval_days     INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT    NOT NULL,
+    updated_at        TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_points_topic
+    ON knowledge_points(topic_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_points_review
+    ON knowledge_points(next_review_date);
+
+CREATE TABLE IF NOT EXISTS assessment_attempts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    knowledge_point_id INTEGER NOT NULL,
+    task_id            INTEGER,
+    questions_json     TEXT    NOT NULL,
+    answers_json       TEXT    NOT NULL DEFAULT '',
+    ai_result_json     TEXT    NOT NULL DEFAULT '',
+    mastery_estimate   REAL,
+    result_level       TEXT,
+    weak_points_json   TEXT    NOT NULL DEFAULT '',
+    created_at         TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_assessment_attempts_kp
+    ON assessment_attempts(knowledge_point_id);
+CREATE INDEX IF NOT EXISTS idx_assessment_attempts_created
+    ON assessment_attempts(created_at);
+"""
+
+
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    """v2：创建知识点与验收记录表（幂等）。"""
+    conn.executescript(_V2_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[2] = _migrate_v2
 
 
 def get_schema_version(conn) -> int:
