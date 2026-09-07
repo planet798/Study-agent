@@ -1,0 +1,277 @@
+{
+  "version": 1,
+  "updated": "2026-09-08",
+  "note": "课外探索资源池（经过人工验证的真实 URL）。AI 只能从本文件筛选/解释，禁止输出本文件之外的 URL。",
+  "resources": [
+    {
+      "id": "pytorch-gh",
+      "title": "PyTorch 官方源码",
+      "type": "github",
+      "url": "https://github.com/pytorch/pytorch",
+      "tags": ["PyTorch", "张量", "autograd", "深度学习", "训练"],
+      "why": "直接读 PyTorch 源码能看清 Tensor/autograd/优化器的真实实现，是深度学习阶段最好的工程资料。",
+      "minutes": 60
+    },
+    {
+      "id": "pytorch-tutorials-gh",
+      "title": "PyTorch 官方教程仓库",
+      "type": "github",
+      "url": "https://github.com/pytorch/tutorials",
+      "tags": ["PyTorch", "教程", "训练", "深度学习"],
+      "why": "官方 examples 覆盖 Dataset/DataLoader、训练循环等，能把当前知识用到真实代码里。",
+      "minutes": 30
+    },
+    {
+      "id": "hf-transformers-gh",
+      "title": "Hugging Face Transformers",
+      "type": "github",
+      "url": "https://github.com/huggingface/transformers",
+      "tags": ["Hugging Face", "Transformers", "LLM", "Tokenizer", "模型"],
+      "why": "阅读 transformers 源码能同时巩固 Transformer 结构与 Hugging Face 使用方式。",
+      "minutes": 45
+    },
+    {
+      "id": "hf-peft-gh",
+      "title": "Hugging Face PEFT",
+      "type": "github",
+      "url": "https://github.com/huggingface/peft",
+      "tags": ["LoRA", "PEFT", "微调", "SFT", "模型"],
+      "why": "PEFT 仓库演示了 LoRA/QLoRA 的最小用法，是训练与部署阶段的直接实践入口。",
+      "minutes": 45
+    },
+    {
+      "id": "vllm-gh",
+      "title": "vLLM",
+      "type": "github",
+      "url": "https://github.com/vllm-project/vllm",
+      "tags": ["vLLM", "推理", "部署", "PagedAttention"],
+      "why": "vLLM 是生产级 LLM 推理引擎，能让你把模型部署与 PagedAttention 概念做对照。",
+      "minutes": 45
+    },
+    {
+      "id": "langchain-gh",
+      "title": "LangChain",
+      "type": "github",
+      "url": "https://github.com/langchain-ai/langchain",
+      "tags": ["Agent", "RAG", "LLM 应用", "Memory", "工具调用"],
+      "why": "LangChain 示例把 Function Calling、Memory、RAG 串进真实应用，适合 LLM 应用阶段。",
+      "minutes": 45
+    },
+    {
+      "id": "llamaindex-gh",
+      "title": "LlamaIndex",
+      "type": "github",
+      "url": "https://github.com/run-llama/llama_index",
+      "tags": ["RAG", "检索", "Embedding", "知识库"],
+      "why": "LlamaIndex 围绕 RAG 全流程设计，可对照 Chunking/Embedding/检索做练习。",
+      "minutes": 45
+    },
+    {
+      "id": "hf-notebooks-gh",
+      "title": "Hugging Face Notebooks",
+      "type": "github",
+      "url": "https://github.com/huggingface/notebooks",
+      "tags": ["Hugging Face", "教程", "Transformers", "Tokenizer"],
+      "why": "官方 notebook 逐步演示模型加载、tokenizer、训练，是跟随式练习的可靠素材。",
+      "minutes": 30
+    },
+    {
+      "id": "thealgorithms-python-gh",
+      "title": "TheAlgorithms/Python",
+      "type": "github",
+      "url": "https://github.com/TheAlgorithms/Python",
+      "tags": ["Python", "算法", "数据结构", "LeetCode"],
+      "why": "高质量 Python 算法实现仓库，可强化数据结构与逻辑能力，为算法题打底。",
+      "minutes": 30
+    },
+    {
+      "id": "docker-getting-started-gh",
+      "title": "Docker Getting Started",
+      "type": "github",
+      "url": "https://github.com/docker/getting-started",
+      "tags": ["Docker", "容器", "部署"],
+      "why": "官方入门 repo 用手把手教程让你快速掌握容器化，直通部署阶段。",
+      "minutes": 30
+    },
+    {
+      "id": "llama-gh",
+      "title": "Meta LLaMA",
+      "type": "github",
+      "url": "https://github.com/meta-llama/llama-models",
+      "tags": ["LLaMA", "LLM", "模型"],
+      "why": "LLaMA 官方仓库可用于对照 GQA/SwiGLU 等当代架构概念在真实模型中的位置。",
+      "minutes": 30
+    },
+    {
+      "id": "le-two-sum",
+      "title": "LeetCode 1. 两数之和",
+      "type": "leetcode",
+      "url": "https://leetcode.com/problems/two-sum/",
+      "tags": ["Python", "数组", "哈希", "数据结构"],
+      "why": "热身题，强化 Python 数据结构/哈希查找能力，是日常保持编码手感的好选择。",
+      "minutes": 20
+    },
+    {
+      "id": "le-reverse-linked-list",
+      "title": "LeetCode 206. 反转链表",
+      "type": "leetcode",
+      "url": "https://leetcode.com/problems/reverse-linked-list/",
+      "tags": ["数据结构", "链表"],
+      "why": "链表经典题，能巩固指针/引用思维，为更复杂数据结构打基础。",
+      "minutes": 20
+    },
+    {
+      "id": "le-binary-tree-traversal",
+      "title": "LeetCode 94. 二叉树中序遍历",
+      "type": "leetcode",
+      "url": "https://leetcode.com/problems/binary-tree-inorder-traversal/",
+      "tags": ["树", "递归", "数据结构"],
+      "why": "递归与二叉树遍历入门题，帮助建立递归思维，后续理解 Transformer 层级结构也有帮助。",
+      "minutes": 20
+    },
+    {
+      "id": "le-longest-substring",
+      "title": "LeetCode 3. 无重复字符的最长子串",
+      "type": "leetcode",
+      "url": "https://leetcode.com/problems/longest-substring-without-repeating-characters/",
+      "tags": ["算法", "滑动窗口", "Python"],
+      "why": "滑动窗口经典题，训练对序列/窗口的思考，是编码能力进阶的必经练习。",
+      "minutes": 25
+    },
+    {
+      "id": "le-climbing-stairs",
+      "title": "LeetCode 70. 爬楼梯",
+      "type": "leetcode",
+      "url": "https://leetcode.com/problems/climbing-stairs/",
+      "tags": ["动态规划", "算法"],
+      "why": "最简动态规划题，先建立 DP 直觉，后续理解反向传播/序列模型更顺。",
+      "minutes": 20
+    },
+    {
+      "id": "le-kth-largest",
+      "title": "LeetCode 215. 数组中的第 K 个最大元素",
+      "type": "leetcode",
+      "url": "https://leetcode.com/problems/kth-largest-element-in-an-array/",
+      "tags": ["堆", "排序", "算法"],
+      "why": "考察堆/快选，能强化复杂度分析能力，与 top-k 检索思想相关。",
+      "minutes": 25
+    },
+    {
+      "id": "pytorch-docs",
+      "title": "PyTorch 官方文档",
+      "type": "docs",
+      "url": "https://pytorch.org/docs/stable/",
+      "tags": ["PyTorch", "张量", "autograd"],
+      "why": "官方 API 文档是排查 Tensor/autograd 用法问题的一手依据。",
+      "minutes": 30
+    },
+    {
+      "id": "pytorch-tutorials-web",
+      "title": "PyTorch Tutorials（官网）",
+      "type": "docs",
+      "url": "https://pytorch.org/tutorials/",
+      "tags": ["PyTorch", "教程", "训练", "DataLoader"],
+      "why": "官网逐步教程覆盖从张量到 CIFAR 训练，正好把当前学习阶段串联成动手闭环。",
+      "minutes": 45
+    },
+    {
+      "id": "hf-transformer-docs",
+      "title": "Hugging Face Transformers 文档",
+      "type": "docs",
+      "url": "https://huggingface.co/docs/transformers/index",
+      "tags": ["Hugging Face", "Transformers", "LLM"],
+      "why": "官方文档把 Pipeline/Tokenizer/加载模型讲得最清楚，是 HF 阶段的必读。",
+      "minutes": 30
+    },
+    {
+      "id": "vllm-docs",
+      "title": "vLLM 官方文档",
+      "type": "docs",
+      "url": "https://docs.vllm.ai/en/latest/",
+      "tags": ["vLLM", "推理", "部署"],
+      "why": "vLLM 文档说明部署、PagedAttention、continuous batching，是工程阶段权威来源。",
+      "minutes": 30
+    },
+    {
+      "id": "docker-docs",
+      "title": "Docker 官方入门文档",
+      "type": "docs",
+      "url": "https://docs.docker.com/get-started/",
+      "tags": ["Docker", "容器"],
+      "why": "官方 Get Started 是容器化最稳妥的入门路径。",
+      "minutes": 30
+    },
+    {
+      "id": "python-docs-tutorial",
+      "title": "Python 官方教程",
+      "type": "docs",
+      "url": "https://docs.python.org/3/tutorial/",
+      "tags": ["Python"],
+      "why": "Python 官方教程是最权威的基础补全来源，适合遇到语法盲点时查证。",
+      "minutes": 20
+    },
+    {
+      "id": "github-get-started-docs",
+      "title": "GitHub Docs：Git 基础",
+      "type": "docs",
+      "url": "https://docs.github.com/en/get-started",
+      "tags": ["Git", "GitHub"],
+      "why": "官方文档把分支/合并/协作讲得清楚，可补全 Git 协作细节。",
+      "minutes": 20
+    },
+    {
+      "id": "ubuntu-cli-tutorial",
+      "title": "Ubuntu 命令行入门",
+      "type": "docs",
+      "url": "https://ubuntu.com/tutorials/command-line-for-beginners",
+      "tags": ["Linux", "命令行"],
+      "why": "Ubuntu 官方命令行教程能系统补齐 Linux 基本功。",
+      "minutes": 30
+    },
+    {
+      "id": "openai-function-calling",
+      "title": "OpenAI Function Calling 指南",
+      "type": "docs",
+      "url": "https://platform.openai.com/docs/guides/function-calling",
+      "tags": ["Function Calling", "工具调用", "LLM 应用", "Agent"],
+      "why": "官方指南解释工具调用的数据流，是 RAG/Agent 阶段的主干知识点。",
+      "minutes": 30
+    },
+    {
+      "id": "lilianweng-agent",
+      "title": "Lilian Weng：LLM Powered Autonomous Agents",
+      "type": "docs",
+      "url": "https://lilianweng.github.io/posts/2023-06-23-agent/",
+      "tags": ["Agent", "Planning", "Memory", "LLM 应用"],
+      "why": "Agent 领域高频引用综述，把规划/工具/记忆串成一幅完整图景。",
+      "minutes": 45
+    },
+    {
+      "id": "attention-paper",
+      "title": "Attention Is All You Need（论文）",
+      "type": "docs",
+      "url": "https://arxiv.org/abs/1706.03762",
+      "tags": ["Transformer", "Attention", "论文"],
+      "why": "Transformer 原始论文，学自注意力/多头/位置编码时必须回到一手文献。",
+      "minutes": 60
+    },
+    {
+      "id": "rag-paper",
+      "title": "Retrieval-Augmented Generation（论文）",
+      "type": "docs",
+      "url": "https://arxiv.org/abs/2005.11401",
+      "tags": ["RAG", "检索", "论文"],
+      "why": "RAG 原始论文，讲清检索增强的动机与结构，是 RAG 阶段必读。",
+      "minutes": 45
+    },
+    {
+      "id": "lora-paper",
+      "title": "LoRA: Low-Rank Adaptation（论文）",
+      "type": "docs",
+      "url": "https://arxiv.org/abs/2106.09685",
+      "tags": ["LoRA", "微调", "论文"],
+      "why": "LoRA 原始论文，理解为什么低秩分解能高效微调，是训练阶段的核心文献。",
+      "minutes": 45
+    }
+  ]
+}
