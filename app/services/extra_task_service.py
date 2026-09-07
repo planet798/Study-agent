@@ -121,6 +121,12 @@ class ExtraTaskService:
 
     # ================= 生成 =================
 
+    def _existing_extra_count(self, date_str: str) -> int:
+        """当天已经存在的 extra 任务数量（task_type='extra' 且日期==today）。"""
+        return sum(
+            1 for t in self.repo.list_by_date(date_str) if t.task_type == "extra"
+        )
+
     def generate_extra_tasks(
         self,
         today: str | None = None,
@@ -128,26 +134,35 @@ class ExtraTaskService:
     ) -> dict:
         """为用户主动请求生成当天额外任务。
 
+        每日上限按“当天累计”计算：
+        remaining = max_daily_extra - 当天已有 extra 数；
+        本词最多只生成 remaining 个；remaining <= 0 直接返回预算耗尽。
+
         :return: {"created": [Task], "skipped_duplicate": [cand_title],
-                  "skipped_budget": [cand_title], "difficulty": str}
+                  "skipped_budget": [cand_title], "difficulty": str,
+                  "remaining": int}
         """
         date = today or _today()
         difficulty = difficulty if difficulty in _DIFFICULTIES else "practice"
 
         candidates = self._candidate_sources(date)
-        if not candidates:
+        existing = self._existing_extra_count(date)
+        remaining = max(0, self.max_daily_extra - existing)
+
+        if not candidates or remaining <= 0:
             return {
                 "created": [],
                 "skipped_duplicate": [],
                 "skipped_budget": [],
                 "difficulty": difficulty,
+                "remaining": remaining,
             }
 
         created = []
         skipped_duplicate = []
         skipped_budget = []
         for cand in candidates:
-            if len(created) >= self.max_daily_extra:
+            if len(created) >= remaining:
                 skipped_budget.append(cand["title"])
                 continue
             if self._source_has_unfinished_extra(cand):
@@ -163,6 +178,7 @@ class ExtraTaskService:
             "skipped_duplicate": skipped_duplicate,
             "skipped_budget": skipped_budget,
             "difficulty": difficulty,
+            "remaining": max(0, remaining - len(created)),
         }
 
     def _create_extra_task(self, cand: dict, date_str: str, difficulty: str):

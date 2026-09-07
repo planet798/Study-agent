@@ -258,3 +258,115 @@ class TestEnterAssessment:
         # 验收记录与 extra 任务关联；正式阶段不被推进
         assert attempt["task_id"] == task.id
         assert attempt["knowledge_point_id"] == kp["id"]
+
+
+class TestDailyCumulativeBudget:
+    """Phase 5 修复：每日 extra 上限按“当天累计”计算（跨多次调用）。"""
+
+    def _weak_kps(self, assessment_repo, names):
+        ids = []
+        for i, n in enumerate(names):
+            kp = assessment_repo.create_knowledge_point(n)
+            assessment_repo.update_knowledge_point(
+                kp["id"],
+                last_assessed_at="2026-09-06T10:00:00",
+                mastery_estimate=0.1 + 0.1 * i,
+                review_count=1,
+            )
+            ids.append(kp["id"])
+        return ids
+
+    def test_first_two_then_second_call_creates_none(self, repo, assessment_repo):
+        """第一次生成满 2 个，第二次调用不新增，当天累计仍为 2。"""
+        self._weak_kps(assessment_repo, ["kpA", "kpB"])
+        svc = ExtraTaskService(
+            repo, study_plan_service=None, assessment_repo=assessment_repo,
+            max_daily_extra=2,
+        )
+        r1 = svc.generate_extra_tasks(today="2026-09-06")
+        assert len(r1["created"]) == 2
+
+        r2 = svc.generate_extra_tasks(today="2026-09-06")
+        assert r2["created"] == []
+        assert r2["remaining"] == 0
+
+        total = len([t for t in repo.list_by_date("2026-09-06")
+                     if t.task_type == "extra"])
+        assert total == 2  # 累计不超过上限
+
+    def test_first_one_then_second_adds_only_one(self, repo, assessment_repo):
+        """第一次只生成 1 个；第二次（新增来源可用）只能再生成 1 个，累计 2。"""
+        self._weak_kps(assessment_repo, ["kpA"])
+        svc = ExtraTaskService(
+            repo, study_plan_service=None, assessment_repo=assessment_repo,
+            max_daily_extra=2,
+        )
+        r1 = svc.generate_extra_tasks(today="2026-09-06")
+        assert len(r1["created"]) == 1
+
+        # 之后又出现一个新的薄弱来源
+        self._weak_kps(assessment_repo, ["kpB"])
+        r2 = svc.generate_extra_tasks(today="2026-09-06")
+        assert len(r2["created"]) == 1  # remaining=1，只能再补 1 个
+        total = len([t for t in repo.list_by_date("2026-09-06")
+                     if t.task_type == "extra"])
+        assert total == 2
+
+    def test_already_two_returns_exhausted_no_new(self, repo, assessment_repo):
+        """当天已有 2 个 extra（预先存在），继续调用返回预算耗尽且不新增。"""
+        self._weak_kps(assessment_repo, ["kpA", "kpB"])
+        for kp_name in ("kpA", "kpB"):
+            kp = assessment_repo.get_knowledge_point_by_name(kp_name)
+            repo.create(
+                title=f"【额外·实践】{kp_name}", scheduled_date="2026-09-06",
+                category="额外学习", source="extra", task_type="extra",
+                knowledge_point_id=kp["id"], difficulty="practice",
+            )
+        svc = ExtraTaskService(
+            repo, study_plan_service=None, assessment_repo=assessment_repo,
+            max_daily_extra=2,
+        )
+        result = svc.generate_extra_tasks(today="2026-09-06")
+        assert result["created"] == []
+        assert result["remaining"] == 0
+        total = len([t for t in repo.list_by_date("2026-09-06")
+                     if t.task_type == "extra"])
+        assert total == 2
+
+    def test_dedup_and_cumulative_budget_together(self, repo, assessment_repo):
+        """去重与累计预算同时生效：第三方来源可用时，因上限已满也不再创建。"""
+        self._weak_kps(assessment_repo, ["kpA", "kpB", "kpC"])
+        svc = ExtraTaskService(
+            repo, study_plan_service=None, assessment_repo=assessment_repo,
+            max_daily_extra=2,
+        )
+        r1 = svc.generate_extra_tasks(today="2026-09-06")
+        assert len(r1["created"]) == 2
+
+        # 第三次调用：kpC 可用且未生成过，但当天累计已达上限 -> 不创建
+        r3 = svc.generate_extra_tasks(today="2026-09-06")
+        assert r3["created"] == []
+        total = len([t for t in repo.list_by_date("2026-09-06")
+                     if t.task_type == "extra"])
+        assert total == 2
+
+    def test_extra_does_not_affect_formal_tasks_or_plan(
+        self, repo, conn, sps, assessment_repo
+    ):
+        """多轮生成（触顶）后：phase / topic 不变，正式生成不产出 extra。"""
+        self._weak_kps(assessment_repo, ["kpA", "kpB"])
+        svc = ExtraTaskService(
+            repo, study_plan_service=sps, assessment_repo=assessment_repo,
+            max_daily_extra=2,
+        )
+        svc.generate_extra_tasks(today="2026-09-06")
+        svc.generate_extra_tasks(today="2026-09-06")
+
+        phase = sps.get_current_phase("2026-09-06")
+        assert phase is not None
+        topics_before = len(phase.topics)
+
+        res = sps.generate_daily_tasks("2026-09-06")
+        assert all(t.task_type != "extra" for t in res["generated"])
+        assert all(t.source != "extra" for t in res["generated"])
+        assert len(sps.get_current_phase("2026-09-06").topics) == topics_before
