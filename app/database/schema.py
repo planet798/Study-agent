@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -285,6 +285,24 @@ def _migrate_v4(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[4] = _migrate_v4
+
+
+# ============================================================
+# v5：额外学习任务难度（Phase 5）
+# ============================================================
+
+
+def _migrate_v5(conn: sqlite3.Connection) -> None:
+    """v5：tasks 增加 difficulty（基础巩固 basic / 实践 practice / 挑战 challenge）。"""
+    add_column_if_not_exists(
+        conn,
+        "tasks",
+        "difficulty",
+        "TEXT NOT NULL DEFAULT 'practice'",
+    )
+
+
+_MIGRATIONS[5] = _migrate_v5
 
 
 def get_schema_version(conn) -> int:

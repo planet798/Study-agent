@@ -54,6 +54,8 @@ class Task:
     # v4 起：区分任务性质（new / review / extra），并关联知识点
     task_type: str = "new"
     knowledge_point_id: int | None = None
+    # v5 起：额外任务难度（basic / practice / challenge）
+    difficulty: str = "practice"
 
     @property
     def is_done(self) -> bool:
@@ -156,6 +158,7 @@ class TaskRepository:
         topic_id: int | None = None,
         task_type: str = "new",
         knowledge_point_id: int | None = None,
+        difficulty: str = "practice",
     ) -> Task:
         """新增一条任务，返回带 id 的 Task。
 
@@ -164,6 +167,7 @@ class TaskRepository:
         :param topic_id: 关联的 study_topics 主题 id（自动生成任务使用）
         :param task_type: 任务性质（new / review / extra）
         :param knowledge_point_id: 关联的知识点 id（复习任务使用）
+        :param difficulty: 难度（basic / practice / challenge，额外任务用）
         """
         if not title.strip():
             raise ValueError("任务标题不能为空")
@@ -173,11 +177,11 @@ class TaskRepository:
             "INSERT INTO tasks "
             "(title, description, category, estimated_minutes, priority, "
             " status, scheduled_date, postpone_count, created_at, updated_at, "
-            " source, topic_id, task_type, knowledge_point_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
+            " source, topic_id, task_type, knowledge_point_id, difficulty) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
             (title.strip(), description, category, estimated_minutes,
              priority, STATUS_ACTIVE, date_str, ts, ts, source, topic_id,
-             task_type, knowledge_point_id),
+             task_type, knowledge_point_id, difficulty),
         )
         self.conn.commit()
         return self.get(cur.lastrowid)

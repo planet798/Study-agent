@@ -210,10 +210,29 @@ def test_migrate_is_idempotent(tmp_path):
         conn.close()
 
 
+def test_v5_adds_difficulty_column(tmp_path):
+    conn = get_connection(tmp_path / "v5.db")
+    try:
+        assert get_schema_version(conn) == SCHEMA_VERSION
+        task_cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+        assert "difficulty" in task_cols
+        conn.execute(
+            "INSERT INTO tasks (title, description, category, estimated_minutes,"
+            " priority, status, scheduled_date, postpone_count, created_at,"
+            " updated_at, source) VALUES ('t','','学习',1,1,'active','2026-09-06',0,"
+            " '2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
+        )
+        conn.commit()
+        row = conn.execute("SELECT difficulty FROM tasks WHERE title='t'").fetchone()
+        assert row["difficulty"] == "practice"
+    finally:
+        conn.close()
+
+
 def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
-    """模拟未来 v5 迁移：能按序执行，且重复 migrate 不重复执行。"""
+    """模拟未来 v6 迁移：能按序执行，且重复 migrate 不重复执行。"""
     path = tmp_path / "future.db"
-    # 先建到真实最新版本（v1 + v2 + v3 + v4）
+    # 先建到真实最新版本（v1..v5）
     raw = sqlite3.connect(str(path))
     try:
         migrate(raw)
@@ -223,23 +242,23 @@ def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
 
     calls = []
 
-    def _v5(conn):
+    def _v6(conn):
         calls.append(1)
         add_column_if_not_exists(
             conn, "tasks", "extra_flag", "TEXT NOT NULL DEFAULT 'x'"
         )
 
-    monkeypatch.setitem(schema_module._MIGRATIONS, 5, _v5)
-    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", 5)
+    monkeypatch.setitem(schema_module._MIGRATIONS, 6, _v6)
+    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", 6)
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == 5
+        assert get_schema_version(conn) == 6
         cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
         assert "extra_flag" in cols
-        # 再次迁移：版本不变，真实 v5 迁移函数不再执行
-        assert migrate(conn) == 5
-        assert migrate(conn) == 5
+        # 再次迁移：版本不变，真实 v6 迁移函数不再执行
+        assert migrate(conn) == 6
+        assert migrate(conn) == 6
         assert len(calls) == 1
     finally:
         conn.close()

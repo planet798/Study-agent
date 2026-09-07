@@ -116,6 +116,7 @@ class TaskService:
         topic_id: int | None = None,
         task_type: str = "new",
         knowledge_point_id: int | None = None,
+        difficulty: str = "practice",
     ) -> Task:
         """创建任务，默认放到 scheduled_date 当天。"""
         return self.repo.create(
@@ -129,6 +130,7 @@ class TaskService:
             topic_id=topic_id,
             task_type=task_type,
             knowledge_point_id=knowledge_point_id,
+            difficulty=difficulty,
         )
 
     def complete_task(self, task_id: int) -> Task:
