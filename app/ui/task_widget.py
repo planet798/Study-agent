@@ -56,6 +56,8 @@ class TaskWidget(QFrame):
     complete_requested = Signal(int)
     not_done_requested = Signal(int)
     postpone_requested = Signal(int)
+    assessment_requested = Signal(int)  # 开始验收（Phase 7）
+
 
     def __init__(self, task: Task, parent: QWidget | None = None):
         super().__init__(parent)
@@ -119,7 +121,7 @@ class TaskWidget(QFrame):
         root.addLayout(self.action_row)
 
     def _add_action_buttons(self) -> None:
-        """active 状态显示 [完成] [未完成]。"""
+        """active 状态显示 [完成] [未完成]（关联知识点的任务另加 [验收]）。"""
         self.complete_btn = QPushButton("完成")
         self.complete_btn.setObjectName("PrimaryButton")
         self.complete_btn.clicked.connect(
@@ -132,6 +134,14 @@ class TaskWidget(QFrame):
         )
         self.action_row.addWidget(self.complete_btn)
         self.action_row.addWidget(self.not_done_btn)
+        # 已关联知识点的任务支持“开始验收”（复习/额外任务）
+        if self._task.knowledge_point_id is not None:
+            self.assessment_btn = QPushButton("开始验收")
+            self.assessment_btn.setObjectName("PrimaryButton")
+            self.assessment_btn.clicked.connect(
+                lambda: self.assessment_requested.emit(self._task.id)
+            )
+            self.action_row.addWidget(self.assessment_btn)
         self.action_row.addStretch()
 
     def _add_done_state(self) -> None:

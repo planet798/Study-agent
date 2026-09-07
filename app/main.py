@@ -122,6 +122,29 @@ def main() -> int:
     )
     review_service = TaskReviewService(ai_client)
 
+    # Phase 3D~6：验收 / 复习调度 / 额外学习 / 课外探索
+    from app.database.assessment_repository import AssessmentRepository
+    from app.services.assessment_service import AssessmentService
+    from app.services.exploration_service import ExplorationService
+    from app.services.extra_task_service import ExtraTaskService
+    from app.services.review_service import ReviewService
+
+    assessment_repo = AssessmentRepository(conn)
+    # 复习调度（依赖 TaskRepository + AssessmentRepository）
+    review_scheduler = ReviewService(repo, assessment_repo)
+    # 验收（判题成功后自动联动复习调度）
+    assessment_service = AssessmentService(
+        ai_client,
+        assessment_repo=assessment_repo,
+        review_service=review_scheduler,
+    )
+    extra_service = ExtraTaskService(
+        repo,
+        study_plan_service=study_plan_service,
+        assessment_repo=assessment_repo,
+    )
+    exploration_service = ExplorationService()
+
     # 周/月总结（本地统计 + AI 解读 + 缓存）
     summary_service = SummaryService(
         stats_service=StatsService(repo),
@@ -138,6 +161,11 @@ def main() -> int:
         study_plan_service=study_plan_service,
         daily_planner_service=daily_planner,
         summary_service=summary_service,
+        assessment_service=assessment_service,
+        assessment_repo=assessment_repo,
+        review_scheduler=review_scheduler,
+        extra_service=extra_service,
+        exploration_service=exploration_service,
     )
     window.show()
     return app.exec()

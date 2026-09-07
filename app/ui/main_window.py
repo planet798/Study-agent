@@ -11,10 +11,17 @@
 
 from __future__ import annotations
 
+import json
 import sys
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QCloseEvent, QIcon, QPixmap
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QIcon,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -35,7 +42,8 @@ from ..services.date_service import DateService
 from ..services.task_review_service import TaskReviewService
 from ..services.task_service import TaskService
 from ..utils.date_utils import add_days, today as _default_today
-from .ai_worker import AIReviewWorker
+from .ai_worker import AIReviewWorker, AssessmentWorker
+from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
 from .styles import APP_STYLE
 from .task_widget import TaskWidget
@@ -71,6 +79,11 @@ class MainWindow(QMainWindow):
         study_plan_service=None,
         daily_planner_service=None,
         summary_service=None,
+        assessment_service=None,
+        assessment_repo=None,
+        review_scheduler=None,
+        extra_service=None,
+        exploration_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -84,11 +97,19 @@ class MainWindow(QMainWindow):
         self.daily_planner_service = daily_planner_service
         # 周/月总结服务：可选；未传则隐藏周/月总结页
         self.summary_service = summary_service
+        # Phase 3D~6 服务：可选；未传则对应区域隐藏
+        self.assessment_service = assessment_service
+        self.assessment_repo = assessment_repo
+        # 复习调度服务（ReviewService，区别于上面的 review_service=TaskReviewService）
+        self.review_scheduler = review_scheduler
+        self.extra_service = extra_service
+        self.exploration_service = exploration_service
 
         self._task_widgets: list[TaskWidget] = []
         self._quit_requested = False
         self._tray: QSystemTrayIcon | None = None
         self._ai_workers: list[AIReviewWorker] = []
+        self._exploration_added = False
 
         self.setWindowTitle("Study Agent")
         self.setMinimumSize(560, 460)
@@ -287,43 +308,258 @@ class MainWindow(QMainWindow):
     # ---------- 启动 / 刷新 ----------
 
     def _on_startup(self) -> None:
-        """启动流程：先做日期切换，再加载今日任务。"""
+        """启动流程：日期切换 -> 生成今日到期复习 -> 加载今日任务。"""
         today_str = self.today_provider()
         self.date_service.process_date_transition(today_str)
+        # 复习调度（幂等）：为今天到期的知识点生成复习任务
+        if self.review_scheduler is not None:
+            try:
+                self.review_scheduler.generate_due_reviews(today=today_str)
+            except Exception:  # noqa: BLE001 - 复习生成失败不影响启动
+                pass
         self.current_date = today_str
         self.date_label.setText(today_str)
         self.refresh()
 
     def refresh(self) -> None:
-        """重建今日任务列表并刷新统计。"""
+        """重建今日页：新知识 / 复习 / 额外 / 课外探索 四个区域 + 统计。"""
         today_str = self.current_date
         tasks = self.task_service.get_tasks_by_date(today_str)
 
-        # 当前学习阶段显示
         self._update_phase_info(today_str)
-        # AI 今日规划状态
         self._update_planner_info()
 
-        # 清空旧卡片
+        # 清空滚动区动态内容
+        self._clear_dynamic_list()
+        self._task_widgets.clear()
+        self._exploration_added = False
+
+        new_tasks = [t for t in tasks if t.task_type not in ("review", "extra")]
+        review_tasks = [t for t in tasks if t.task_type == "review"]
+        extra_tasks = [t for t in tasks if t.task_type == "extra"]
+
+        # 1) 今日新知识
+        self._add_section_header("今日新知识")
+        for t in new_tasks:
+            self._add_task_widget(t)
+
+        # 2) 今日复习
+        if self.review_scheduler is not None or review_tasks:
+            self._add_section_header("今日复习")
+            if review_tasks:
+                for t in review_tasks:
+                    self._add_task_widget(t)
+            else:
+                self._add_section_hint("今日暂无到期复习")
+
+        # 3) 额外学习
+        if self.extra_service is not None or extra_tasks:
+            self._add_section_header("额外学习")
+            self._add_extra_control(extra_tasks)
+            for t in extra_tasks:
+                self._add_task_widget(t)
+
+        # 4) 课外探索
+        if self.exploration_service is not None:
+            self._add_section_header("课外探索")
+            self._add_exploration()
+
+        self.list_layout.addStretch()
+
+        has_content = bool(self._task_widgets) or self._exploration_added
+        scroll_visible = bool(tasks) or self._exploration_added
+        self.empty_hint.setVisible(not tasks and not self._exploration_added)
+        self.scroll.setVisible(scroll_visible)
+        self._refresh_stats(today_str)
+
+    # ---------- 今日页区域构建 ----------
+
+    def _clear_dynamic_list(self) -> None:
+        """清空滚动区内所有动态加入的项（含伸展符）。"""
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.setParent(None)
                 w.deleteLater()
-        self._task_widgets.clear()
 
-        for task in tasks:
-            widget = TaskWidget(task)
-            widget.complete_requested.connect(self._on_complete)
-            widget.not_done_requested.connect(self._on_not_done)
-            widget.postpone_requested.connect(self._on_postpone)
-            self.list_layout.addWidget(widget)
-            self._task_widgets.append(widget)
+    def _add_section_header(self, title: str) -> None:
+        lbl = QLabel(title)
+        lbl.setObjectName("SectionTitle")
+        self.list_layout.addWidget(lbl)
 
-        self.empty_hint.setVisible(len(tasks) == 0)
-        self.scroll.setVisible(len(tasks) > 0)
-        self._refresh_stats(today_str)
+    def _add_section_hint(self, text: str) -> None:
+        hint = QLabel(text)
+        hint.setObjectName("EmptyHint")
+        self.list_layout.addWidget(hint)
+
+    def _add_task_widget(self, task) -> None:
+        widget = TaskWidget(task)
+        widget.complete_requested.connect(self._on_complete)
+        widget.not_done_requested.connect(self._on_not_done)
+        widget.postpone_requested.connect(self._on_postpone)
+        widget.assessment_requested.connect(self._on_start_assessment)
+        self.list_layout.addWidget(widget)
+        self._task_widgets.append(widget)
+
+    def _add_extra_control(self, extra_tasks) -> None:
+        """额外学习区域的额度提示 + 生成按钮。"""
+        if self.extra_service is None:
+            return
+        used = len(extra_tasks)
+        cap = int(getattr(self.extra_service, "max_daily_extra", 0))
+        remaining = max(0, cap - used)
+        row_w = QWidget()
+        row = QHBoxLayout(row_w)
+        row.setContentsMargins(0, 0, 0, 0)
+        info = QLabel(f"已生成 {used} / {cap} 个，今日剩余额度 {remaining} 个")
+        info.setObjectName("TaskMeta")
+        btn = QPushButton("继续学习 / 生成额外任务")
+        btn.setObjectName("PrimaryButton")
+        btn.clicked.connect(self._on_generate_extra)
+        row.addWidget(info)
+        row.addStretch()
+        row.addWidget(btn)
+        self.list_layout.addWidget(row_w)
+
+    def _on_generate_extra(self) -> None:
+        if self.extra_service is None:
+            return
+        try:
+            result = self.extra_service.generate_extra_tasks(today=self.current_date)
+        except Exception as e:  # noqa: BLE001
+            self.statusBar().showMessage(f"生成额外任务失败: {e}", 5000)
+            return
+        self.refresh()
+        created = result.get("created", [])
+        if created:
+            msg = f"生成了 {len(created)} 个额外任务"
+        elif result.get("skipped_duplicate"):
+            msg = "额外任务已存在或今天已生成，未重复创建"
+        else:
+            msg = "今日额外额度已用完或没有可用学习来源"
+        self.statusBar().showMessage(msg, 5000)
+
+    def _add_exploration(self) -> None:
+        """课外探索区域：展示已验证资源的卡片与打开链接按钮。"""
+        svc = self.exploration_service
+        try:
+            context = svc.build_context(
+                self.current_date, self.study_plan_service, self.assessment_repo
+            )
+            items = svc.recommend(context, limit=3)
+        except Exception:  # noqa: BLE001
+            self._add_section_hint("课外探索暂不可用")
+            return
+        if not items:
+            self._add_section_hint("暂无匹配的课外探索资源")
+            return
+        self._exploration_added = True
+        type_label = {"github": "GitHub", "leetcode": "LeetCode", "docs": "文档/资料"}
+        for it in items:
+            card = QWidget()
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(8, 6, 8, 6)
+            head = QHBoxLayout()
+            badge = QLabel(f"[{type_label.get(it.get('type'), it.get('type'))}] {it.get('title')}")
+            badge.setObjectName("TaskTitle")
+            head.addWidget(badge)
+            head.addStretch()
+            minutes = int(it.get("minutes") or 0)
+            mlabel = QLabel(f"{minutes} 分钟" if minutes else "")
+            mlabel.setObjectName("TaskMeta")
+            head.addWidget(mlabel)
+            cl.addLayout(head)
+            why = QLabel(it.get("reason") or "")
+            why.setWordWrap(True)
+            why.setObjectName("TaskMeta")
+            cl.addWidget(why)
+            open_btn = QPushButton("打开链接")
+            open_btn.setObjectName("PrimaryButton")
+            open_btn.clicked.connect(
+                lambda _=False, u=it.get("url", ""): self._open_exploration_url(u)
+            )
+            br = QHBoxLayout()
+            br.addStretch()
+            br.addWidget(open_btn)
+            cl.addLayout(br)
+            self.list_layout.addWidget(card)
+
+    def _open_exploration_url(self, url: str) -> None:
+        """打开课外资源链接（URL 只能来自已验证资源集合）。"""
+        if not url:
+            self.statusBar().showMessage("该资源没有可用链接", 3000)
+            return
+        if QDesktopServices.openUrl(QUrl(url)):
+            self.statusBar().showMessage("已在浏览器中打开", 3000)
+        else:
+            self.statusBar().showMessage("无法打开链接", 3000)
+
+    # ---------- 验收流程 ----------
+
+    def _on_start_assessment(self, task_id: int) -> None:
+        """开始验收：创建/复用 pending 验收记录，并弹出验收对话框。"""
+        try:
+            task = self.task_service.get_task(task_id)
+        except Exception:  # noqa: BLE001
+            return
+        svc = self.assessment_service
+        if svc is None:
+            self.statusBar().showMessage("验收功能不可用", 3000)
+            return
+        if task.knowledge_point_id is None:
+            self.statusBar().showMessage("该任务暂不支持验收（无关联知识点）", 3000)
+            return
+        if not svc.is_configured():
+            from .dialogs import show_warning
+
+            show_warning(self, "AI 未配置，无法开始验收。")
+            return
+
+        existing = None
+        if self.assessment_repo is not None:
+            existing = self.assessment_repo.find_pending_attempt_for_task(task.id)
+        if existing is not None:
+            self._open_assessment_dialog(existing)
+            return
+
+        self.statusBar().showMessage("正在生成验收题…", 0)
+        worker = AssessmentWorker(
+            svc.start_assessment,
+            args=(task.knowledge_point_id,),
+            kwargs={"task_id": task.id},
+            parent=self,
+        )
+        worker.succeeded.connect(self._on_assessment_ready)
+        worker.failed.connect(self._on_assessment_failed)
+        worker.finished.connect(lambda w=worker: self._release_worker(w))
+        self._ai_workers.append(worker)
+        worker.start()
+
+    def _on_assessment_ready(self, attempt) -> None:
+        self.statusBar().clearMessage()
+        self._open_assessment_dialog(attempt)
+
+    def _on_assessment_failed(self, msg: str) -> None:
+        self.statusBar().clearMessage()
+        self.statusBar().showMessage(f"验收启动失败：{msg}", 5000)
+
+    def _open_assessment_dialog(self, attempt) -> None:
+        dlg = AssessmentDialog(
+            self.assessment_service, attempt, self.current_date, parent=self
+        )
+        dlg.assessment_completed.connect(self._on_assessment_completed)
+        dlg.exec()
+
+    def _on_assessment_completed(self, task_id: int) -> None:
+        """验收成功：复习任务自动标记完成并刷新。"""
+        try:
+            task = self.task_service.get_task(task_id)
+            if task.task_type == "review":
+                self.task_service.complete_task(task_id)
+        except Exception:  # noqa: BLE001
+            pass
+        self.refresh()
 
     def _update_phase_info(self, today_str: str) -> None:
         """显示当前学习阶段与今日学习目标。"""
@@ -532,12 +768,12 @@ class MainWindow(QMainWindow):
         #    避免 “QThread: Destroyed while thread is still running”。
         self._stop_ai_workers()
 
-        # 3) 关闭可能仍打开着的 AI 结果对话框，避免残留顶级窗口
+        # 3) 关闭可能仍打开着的 AI 结果/验收对话框，避免残留顶级窗口
         #    （否则“最后一个窗口关闭”不会触发，QApplication 不退出）。
         app = QApplication.instance()
         if app is not None:
             for w in list(app.topLevelWidgets()):
-                if isinstance(w, AIReviewDialog) and w.isVisible():
+                if isinstance(w, (AIReviewDialog, AssessmentDialog)) and w.isVisible():
                     w.close()
 
     def _stop_ai_workers(self) -> None:

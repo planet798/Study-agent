@@ -166,6 +166,15 @@ class AssessmentRepository:
         self.conn.commit()
         return self.get_attempt(attempt_id)
 
+    def find_pending_attempt_for_task(self, task_id: int) -> dict | None:
+        """查找某任务最新一条尚未判题的验收记录（用于 UI 继续验收）。"""
+        row = self.conn.execute(
+            "SELECT * FROM assessment_attempts WHERE task_id = ? "
+            "AND judge_status = 'pending' ORDER BY id DESC LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        return _row(row)
+
     # ---------- review_schedule ----------
 
     _REVIEW_UPDATABLE = (

@@ -43,3 +43,33 @@ class AIReviewWorker(QThread):
             self.result_ready.emit(review)
         except Exception as e:  # noqa: BLE001 - 任何异常都转为消息信号
             self.review_failed.emit(str(e))
+
+
+class AssessmentWorker(QThread):
+    """通用 AI 任务 worker：在子线程执行任意可调用函数（验收出题/判题等）。
+
+    成功：发 succeeded(object)；失败：发 failed(str 错误信息)。
+    任何异常都不会让 GUI 崩溃。
+    """
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        func,
+        args=(),
+        kwargs=None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._func = func
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            result = self._func(*self._args, **self._kwargs)
+            self.succeeded.emit(result)
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(str(e))
