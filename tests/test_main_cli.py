@@ -114,6 +114,9 @@ class TestEndToEndMain:
             def setApplicationName(self, name):
                 captured["app_name"] = name
 
+            def setQuitOnLastWindowClosed(self, flag):
+                captured["quit_on_last_window_closed"] = flag
+
             def exec(self):
                 captured["exec"] = True
                 return 0
@@ -149,6 +152,8 @@ class TestEndToEndMain:
             assert captured["argv"] == ["app/main.py"]
             assert "--date" not in captured["argv"]
             assert D9_05 not in captured["argv"]
+            # 托盘常驻：最后一个窗口关闭不退出
+            assert captured["quit_on_last_window_closed"] is False
         finally:
             date_utils.reset_today_provider()
             assert date_utils.today() == original

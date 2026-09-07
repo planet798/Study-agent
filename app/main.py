@@ -87,6 +87,9 @@ def main() -> int:
     #    避免 Qt 把开发参数当成未知选项报错。
     app = QApplication([sys.argv[0]] + qt_args)
     app.setApplicationName("Study Agent")
+    # 托盘常驻：点 X 只是隐藏窗口，最后一个窗口消失也不退出，
+    # 真正退出只由托盘菜单“退出”触发（QApplication.quit）
+    app.setQuitOnLastWindowClosed(False)
 
     # 3) 组装依赖：SQLite -> Repository -> Service -> UI（UI 不直接碰 SQLite）
     conn = get_connection()

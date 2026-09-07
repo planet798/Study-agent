@@ -5,7 +5,8 @@
 - 作为 UI 层唯一与 service 交互的入口，将 TaskWidget 的操作信号
   转成对 TaskService / DateService 的调用；
 - 启动时执行日期切换检查；
-- 基础系统托盘（平台不支持时自动降级，不影响运行）。
+- 系统托盘：点 X 最小化到托盘（进程继续运行），托盘菜单提供“打开/退出”；
+  平台不支持托盘时自动降级，不影响运行。
 """
 
 from __future__ import annotations
@@ -495,21 +496,27 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def quit_app(self) -> None:
-        """托盘“退出”：关闭主窗口（closeEvent 负责清理与退出）。"""
-        if self._tray is not None:
-            self._tray.hide()
-        self.close()
+        """托盘“退出”：真正退出程序（集中清理后结束事件循环）。"""
+        self._quit_requested = True
+        self._shutdown()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """点右上角 X / 托盘“退出” = 真正退出程序，不驻留后台。
+        """点右上角 X = 最小化到系统托盘，程序继续运行；托盘“退出”走 quit_app。
 
-        顺序：清理托盘 -> 安全停止并等待 AI worker -> 关闭 AI 对话框，
-        然后接受关闭；QApplication 因“最后一个窗口已关闭”而正常退出，
-        PowerShell 立即返回提示符。
+        - 真正退出（_quit_requested）时：清理后接受关闭；
+        - 托盘可用时点 X：只 hide，保留进程与托盘；
+        - 无托盘可用时点 X：回退为“关闭即退出”，避免出现无入口的隐形进程。
         """
-        if not self._quit_requested:
+        if self._quit_requested or self._tray is None:
             self._shutdown()
-        event.accept()
+            event.accept()
+            return
+        # 点 X：隐藏窗口（不退出，不清理托盘/AI 线程）
+        event.ignore()
+        self.hide()
 
     def _shutdown(self) -> None:
         """退出前集中清理：托盘、AI 线程、打开的 AI 对话框。"""
@@ -568,6 +575,7 @@ class MainWindow(QMainWindow):
         from ..services.task_service import TaskService
 
         app = QApplication(sys.argv)
+        app.setQuitOnLastWindowClosed(False)  # 托盘常驻：X=隐藏，退出走 quit_app
         conn = get_connection()
         repo = TaskRepository(conn)
         task_service = TaskService(repo)
