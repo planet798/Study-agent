@@ -9,6 +9,11 @@ from ..database.repository import Task
 from ..database.schema import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_MEDIUM
 from ..utils.date_utils import to_display
 from .long_term_context import LongTermContext, make_long_term_summary
+from .schemas import (
+    ASSESSMENT_QUESTION_TYPES,
+    MAX_ASSESSMENT_QUESTIONS,
+    MAX_ASSESSMENT_POINTS,
+)
 
 SYSTEM_PROMPT = """你是一个学习计划辅助助手。
 
@@ -175,6 +180,73 @@ PLANNER_OUTPUT_INSTRUCTION = """
 - task_id 必须属于上下文中的历史未完成任务（unfinished/postponed）
 - 不要推荐已经完成的主题
 """
+
+
+# ============================================================
+# AI 验收题生成（Assessment）Prompt
+# ============================================================
+
+ASSESSMENT_SYSTEM_PROMPT = """你是严格的学习验收出题助手。
+
+你的任务是围绕给定知识点，出客观、可验证的验收题目。
+
+规则：
+- 禁止让用户自评掌握程度（不要问“你掌握了吗 / 会了吗 / 给自己打几分”）。
+- 题目必须能检验真实理解与动手能力。
+- 题型只能是：
+  concept       概念解释
+  code_reading  代码阅读
+  coding        编程实现
+  debug         Debug / 错误分析
+  scenario      简单应用场景
+- 每道题必须给出 expected_points（该题应得的分数/关键点数量）。
+
+你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
+
+ASSESSMENT_OUTPUT_INSTRUCTION = """
+请输出严格 JSON：
+{{
+  "questions": [
+    {{"question": "题干", "type": "concept", "expected_points": 2}}
+  ]
+}}
+
+约束：
+- questions 数量 1~{max_questions}
+- type 只能是：{types}
+- expected_points 是 1~{max_points} 的整数，表示该题分值/关键点数量
+"""
+
+
+def build_assessment_prompt(
+    knowledge_point_name: str,
+    description: str = "",
+    num_questions: int = 4,
+) -> str:
+    """根据知识点构造验收题 Prompt。"""
+    lines = [
+        "请为以下知识点生成验收题。",
+        "",
+        "【知识点】",
+        f"- 名称：{knowledge_point_name}",
+    ]
+    if description:
+        lines.append(f"- 描述：{description}")
+    lines.append(f"- 目标题数：{int(num_questions)}")
+    lines.extend(
+        [
+            "",
+            "要求：",
+            "- 题目必须能检验真实理解与动手能力，不能问主观掌握度。",
+            f"- 尽量覆盖多种题型：{' / '.join(ASSESSMENT_QUESTION_TYPES)}。",
+            "- 围绕该知识点出题，不要扩展到无关领域。",
+        ]
+    )
+    return "\n".join(lines) + ASSESSMENT_OUTPUT_INSTRUCTION.format(
+        max_questions=MAX_ASSESSMENT_QUESTIONS,
+        types=", ".join(ASSESSMENT_QUESTION_TYPES),
+        max_points=MAX_ASSESSMENT_POINTS,
+    )
 
 
 # ============================================================

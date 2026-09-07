@@ -348,3 +348,108 @@ def parse_monthly_from_json(text: str) -> MonthlySummary:
     except json.JSONDecodeError as e:
         raise AIServiceError(f"AI 月总结不是合法 JSON：{e}") from e
     return parse_monthly_summary(data)
+
+
+# ============================================================
+# AI 验收题生成（Assessment）输出结构
+# ============================================================
+
+# 允许的客观题型（不允许“自评掌握度”类题目）
+ASSESSMENT_QUESTION_TYPES = (
+    "concept",        # 概念解释
+    "code_reading",   # 代码阅读
+    "coding",         # 编程实现
+    "debug",          # Debug / 错误分析
+    "scenario",       # 简单应用场景
+)
+
+MAX_ASSESSMENT_QUESTIONS = 10
+MAX_ASSESSMENT_POINTS = 20
+
+
+@dataclass(frozen=True)
+class AssessmentQuestion:
+    """一道通过校验的客观验收题。"""
+
+    question: str
+    type: str
+    expected_points: int
+
+
+@dataclass(frozen=True)
+class AssessmentQuestionSet:
+    """一组验收题（围绕一个知识点）。"""
+
+    questions: tuple[AssessmentQuestion, ...]
+
+    def question_dicts(self) -> list[dict]:
+        """转成可落库的 dict 列表。"""
+        return [
+            {
+                "question": q.question,
+                "type": q.type,
+                "expected_points": q.expected_points,
+            }
+            for q in self.questions
+        ]
+
+    def questions_json(self) -> str:
+        """序列化为 questions_json（供 assessment_attempts 保存）。"""
+        return json.dumps(self.question_dicts(), ensure_ascii=False)
+
+
+def parse_assessment_questions(raw: object) -> AssessmentQuestionSet:
+    """把 dict 解析并校验为验收题集合；任何问题抛 AIServiceError。"""
+    if not isinstance(raw, dict):
+        raise AIServiceError(
+            f"验收题输出必须是 JSON 对象，实际为 {type(raw).__name__}"
+        )
+    if "questions" not in raw:
+        raise AIServiceError("验收题输出缺少字段：questions")
+
+    items = raw["questions"]
+    if not isinstance(items, list):
+        raise AIServiceError("字段 questions 必须是数组")
+    if not (1 <= len(items) <= MAX_ASSESSMENT_QUESTIONS):
+        raise AIServiceError(
+            f"questions 数量必须在 1~{MAX_ASSESSMENT_QUESTIONS} 之间"
+        )
+
+    out: list[AssessmentQuestion] = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise AIServiceError(f"questions[{i}] 必须是对象")
+        for field_name in ("question", "type", "expected_points"):
+            if field_name not in item:
+                raise AIServiceError(f"questions[{i}] 缺少字段：{field_name}")
+
+        question = _require_str(item["question"], f"questions[{i}].question")
+        qtype = _require_str(item["type"], f"questions[{i}].type", max_len=40)
+        if qtype not in ASSESSMENT_QUESTION_TYPES:
+            raise AIServiceError(
+                f"questions[{i}].type 非法：{qtype}，"
+                f"允许值：{', '.join(ASSESSMENT_QUESTION_TYPES)}"
+            )
+        points = _require_number_in_range(
+            item["expected_points"],
+            f"questions[{i}].expected_points",
+            1.0,
+            float(MAX_ASSESSMENT_POINTS),
+        )
+        out.append(
+            AssessmentQuestion(
+                question=question,
+                type=qtype,
+                expected_points=int(points),
+            )
+        )
+    return AssessmentQuestionSet(questions=tuple(out))
+
+
+def parse_assessment_questions_from_json(text: str) -> AssessmentQuestionSet:
+    """字符串 -> JSON -> 校验。"""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise AIServiceError(f"验收题返回的不是合法 JSON：{e}") from e
+    return parse_assessment_questions(data)
