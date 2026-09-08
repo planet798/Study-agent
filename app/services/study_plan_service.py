@@ -120,11 +120,14 @@ class StudyPlanService:
         repo: TaskRepository,
         plan_repo: StudyPlanRepository | None = None,
         max_daily_minutes: int = MAX_DAILY_STUDY_MINUTES,
+        assessment_repo=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
         # 允许测试/日后调整预算
         self.max_daily_minutes = max_daily_minutes
+        # 可选：读到知识掌握证据，用于“薄弱优先 / 高掌握与复习中不重复”（Phase 8）
+        self.assessment_repo = assessment_repo
         self._default_plan_created = False
 
     # ================= 默认研一计划 =================
@@ -308,14 +311,14 @@ class StudyPlanService:
     def generate_daily_tasks(self, date_str: str) -> dict:
         """为 date_str 生成每日学习任务（不使用 LLM，规则简单可预测）。
 
-        规则（按优先级排序后逐条采纳）：
-        1. 当天已存在的任务占用预算（延期任务优先：已有任务的活动任务
-           视为已占用时间，且不会重复生成同主题任务）；
-        2. 高优先级主题优先；
-        3. 已经完成过的主题不再重复生成；
+        规则（Phase 8 起）：
+        1. 当天已存在的任务占用预算（延期任务优先）；
+        2. 高优先级主题优先；薄弱（低掌握或有 weak_points）主题按证据提前；
+        3. 已经完成过的主题不再重复生成；高掌握且最近验收良好、或有未完成复习任务
+           的主题不再重复安排（复习交给 ReviewService，不伪造 mastery）；
         4. 不超过 max_daily_minutes 总预算；
         5. 若当天还没有任何任务，至少安排一个核心主题；
-        6. 剩余预算装不下剩余主题时停止，不强行塞满。
+        6. 剩余预算装不下剩余主题时停止。
 
         :return: {"generated": [Task], "phase": name|None, "selected": [topic_id], ...}
         """
@@ -349,14 +352,27 @@ class StudyPlanService:
         # 已完成的主题列表（任意日期完成过即视为已掌握）
         done_topic_ids = self._done_topic_ids()
 
-        # 按优先级高在前排（同优先级按创建顺序）
+        # 知识掌握证据（Phase 8；无 assessment_repo 时为空，行为与旧版一致）
+        weak_ids = set()
+        skip_ids = set()
+        if self.assessment_repo is not None:
+            from .knowledge_evidence import skip_topic_ids, weak_topic_ids
+
+            weak_ids = weak_topic_ids(self.repo, self.assessment_repo)
+            skip_ids = skip_topic_ids(self.repo, self.assessment_repo)
+
+        # 按优先级高在前排；同优先级内薄弱主题提前（削弱“只按纯数字顺序”依赖）
         topics = sorted(
             phase.topics,
-            key=lambda t: (-t.priority, t.order_index),
+            key=lambda t: (
+                -t.priority,
+                -int(t.id in weak_ids),
+                t.order_index,
+            ),
         )
 
         for topic in topics:
-            if topic.id in done_topic_ids:
+            if topic.id in done_topic_ids or topic.id in skip_ids:
                 result["skipped_done"].append(topic.id)
                 continue
             if topic.id in active_topic_ids:

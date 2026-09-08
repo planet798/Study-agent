@@ -23,6 +23,7 @@ from ..ai.planner_context import (
     ContextTask,
     ContextTopic,
     DaySummary,
+    KnowledgeEvidence,
     PlanningContext,
 )
 from ..database.repository import Task, TaskRepository
@@ -45,6 +46,7 @@ class DailyPlannerService:
         planner: AIPlanner | None = None,
         study_plan_service: StudyPlanService | None = None,
         max_daily_minutes: int = MAX_DAILY_STUDY_MINUTES,
+        assessment_repo=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -54,6 +56,8 @@ class DailyPlannerService:
         self.planner = planner
         self.decision_repo = PlannerDecisionRepository(repo.conn)
         self.max_daily_minutes = max_daily_minutes
+        # 可选：读取 knowledge_points / assessment_attempts 作为掌握证据（Phase 8）
+        self.assessment_repo = assessment_repo
 
     # ================= 幂等保护 =================
 
@@ -97,7 +101,47 @@ class DailyPlannerService:
         ctx.estimated_minutes = sum(d.estimated_minutes for d in recent)
         ctx.actual_completed_minutes = sum(d.completed_minutes for d in recent)
         ctx.current_daily_limit = self.max_daily_minutes
+        # Phase 8：把真实验收证据放进上下文（无证据的知识点不出现，不伪造 mastery）
+        self._fill_knowledge_evidence(ctx, plan_next_date)
         return ctx
+
+    def _fill_knowledge_evidence(
+        self, ctx: PlanningContext, plan_date: str
+    ) -> None:
+        """把 knowledge_points + 最近验收结果整理为 KnowledgeEvidence 列表。"""
+        if self.assessment_repo is None:
+            return
+        from .knowledge_evidence import (
+            _attempt_weak_points,
+            _latest_judged_attempt,
+        )
+
+        topic_names = {
+            r["id"]: r["name"]
+            for r in self.repo.conn.execute("SELECT id, name FROM study_topics")
+        }
+        for kp in self.assessment_repo.list_knowledge_points():
+            if not kp.get("last_assessed_at"):
+                continue  # 没有真实验收证据：不进入 evidence
+            attempt = _latest_judged_attempt(self.assessment_repo, kp["id"])
+            tid = kp.get("topic_id")
+            topic_id = int(tid) if tid is not None else None
+            ctx.knowledge_evidence.append(
+                KnowledgeEvidence(
+                    knowledge_point_id=kp["id"],
+                    name=kp["name"],
+                    topic_id=topic_id,
+                    topic=topic_names.get(topic_id, "") if topic_id else "",
+                    mastery_estimate=float(kp.get("mastery_estimate") or 0.0),
+                    weak_points=tuple(_attempt_weak_points(attempt)),
+                    last_assessed_at=kp.get("last_assessed_at"),
+                    review_count=int(kp.get("review_count") or 0),
+                    next_review_date=kp.get("next_review_date"),
+                    recent_result_level=(
+                        attempt.get("result_level") if attempt else None
+                    ),
+                )
+            )
 
     def _build_recent_days(self, anchor: str, week: int = WEEK_DAYS) -> list[DaySummary]:
         """anchor 之前 week 天（不含 anchor）的每日摘要，按日期升序。"""
@@ -267,6 +311,13 @@ class DailyPlannerService:
 
         done_topic_ids = self._done_topic_ids()
         scheduled_topic_ids = self._scheduled_topic_ids(plan_date)
+        # Phase 8：高掌握且最近良好 / 已有未完成复习任务 的主题不重复安排
+        # （复习交给 ReviewService；此处视为去重，不当作规划失败）
+        evidence_skip: set[int] = set()
+        if self.assessment_repo is not None:
+            from .knowledge_evidence import skip_topic_ids
+
+            evidence_skip = skip_topic_ids(self.repo, self.assessment_repo)
 
         # 推荐任务校验（不实际创建，先全部校验）
         to_create: list = []
@@ -277,6 +328,9 @@ class DailyPlannerService:
                 continue
             if rec.topic_id in done_topic_ids:
                 problems.append(f"topic_id {rec.topic_id} 已完成，不应重新生成")
+                continue
+            if rec.topic_id in evidence_skip:
+                # 已掌握/复习进行中：不生成正式新任务，也不判为规划失败
                 continue
             if rec.topic_id in scheduled_topic_ids or rec.topic_id in seen_topic_ids:
                 # 已存在/已排过：去重，不算违规

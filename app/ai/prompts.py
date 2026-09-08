@@ -107,6 +107,15 @@ PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是个人学习规划助手。
 8. 每天自主学习总时间默认不超过 {daily_limit} 分钟。
 9. 给出的任务必须来自当前 StudyTopic 或合法延期任务。
 10. AI 的建议必须可解释。
+11. 明确区分信息来源：career_context 决定长期方向；current_phase / available_topics
+    决定当前阶段可学什么；knowledge_evidence 只反映当前实际掌握情况的动态估计
+    （不是路线）；已到期的复习由复习调度（ReviewService）负责，你不得再为这些
+    知识点生成正式复习任务；额外学习由额外任务（ExtraTaskService）负责，与你无关。
+12. 不要把 mastery_estimate 当作绝对事实或路线控制器：不得仅凭单次验收或某个
+    较高 mastery 跳过整个阶段；不得因一次 poor 永久放弃某个知识点。阶段推进仍由
+    学习计划顺序决定，你只能在当前阶段内调整“下一步学什么”。
+13. 已完成且掌握度较高的知识点不要重复安排基础任务；已存在 active/not_done 的
+    同知识点正式任务不要重复创建。
 
 你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
 
@@ -120,6 +129,7 @@ def build_planner_user_prompt(context: "object", long_term: "object | None" = No
     """根据 PlanningContext 构造用户提示；可选附带长期学习上下文。
 
     :param long_term: LongTermContext 或已渲染好的摘要字符串；None 表示不带。
+    :return: user prompt，含上下文 JSON + 知识掌握证据段 +（可选）长期上下文段。
     """
     import json
 
@@ -130,11 +140,47 @@ def build_planner_user_prompt(context: "object", long_term: "object | None" = No
         "上下文 JSON：",
         json.dumps(ctx_data, ensure_ascii=False, indent=2),
     ]
+    evidence_section = build_knowledge_evidence_section(context)
+    if evidence_section:
+        lines.extend(["", evidence_section])
     long_term_section = build_long_term_context_section(long_term)
     if long_term_section:
         lines.extend(["", long_term_section])
     lines.extend(
         ["", PLANNER_OUTPUT_INSTRUCTION.format(daily_limit=context.current_daily_limit)]
+    )
+    return "\n".join(lines)
+
+
+def build_knowledge_evidence_section(context: "object") -> str:
+    """把 PlanningContext.knowledge_evidence 渲染为 Prompt 段落；无证据返回空串。
+
+    只有确实有验收证据的知识点会出现在这里；绝不伪造 mastery。
+    """
+    evidence = getattr(context, "knowledge_evidence", None)
+    if not evidence:
+        return ""
+    lines = [
+        "【知识掌握证据】（当前实际掌握情况的 AI 估计；动态证据，不是职业路线/阶段控制器）"
+    ]
+    for e in evidence:
+        parts = [f"知识点:{e.name}"]
+        if e.topic:
+            parts.append(f"主题:{e.topic}")
+        if e.mastery_estimate is not None:
+            parts.append(f"mastery:{e.mastery_estimate:.2f}")
+        else:
+            parts.append("mastery:—")
+        parts.append(f"最近验收:{e.recent_result_level or '—'}")
+        parts.append(f"review_count:{e.review_count}")
+        if e.next_review_date:
+            parts.append(f"下次复习:{e.next_review_date}")
+        if e.weak_points:
+            parts.append(f"薄弱点:{'、'.join(e.weak_points)}")
+        lines.append("- " + "；".join(parts))
+    lines.append(
+        "用途：只用于调整‘下一步学什么’的优先级与针对性；不要据此跳过整个阶段，"
+        "不要代替复习调度；不要重复已掌握/正在复习的内容。"
     )
     return "\n".join(lines)
 

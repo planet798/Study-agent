@@ -96,9 +96,14 @@ def main() -> int:
     repo = TaskRepository(conn)
     task_service = TaskService(repo)
 
-    # 学习计划：确保默认研一计划已创建，供每日任务生成与阶段显示
+    # 学习计划：确保默认研一计划已创建，供每日任务生成与阶段显示；
+    # 注入 assessment_repo（Phase 8）让规则生成能读取掌握证据（薄弱优先/不重复）。
     plan_repo = StudyPlanRepository(conn)
-    study_plan_service = StudyPlanService(repo, plan_repo)
+    from app.database.assessment_repository import AssessmentRepository
+
+    assessment_repo = AssessmentRepository(conn)
+    study_plan_service = StudyPlanService(repo, plan_repo,
+                                          assessment_repo=assessment_repo)
     study_plan_service.ensure_default_plan()
 
     # AI 配置读取环境变量；未配置时 GUI 正常运行（本地功能不受影响）
@@ -114,6 +119,7 @@ def main() -> int:
             long_term_context=long_term_context,
         ),
         study_plan_service=study_plan_service,
+        assessment_repo=assessment_repo,
     )
     date_service = DateService(
         repo,
@@ -123,13 +129,11 @@ def main() -> int:
     review_service = TaskReviewService(ai_client)
 
     # Phase 3D~6：验收 / 复习调度 / 额外学习 / 课外探索
-    from app.database.assessment_repository import AssessmentRepository
     from app.services.assessment_service import AssessmentService
     from app.services.exploration_service import ExplorationService
     from app.services.extra_task_service import ExtraTaskService
     from app.services.review_service import ReviewService
 
-    assessment_repo = AssessmentRepository(conn)
     # 复习调度（依赖 TaskRepository + AssessmentRepository）
     review_scheduler = ReviewService(repo, assessment_repo)
     # 验收（判题成功后自动联动复习调度）
