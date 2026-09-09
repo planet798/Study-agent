@@ -1,5 +1,11 @@
 """全局 QSS 样式。简洁、中文友好、信息层级清晰。"""
 
+from __future__ import annotations
+
+from PySide6.QtGui import QColor, QPalette
+
+SECONDARY_TEXT_COLOR = "#2c6fbb"
+
 APP_STYLE = """
 /* ---- 全局 ---- */
 QWidget {
@@ -110,6 +116,22 @@ QPushButton#PostponeButton {
 QPushButton#PostponeButton:hover {
     background-color: #fff8e6;
 }
+QPushButton#SecondaryButton {
+    background-color: #eef2f6;
+    border: 1px solid #2c6fbb;
+    color: #2c6fbb;
+    font-weight: bold;
+}
+QPushButton#SecondaryButton:hover {
+    background-color: #eaf2fb;
+}
+QPushButton#SecondaryButton:pressed {
+    background-color: #dce8f7;
+}
+QPushButton#SecondaryButton:disabled {
+    color: #b0b7bf;
+    border-color: #d5dbe2;
+}
 
 /* ---- 统计栏 ---- */
 QFrame#StatsBar {
@@ -149,3 +171,18 @@ QStatusBar {
     color: #5d6d7e;
 }
 """
+
+
+def apply_secondary_button_text(button) -> None:
+    """把“完成 / 打开链接”等次级按钮文字强制为蓝字。
+
+    Windows 原生 QPushButton 样式可能不采纳 QSS 的 color 属性，导致文字仍为
+    白字（或系统色）；这里显式把 palette 的 ButtonText 设为蓝字，保证文字在
+    所有平台下都清晰可读。只影响文字颜色，不改尺寸 / 边框 / 布局。
+    """
+    blue = QColor(SECONDARY_TEXT_COLOR)
+    pal = button.palette()
+    pal.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.ButtonText, blue)
+    pal.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.ButtonText, blue)
+    button.setPalette(pal)
+

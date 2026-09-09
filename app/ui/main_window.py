@@ -45,7 +45,7 @@ from ..utils.date_utils import add_days, today as _default_today
 from .ai_worker import AIReviewWorker, AssessmentWorker
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
-from .styles import APP_STYLE
+from .styles import APP_STYLE, apply_secondary_button_text
 from .task_widget import TaskWidget
 
 POSTPONE_WARNING = "该任务已经连续延期 3 次，请考虑拆分任务或调整计划。"
@@ -475,7 +475,8 @@ class MainWindow(QMainWindow):
             why.setObjectName("TaskMeta")
             cl.addWidget(why)
             open_btn = QPushButton("打开链接")
-            open_btn.setObjectName("PrimaryButton")
+            open_btn.setObjectName("SecondaryButton")
+            apply_secondary_button_text(open_btn)
             open_btn.clicked.connect(
                 lambda _=False, u=it.get("url", ""): self._open_exploration_url(u)
             )

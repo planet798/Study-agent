@@ -27,6 +27,7 @@ from ..database.schema import (
     STATUS_DONE,
     STATUS_NOT_DONE,
 )
+from .styles import apply_secondary_button_text
 
 _PRIORITY_TEXT = {
     PRIORITY_LOW: "低",
@@ -123,7 +124,8 @@ class TaskWidget(QFrame):
     def _add_action_buttons(self) -> None:
         """active 状态显示 [完成] [未完成]（关联知识点的任务另加 [验收]）。"""
         self.complete_btn = QPushButton("完成")
-        self.complete_btn.setObjectName("PrimaryButton")
+        self.complete_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(self.complete_btn)
         self.complete_btn.clicked.connect(
             lambda: self.complete_requested.emit(self._task.id)
         )
