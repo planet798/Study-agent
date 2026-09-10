@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -303,6 +303,79 @@ def _migrate_v5(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[5] = _migrate_v5
+
+
+# ============================================================
+# v6：技能 / JD / 学习成果 底座（Phase A）
+# ============================================================
+#
+# - skills            : 技能实体（S/A/B/C tier、状态、JD 频率、
+#                       系统计算的优先级、前置依赖、主题映射、共振标记）
+# - jds               : 真实 JD 记录（保留原文 raw_text + 结构化 parsed）
+# - learning_outcomes : 学习成果 → 简历素材底座
+#
+# 本阶段只建设数据结构；优先级计算在 app/services/skill_service.py（确定性规则）。
+
+_V6_SQL = """
+CREATE TABLE IF NOT EXISTS skills (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT    NOT NULL UNIQUE,
+    tier             TEXT    NOT NULL DEFAULT 'C',
+    category         TEXT    NOT NULL DEFAULT 'core',
+    status           TEXT    NOT NULL DEFAULT 'not_started',
+    mastery_ref      TEXT    NOT NULL DEFAULT '',
+    jd_frequency     TEXT    NOT NULL DEFAULT '{}',
+    priority_score   REAL    NOT NULL DEFAULT 0.0,
+    prerequisites    TEXT    NOT NULL DEFAULT '[]',
+    linked_topics    TEXT    NOT NULL DEFAULT '[]',
+    shared_connector INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT    NOT NULL DEFAULT '',
+    updated_at       TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_skills_tier   ON skills(tier);
+CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status);
+
+CREATE TABLE IF NOT EXISTS jds (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    company            TEXT    NOT NULL DEFAULT '',
+    title              TEXT    NOT NULL DEFAULT '',
+    direction          TEXT    NOT NULL DEFAULT '',
+    intern_requirement TEXT    NOT NULL DEFAULT '',
+    raw_text           TEXT    NOT NULL DEFAULT '',
+    parsed             TEXT    NOT NULL DEFAULT '{}',
+    uploaded_at        TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_jds_direction ON jds(direction);
+
+CREATE TABLE IF NOT EXISTS learning_outcomes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT    NOT NULL DEFAULT '',
+    kind            TEXT    NOT NULL DEFAULT 'note',
+    title           TEXT    NOT NULL DEFAULT '',
+    content         TEXT    NOT NULL DEFAULT '',
+    tech_stack      TEXT    NOT NULL DEFAULT '[]',
+    dataset         TEXT    NOT NULL DEFAULT '',
+    metrics         TEXT    NOT NULL DEFAULT '{}',
+    git_commit      TEXT    NOT NULL DEFAULT '',
+    github_url      TEXT    NOT NULL DEFAULT '',
+    resume_keywords TEXT    NOT NULL DEFAULT '[]',
+    linked_kp_id    INTEGER,
+    linked_topic_id INTEGER,
+    created_at      TEXT    NOT NULL DEFAULT '',
+    updated_at      TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_learning_outcomes_date ON learning_outcomes(date);
+CREATE INDEX IF NOT EXISTS idx_learning_outcomes_kind ON learning_outcomes(kind);
+"""
+
+
+def _migrate_v6(conn: sqlite3.Connection) -> None:
+    """v6：创建 skills / jds / learning_outcomes 三张表（幂等）。"""
+    conn.executescript(_V6_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[6] = _migrate_v6
 
 
 def get_schema_version(conn) -> int:

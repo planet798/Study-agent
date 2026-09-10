@@ -1,20 +1,55 @@
 {
-  "schema_version": 1,
-  "updated": "2026-09-05",
-  "career_goal": "为硕士毕业后的大厂 AI/大模型岗位做准备，学习路线围绕真实招聘 JD 需求，而不是为了学习技术而学习技术。",
+  "schema_version": 2,
+  "updated": "2026-09-08",
+  "career_goal": "目标不是泛 AI 算法工程师，而是「推荐 / 搜索 / 广告算法（搜广推）+ LLM / AI Agent」的交叉方向。长期以搜广推为主轴、叠加 LLM / RAG / Agent 应用能力，最终形成 Recommendation/Search/Ads + LLM + Agent 的交叉能力。",
   "target_roles": {
     "primary": [
-      "大模型算法工程师 / LLM 算法工程师",
-      "大模型应用算法工程师",
-      "AI 算法工程师（大模型/NLP）",
-      "Agent / 智能体算法工程师",
-      "大模型研发工程师 / AI 应用研发工程师"
+      "搜广推算法工程师 / 推荐算法工程师",
+      "搜广推 + LLM 算法工程师",
+      "LLM 应用算法工程师",
+      "Agent / LLM 算法工程师"
     ],
     "secondary": [
-      "AI 系统 / 大模型推理工程师"
-    ]
+      "NLP 算法工程师",
+      "机器学习 / 深度学习工程师",
+      "数据挖掘工程师",
+      "大模型应用算法工程师"
+    ],
+    "job_pool": {
+      "S": [
+        "推荐算法",
+        "搜索算法",
+        "广告算法",
+        "大模型算法"
+      ],
+      "A": [
+        "NLP 算法",
+        "机器学习",
+        "深度学习",
+        "数据挖掘",
+        "Agent 算法",
+        "AI Agent",
+        "大模型应用算法"
+      ],
+      "B": [
+        "泛 AI 算法工程师",
+        "算法研发工程师",
+        "AI 应用方向"
+      ],
+      "low_priority": [
+        "CV",
+        "SLAM",
+        "自动驾驶",
+        "语音",
+        "规控",
+        "风控",
+        "与上述主线无明显关系的算法岗位"
+      ]
+    },
+    "job_pool_note": "求职池按 S/A/B 分级，低优先级岗位不作为主线；搜广推 + AI Agent 通常不是固定统一岗位名，因此不要求岗位标题必须同时出现两者。"
   },
   "jd_evidence": {
+    "source_scope": "旧方向（LLM/NLP/大模型）时期的真实 JD 研究成果，保留作历史参考；新方向（搜广推 + LLM）尚未收集新 JD，相关频率一律留空，不编造数字。",
     "companies": [
       "华为",
       "蔚来",
@@ -28,42 +63,98 @@
       "科大讯飞"
     ],
     "tech_frequency": {
-      "Python": { "count": 9, "total": 10, "priority": "最高" },
-      "PyTorch": { "count": 7, "total": 10, "priority": "最高" },
-      "LLM 理论/应用": { "count": 7, "total": 10, "priority": "最高" },
-      "Linux / 系统能力": { "count": 6, "total": 10, "priority": "高" },
-      "VLM / VLA": { "count": 5, "total": 10, "priority": "中高" },
-      "Agent": { "count": 5, "total": 10, "priority": "中高" },
-      "SFT / LoRA / QLoRA": { "count": 4, "total": 10, "priority": "中高" }
+      "Python": { "count": 9, "total": 10, "priority": "最高", "scope": "legacy" },
+      "PyTorch": { "count": 7, "total": 10, "priority": "最高", "scope": "legacy" },
+      "LLM 理论/应用": { "count": 7, "total": 10, "priority": "最高", "scope": "legacy" },
+      "Linux / 系统能力": { "count": 6, "total": 10, "priority": "高", "scope": "legacy" },
+      "VLM / VLA": { "count": 5, "total": 10, "priority": "中高", "scope": "legacy" },
+      "Agent": { "count": 5, "total": 10, "priority": "中高", "scope": "legacy" },
+      "SFT / LoRA / QLoRA": { "count": 4, "total": 10, "priority": "中高", "scope": "legacy" }
     },
-    "other_common": [
+    "conclusions": [
+      "（历史）Python、PyTorch、LLM、Linux 是核心基础",
+      "（历史）Agent、RAG、SFT/LoRA 是重要应用/训练能力",
+      "（历史）vLLM、Docker、模型部署是后续工程能力"
+    ],
+    "recent_jds": {
+      "note": "新方向（搜广推 + LLM/Agent）暂无新增 JD 记录；技能优先级中的 jd_frequency 以 Phase B 导入的真实 JD 为准，本字段不编造。",
+      "companies": [],
+      "tech_frequency": {},
+      "conclusions": []
+    }
+  },
+  "skill_pool": {
+    "S": [
+      "Python",
+      "PyTorch",
       "Transformer",
       "Hugging Face",
+      "SFT",
+      "LoRA / QLoRA",
+      "Embedding",
       "RAG",
-      "模型训练与部署",
-      "模型评测",
+      "推荐系统基础",
+      "Recall",
+      "Ranking"
+    ],
+    "A": [
+      "CTR",
+      "Rerank",
+      "用户画像",
+      "Agent",
+      "模型评估",
+      "SQL",
+      "Linux",
+      "Git"
+    ],
+    "B": [
+      "VLM",
       "vLLM",
       "Docker",
-      "C/C++",
-      "推理优化",
-      "数据处理",
-      "多模态"
+      "C++"
     ],
-    "conclusions": [
-      "Python、PyTorch、LLM、Linux 是核心基础",
-      "Agent、RAG、SFT/LoRA 是重要应用/训练能力",
-      "vLLM、Docker、模型部署是后续工程能力",
-      "VLM/VLA 是后续扩展方向",
-      "C/C++、CUDA、DDP、DeepSpeed、ZeRO 等暂不作为当前阶段重点"
+    "C": [
+      "CUDA",
+      "分布式训练底层",
+      "复杂推理优化",
+      "与主路线关系较弱的 CV / SLAM / 自动驾驶 / 语音 / 规控 / 风控 等内容"
     ]
   },
+  "skill_dependencies": {
+    "Hugging Face": ["Python", "Transformer"],
+    "LLM 基础": ["Python", "Transformer"],
+    "SFT": ["Transformer", "LLM 基础", "Hugging Face"],
+    "LoRA / QLoRA": ["PyTorch", "Transformer", "SFT"],
+    "模型评估": ["LLM 基础", "Hugging Face"],
+    "Embedding": ["Python", "PyTorch", "Transformer"],
+    "RAG": ["LLM 基础", "Embedding"],
+    "推荐系统基础": ["Python", "PyTorch"],
+    "用户画像": ["SQL", "推荐系统基础"],
+    "Recall": ["推荐系统基础", "Embedding"],
+    "Ranking": ["推荐系统基础", "Recall"],
+    "CTR": ["Ranking", "Embedding"],
+    "Rerank": ["Ranking", "Embedding"],
+    "LLM + Recommendation": ["推荐系统基础", "LLM 基础", "Ranking", "Rerank", "RAG"],
+    "Agent": ["LLM 基础", "RAG"],
+    "vLLM": ["LoRA / QLoRA", "Docker"],
+    "Docker": ["Linux"],
+    "VLM": ["LLM 基础", "Transformer"],
+    "CUDA": ["PyTorch"],
+    "分布式训练底层": ["PyTorch", "SFT"],
+    "复杂推理优化": ["Transformer", "vLLM"]
+  },
+  "connectors": {
+    "shared": ["Embedding", "Recall", "Ranking", "Rerank"],
+    "note": "Embedding / Recall / Ranking / Rerank 是推荐系统、搜索系统与 RAG 的共同连接点（共享能力），对这几项技能给予有限的 connector bonus。"
+  },
   "skill_roadmap": {
+    "current_stage": "阶段二→阶段三过渡：深度学习与 LLM 基础（PyTorch / Transformer / LLM / Hugging Face）后进入 LLM 应用与微调（SFT / LoRA / RAG）。",
     "stages": [
       {
         "name": "阶段一：工程底座",
         "items": [
-          "Python", "Linux", "Git", "pytest / Ruff / Black", "Pydantic",
-          "必要时 asyncio / httpx"
+          "Python", "Linux", "Git", "SQL 基础", "pytest / Ruff / Black",
+          "Pydantic", "必要时 asyncio / httpx"
         ]
       },
       {
@@ -71,52 +162,50 @@
         "items": [
           "PyTorch", "Tensor / autograd", "Dataset / DataLoader", "nn.Module",
           "Transformer", "Attention / MHA / FFN", "LayerNorm / RMSNorm",
-          "Tokenizer", "RoPE", "KV Cache", "Hugging Face Transformers",
+          "Tokenizer", "RoPE", "KV Cache", "LLM 基础", "Hugging Face Transformers",
           "generate / sampling", "Qwen / LLaMA / GQA / SwiGLU"
         ]
       },
       {
-        "name": "阶段三：LLM 应用",
+        "name": "阶段三：LLM 应用与微调",
         "items": [
-          "LLM API", "Structured Output", "Function Calling / Tool Calling",
-          "ReAct", "Planning", "Memory / State", "RAG", "Chunking",
-          "Embedding", "BM25", "Hybrid Search", "RRF", "Reranker",
-          "Evaluation / Badcase / LLM-as-Judge", "Agent"
+          "SFT", "LoRA / QLoRA", "PEFT", "LLaMA-Factory", "模型评估",
+          "RAG", "Chunking", "Embedding", "Agent", "Function / Tool Calling"
         ]
       },
       {
-        "name": "阶段四：模型训练与部署",
+        "name": "阶段四：推荐 / 搜索系统基础",
         "items": [
-          "LoRA", "QLoRA", "PEFT", "SFT", "LLaMA-Factory", "vLLM",
-          "PagedAttention", "Continuous Batching", "Docker"
+          "推荐系统基础", "Embedding", "Recall", "Ranking", "CTR", "Rerank",
+          "用户画像", "SQL 数据分析", "LLM + Recommendation"
         ]
       },
       {
-        "name": "阶段五：后续扩展",
+        "name": "阶段五：搜广推 + LLM/Agent 收敛",
         "items": [
-          "VLM", "多模态", "DDP / ZeRO / DeepSpeed（先理解）", "推理优化",
-          "C/C++ / CUDA（确定走 AI 系统/推理方向再深入）",
-          "VLA / World Model 等高级方向"
+          "召回 / 排序 / 重排 + RAG / Agent 交叉实践", "vLLM 部署", "Docker",
+          "（按需：VLM / 分布式训练底层）"
         ]
       }
     ],
     "priority": {
       "must_master": [
-        "Python", "Linux", "Git", "PyTorch", "Transformer", "LLM", "RAG",
-        "Agent", "LoRA / SFT"
+        "Python", "PyTorch", "Transformer", "Hugging Face", "SFT",
+        "LoRA / QLoRA", "Embedding", "RAG", "推荐系统基础", "Recall", "Ranking"
       ],
       "should_master": [
-        "asyncio", "pytest", "Hugging Face", "Reranker", "LLM Evaluation",
-        "vLLM", "Docker", "VLM"
+        "CTR", "Rerank", "用户画像", "Agent", "模型评估", "SQL", "Linux", "Git"
       ],
       "understand_only": [
-        "传统机器学习", "知识图谱", "C++", "CUDA", "DDP", "DeepSpeed",
-        "ZeRO", "世界模型", "VLA"
+        "VLM", "vLLM", "Docker", "C++", "CUDA", "分布式训练底层",
+        "复杂推理优化", "与主路线关系较弱的内容"
       ]
-    }
+    },
+    "core_route": "Python → PyTorch → Transformer → LLM → Hugging Face → SFT / LoRA → RAG → Embedding → 推荐系统 → Recall → Ranking → CTR → Rerank → LLM + Recommendation → Agent"
   },
   "current_skill_state": {
     "mastered": [
+      "Python", "Linux", "Git",
       "Python OOP", "Class / 继承 / ABC / abstractmethod", "Type Hints",
       "dataclass", "异常处理", "pathlib", "JSON", "虚拟环境",
       "requirements.txt", "分层架构", "依赖注入", "pytest", "fixtures",
@@ -124,45 +213,53 @@
       "LLM API 基础调用", "Structured Output", "手写 LLM 输出校验",
       "AI Planner 基础", "AI 失败规则回退", "Linux 常用命令与工具链",
       "Git 基础版本控制流程", "GitHub 远程仓库", "SSH GitHub 认证",
-      "commit / log / diff / tag / push"
+      "commit / log / diff / tag / push",
+      "PyTorch Tensor 与自动求导", "Linear Regression 训练闭环",
+      "Dataset / DataLoader", "nn.Module 与模型搭建",
+      "Transformer：Attention / MHA / FFN"
+    ],
+    "learning": [
+      "PyTorch", "Transformer", "Hugging Face", "LLM 基础"
     ],
     "weak": [
-      "Pydantic", "Ruff / Black", "asyncio / httpx", "Linux 系统化能力",
-      "PyTorch", "Transformer", "Hugging Face", "LLM 深层原理",
-      "Tool / Function Calling", "ReAct", "Memory / State", "RAG",
-      "Evaluation", "LoRA / QLoRA / SFT", "vLLM", "Docker", "VLM"
+      "SFT", "LoRA / QLoRA", "模型评估", "RAG", "Embedding",
+      "推荐系统基础", "Recall", "Ranking", "CTR", "Rerank", "用户画像",
+      "SQL", "LLM + Recommendation", "Agent"
     ],
     "deferred": [
-      "CUDA 深入", "C++ 深入", "DDP", "DeepSpeed", "ZeRO", "VLA",
-      "World Model", "复杂知识图谱", "其他与当前目标岗位距离较远的技术"
+      "VLM", "vLLM", "Docker", "C++", "CUDA", "分布式训练底层",
+      "复杂推理优化",
+      "与主路线关系较弱的 CV / SLAM / 自动驾驶 / 语音 / 规控 / 风控 等内容"
     ]
   },
   "learning_principles": [
-    "不因为某个技术热门就提前学习。",
-    "不为了“技术覆盖率”强行往 Study Agent 中塞技术。",
-    "优先学习真实 JD 高频技能。",
-    "必须考虑当前已有基础。",
-    "必须考虑前置依赖。",
-    "每次只给下一阶段最有价值的一个学习任务，不一次生成几个月的课程。",
-    "今天的任务全部完成后，再根据当前状态重新规划。",
-    "不要因为完成了一个任务就自动跳到下一个知识点；先判断当天剩余任务。",
-    "已经掌握的知识不要重复安排基础教学，除非发现薄弱点。",
-    "新知识优先通过独立练习 + Study Agent 合理落地，而不是为了项目而项目。",
-    "Study Agent 是长期主项目，但不是所有技术都必须进入 Study Agent。",
-    "学习任务应尽可能形成“理论 → 阅读代码 → 动手编码 → 验收”的闭环。"
+    "不要把学习计划固定为最初的“大模型学习路线”：学习计划由长期职业目标、真实 JD、JD 高频技能、已掌握/未掌握技能、项目完成情况、简历技能缺口、技能重要程度共同决定。",
+    "不要因为某个技术热门就提前学习，不追求“技术覆盖率”。",
+    "优先学习真实 JD 高频技能；低频加分项不挤占主线学习时间（放 extra/有余力再学）。",
+    "必须考虑前置依赖：基础不足不允许直接跳到高级内容。",
+    "每次只给下一阶段最有价值的学习任务，不一次生成几个月的课程；今天完成后根据当前状态重新规划。",
+    "已掌握的知识不重复安排基础教学，除非发现薄弱点（掌握度证据只来自真实验收，绝不臆断“不会”）。",
+    "新 JD 是动态输入：新的 JD 大量要求某技能则提高其优先级；岗位方向变化允许重规划后续内容。",
+    "不要因为某一天 JD 出现新技术就立即重写整个长期路线；调整优先作用于未来 1～2 周。",
+    "保持每日学习量合理，不允许动态规划导致每天任务过载。",
+    "学习任务形成“理论 → 阅读代码 → 动手编码 → 验收”的闭环。",
+    "记录“学习 → 项目 → 简历”联动：实践成果、代码、项目、实验指标、Git commit、GitHub 地址、可写进简历的技术关键词，作为未来简历素材。",
+    "每天学习结束后按设计生成独立的笔记（Obsidian Markdown），沉淀知识。",
+    "Study Agent 是长期主项目，但并非所有技术都要进入 Study Agent。"
   ],
   "project_state": {
     "name": "Study Agent",
-    "role_in_learning": "长期主项目，随学习不断升级，最终形成可放入简历/GitHub/面试展示的完整 LLM Agent 项目",
+    "role_in_learning": "长期主项目，随学习不断升级，最终形成可放入简历/GitHub/面试展示的完整 LLM Agent + 推荐/检索实践项目",
     "repo": "planet798/Study-agent",
     "version": "v0.1.0",
     "implemented": [
       "PySide6 GUI", "SQLite", "任务 CRUD", "每日/每周/月度学习任务",
       "日期注入/日期模拟", "AI 任务规划", "AI 任务复核", "AI Summary",
       "LLM Structured Output", "AI 失败规则回退", "Windows 一键启动",
-      "DeepSeek API 接入", "305 个测试", "Git 版本控制",
-      "GitHub 私有仓库", "v0.1.0 Tag"
-    ],
-    "tests_count": 305
+      "DeepSeek API 接入", "客观验收 + AI 判题 + 掌握度", "复习调度",
+      "额外学习", "课外探索", "掌握度回流 Planner（Phase 8）",
+      "技能/JD/学习成果底座（Phase A v6）", "Git 版本控制",
+      "GitHub 私有仓库", "445+ 测试"
+    ]
   }
 }

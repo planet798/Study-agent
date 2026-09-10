@@ -67,7 +67,9 @@ class TestLoad:
     def test_loads_real_context(self):
         ctx = load_long_term_context()
         assert ctx is not None
-        assert "大模型" in ctx.career_goal
+        # v2 职业目标：搜广推 + LLM/Agent
+        assert "搜广推" in ctx.career_goal
+        assert "LLM" in ctx.career_goal
         assert ctx.target_roles["primary"]
         assert ctx.jd_evidence["tech_frequency"]
         assert ctx.skill_roadmap["stages"]
