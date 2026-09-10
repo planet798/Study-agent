@@ -222,6 +222,7 @@ class JdRepository:
         raw_text: str = "",
         parsed: dict | None = None,
         uploaded_at: str | None = None,
+        content_hash: str = "",
     ) -> dict:
         row = {
             "company": (company or "").strip(),
@@ -231,14 +232,16 @@ class JdRepository:
             "raw_text": raw_text or "",
             "parsed": _enc(parsed or {}),
             "uploaded_at": uploaded_at or datetime.date.today().isoformat(),
+            "content_hash": (content_hash or "").strip(),
         }
         cur = self.conn.execute(
             "INSERT INTO jds (company, title, direction, intern_requirement,"
-            " raw_text, parsed, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " raw_text, parsed, uploaded_at, content_hash)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 row["company"], row["title"], row["direction"],
                 row["intern_requirement"], row["raw_text"], row["parsed"],
-                row["uploaded_at"],
+                row["uploaded_at"], row["content_hash"],
             ),
         )
         self.conn.commit()
@@ -261,9 +264,17 @@ class JdRepository:
         ).fetchall()
         return [self._from_row(r) for r in rows]
 
+    def get_by_content_hash(self, content_hash: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM jds WHERE content_hash = ? "
+            "ORDER BY id ASC LIMIT 1",
+            ((content_hash or "").strip(),),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
     def update(self, jd_id: int, **fields) -> dict | None:
         allowed = {"company", "title", "direction", "intern_requirement",
-                   "raw_text", "parsed", "uploaded_at"}
+                   "raw_text", "parsed", "uploaded_at", "content_hash"}
         if "parsed" in fields:
             fields["parsed"] = _enc(fields["parsed"])
         sets = {k: v for k, v in fields.items() if k in allowed}

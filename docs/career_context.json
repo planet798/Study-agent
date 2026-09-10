@@ -88,6 +88,7 @@
       "Python",
       "PyTorch",
       "Transformer",
+      "LLM 基础",
       "Hugging Face",
       "SFT",
       "LoRA / QLoRA",
@@ -190,7 +191,7 @@
     ],
     "priority": {
       "must_master": [
-        "Python", "PyTorch", "Transformer", "Hugging Face", "SFT",
+        "Python", "PyTorch", "Transformer", "LLM 基础", "Hugging Face", "SFT",
         "LoRA / QLoRA", "Embedding", "RAG", "推荐系统基础", "Recall", "Ranking"
       ],
       "should_master": [

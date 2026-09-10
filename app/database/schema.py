@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -376,6 +376,29 @@ def _migrate_v6(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[6] = _migrate_v6
+
+
+# ============================================================
+# v7：jds 增加 content_hash（Phase B，幂等入库用）
+# ============================================================
+# 同一 JD 重复入库时以规范化文本哈希去重，避免 frequency 重复累计。
+
+
+def _migrate_v7(conn: sqlite3.Connection) -> None:
+    """v7：jds 增加 content_hash 列 + 索引（幂等）。"""
+    add_column_if_not_exists(
+        conn,
+        "jds",
+        "content_hash",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jds_content_hash ON jds(content_hash)"
+    )
+    conn.commit()
+
+
+_MIGRATIONS[7] = _migrate_v7
 
 
 def get_schema_version(conn) -> int:
