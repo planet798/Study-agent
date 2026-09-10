@@ -454,7 +454,12 @@ class SkillService:
         return seeded
 
     def _seed_links_from_keywords(self, skill_names: list[str]) -> None:
-        """用 skill→关键词 规则建立 topic 映射（只链到已存在的主题）。"""
+        """用 skill→关键词 规则建立 topic 映射（只链到已存在的主题）。
+
+        只链“同阶段可直达”的技能；阶段内后置主题（如 Tokenizer / HF
+        Transformers）故意不链到依赖它的技能（LLM 基础 / Hugging Face），
+        否则会被前置门禁当成“未达标”而一直不生成，导致当前阶段卡死。
+        """
         keywords = {
             "Python": ["Python 语法与基础练习", "Python 面向对象与常用库"],
             "Linux": ["Linux 常用命令与工具链"],
@@ -466,9 +471,6 @@ class SkillService:
                 "最小线性回归训练闭环（y=2x+1）",
             ],
             "Transformer": ["Transformer：Attention / MHA / FFN"],
-            "LLM": ["Tokenize 与分词", "Tokenizer 与分词",
-                    "Qwen / LLaMA 架构：GQA / SwiGLU"],
-            "Hugging Face": ["Hugging Face Transformers"],
             "Embedding": ["Embedding 与向量检索"],
             "RAG": ["RAG 全流程搭建"],
             "Ranking": ["Reranker 重排序", "RRF 排序融合"],

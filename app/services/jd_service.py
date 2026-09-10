@@ -244,19 +244,21 @@ class JdService:
         for name in self._existing_skill_names():
             kws = _SKILL_KEYWORDS.get(name, [name])
             seg_plus = False
-            appeared = False
+            seg_must = False
             for seg in segments:
-                if any(_word_contains(kw, seg.lower()) for kw in kws):
-                    appeared = True
-                    if any(m in seg for m in _PLUS_MARKERS):
-                        seg_plus = True
-            if not appeared:
+                if not any(_word_contains(kw, seg.lower()) for kw in kws):
+                    continue
+                if any(m in seg for m in _PLUS_MARKERS):
+                    seg_plus = True
+                else:
+                    seg_must = True  # 出现在无加分标记的语段
+            if not (seg_plus or seg_must):
                 continue
-            # 同一 JD/同一技能：must 优先于 plus
-            if seg_plus:
-                plus.append(name)
-            else:
+            # 同一 JD / 同一技能：must 优先于 plus
+            if seg_must:
                 must.append(name)
+            else:
+                plus.append(name)
 
         order = self._existing_skill_names()
         must.sort(key=lambda x: order.index(x))

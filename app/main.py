@@ -221,12 +221,33 @@ def main() -> int:
     from app.database.assessment_repository import AssessmentRepository
 
     assessment_repo = AssessmentRepository(conn)
-    study_plan_service = StudyPlanService(repo, plan_repo,
-                                          assessment_repo=assessment_repo)
+    # Phase A/C：技能 + JD（SkillService 确定性优先级；不注入则行为与旧版一致）
+    from app.database.skill_repository import JdRepository, SkillRepository
+    from app.services.skill_service import SkillService
+
+    skill_repo = SkillRepository(conn)
+    skill_service = SkillService(
+        skill_repo, plan_repo=plan_repo, assessment_repo=assessment_repo
+    )
+    study_plan_service = StudyPlanService(
+        repo, plan_repo,
+        assessment_repo=assessment_repo,
+        skill_service=skill_service,
+    )
     study_plan_service.ensure_default_plan()
+
+    # 技能池为空时按 career_context 幂等 seed 并链接到现有主题（不覆盖已维护状态）
+    if not skill_repo.list_all():
+        skill_service.seed_from_career_context()
+        skill_service.recompute_all_priority_scores()
 
     # AI 配置读取环境变量；未配置时 GUI 正常运行（本地功能不受影响）
     ai_client = DeepSeekClient()
+    from app.services.jd_service import JdService
+
+    jd_service = JdService(
+        JdRepository(conn), skill_repo, skill_service, ai_client=ai_client
+    )
     # 长期学习上下文（职业目标/JD/技能路线/能力状态）：作为 AI 规划的长期依据；
     # 文件缺失/非法时返回 None，Planner 自动降级为旧行为，不影响启动。
     long_term_context = load_long_term_context()
@@ -239,6 +260,8 @@ def main() -> int:
         ),
         study_plan_service=study_plan_service,
         assessment_repo=assessment_repo,
+        skill_service=skill_service,
+        jd_service=jd_service,
     )
     date_service = DateService(
         repo,

@@ -116,6 +116,11 @@ PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是个人学习规划助手。
     学习计划顺序决定，你只能在当前阶段内调整“下一步学什么”。
 13. 已完成且掌握度较高的知识点不要重复安排基础任务；已存在 active/not_done 的
     同知识点正式任务不要重复创建。
+14. skill_priorities / jd_gap_skills / weekly_focus 由 SkillService 依据
+    技能池 + 真实 JD 频率 + 掌握证据 + 前置门禁计算，只决定当前阶段内“下一步”的
+    相对优先级，不是路线控制器：不得仅凭 JD 高频或高分跳过当前阶段；不得为
+    prerequisite_blocked（前置未满足）的技能越级安排任务；已掌握技能不因 JD 高频
+    而重复安排。
 
 你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
 
@@ -143,6 +148,9 @@ def build_planner_user_prompt(context: "object", long_term: "object | None" = No
     evidence_section = build_knowledge_evidence_section(context)
     if evidence_section:
         lines.extend(["", evidence_section])
+    skill_section = build_skill_priority_section(context)
+    if skill_section:
+        lines.extend(["", skill_section])
     long_term_section = build_long_term_context_section(long_term)
     if long_term_section:
         lines.extend(["", long_term_section])
@@ -153,7 +161,7 @@ def build_planner_user_prompt(context: "object", long_term: "object | None" = No
 
 
 def build_knowledge_evidence_section(context: "object") -> str:
-    """把 PlanningContext.knowledge_evidence 渲染为 Prompt 段落；无证据返回空串。
+    """把 PlanningContext.knowledge_evidence 渲染为 Prompt 段；无证据返回空串。
 
     只有确实有验收证据的知识点会出现在这里；绝不伪造 mastery。
     """
@@ -181,6 +189,55 @@ def build_knowledge_evidence_section(context: "object") -> str:
     lines.append(
         "用途：只用于调整‘下一步学什么’的优先级与针对性；不要据此跳过整个阶段，"
         "不要代替复习调度；不要重复已掌握/正在复习的内容。"
+    )
+    return "\n".join(lines)
+
+
+def build_skill_priority_section(context: "object") -> str:
+    """把 Phase C 的 技能优先级 / JD 缺口 / 前置阻塞 / 每周预览 渲染为 Prompt 段。
+
+    skill_priorities / jd_gap 等都为空时不输出（保持旧行为）。
+    """
+    sp = getattr(context, "skill_priorities", None)
+    gap = getattr(context, "jd_gap_skills", None)
+    blocked = getattr(context, "prerequisite_blocked", None)
+    weekly = getattr(context, "weekly_focus", None)
+    if not any([sp, gap, blocked, weekly]):
+        return ""
+    lines = [
+        "【技能优先级 / JD 缺口】（SkillService 依据 技能池 + 真实 JD 频率 + 掌握证据 + 前置门禁 计算；"
+        "只决定当前阶段内“下一步”的相对优先级）"
+    ]
+    if sp:
+        lines.append("- 近期技能优先级：")
+        for i, s in enumerate(list(sp)[:8], 1):
+            lines.append(f"  {i}. {s.skill}（{s.tier}级，score={s.score:.3f}）：{s.reason}")
+    if gap:
+        lines.append("- JD 缺口（企业需求但未掌握）：")
+        for g in list(gap)[:10]:
+            mastery_txt = (
+                f"{g.mastery:.2f}" if g.mastery is not None else "无验收"
+            )
+            flag = "（前置阻塞，不得直接安排）" if g.blocked else ""
+            lines.append(
+                f"  - {g.skill}：must×{g.jd_must_count} / plus×{g.jd_plus_count}，"
+                f"mastery={mastery_txt}{flag}"
+            )
+    if blocked:
+        lines.append("- 前置未满足（不得越级安排）：")
+        for b in list(blocked)[:10]:
+            lines.append(f"  - {b.skill}（缺：{'、'.join(b.missing) or '未知'}）")
+    if weekly:
+        lines.append("- 未来 1~2 周学习形状（纯规则预览，不写任务）：")
+        for w in list(weekly)[:7]:
+            line = "、".join(w.skills) if w.skills else "—"
+            lines.append(f"  - {w.date}: {line}")
+    lines.append(
+        "职责与边界：career_context=长期职业方向；study_plan=当前阶段；"
+        "skill_priorities / JD 缺口=近期优先级；knowledge_evidence=实际掌握情况；"
+        "ReviewService=到期复习；ExtraTaskService=用户主动额外学习。"
+        "Planner 只能决定“当前阶段下一步优先学什么”，并从 available_topics 中选取："
+        "不得跳阶段、不得越级安排前置未满足的技能、不要重复已掌握内容。"
     )
     return "\n".join(lines)
 

@@ -69,6 +69,43 @@ class KnowledgeEvidence:
 
 
 @dataclass
+class SkillPriority:
+    """近期应重点的技能（Phase C；SkillService 计算，只影响近期优先级）。"""
+
+    skill: str
+    tier: str = ""
+    score: float = 0.0
+    reason: str = ""
+
+
+@dataclass
+class JdGapSkill:
+    """JD 强需求但当前未掌握/未开始的技能（企业需求缺口）。"""
+
+    skill: str
+    jd_must_count: int = 0
+    jd_plus_count: int = 0
+    mastery: float | None = None
+    blocked: bool = False
+
+
+@dataclass
+class PrerequisiteBlocked:
+    """前置依赖未满足、被门禁阻塞的技能（不得越级安排）。"""
+
+    skill: str
+    missing: list[str] = field(default_factory=list)
+
+
+@dataclass
+class WeeklyFocus:
+    """未来某一天应优先的技能（纯规则预览，不写 tasks）。"""
+
+    date: str = ""
+    skills: list[str] = field(default_factory=list)
+
+
+@dataclass
 class PlanningContext:
     """传给 AI 用于规划下一天的完整上下文。"""
 
@@ -81,6 +118,13 @@ class PlanningContext:
     postponed_tasks: list[ContextTask] = field(default_factory=list)
     completed_tasks: list[ContextTask] = field(default_factory=list)
     knowledge_evidence: list[KnowledgeEvidence] = field(default_factory=list)
+    # Phase C：JD / Skill 优先级上下文
+    skill_priorities: list[SkillPriority] = field(default_factory=list)
+    jd_gap_skills: list[JdGapSkill] = field(default_factory=list)
+    prerequisite_blocked: list[PrerequisiteBlocked] = field(
+        default_factory=list
+    )
+    weekly_focus: list[WeeklyFocus] = field(default_factory=list)
     estimated_minutes: int = 0
     actual_completed_minutes: int = 0
     current_daily_limit: int = 180
@@ -133,6 +177,39 @@ class PlanningContext:
                     "recent_result_level": e.recent_result_level,
                 }
                 for e in self.knowledge_evidence
+            ],
+            "skill_priorities": [
+                {
+                    "skill": s.skill,
+                    "tier": s.tier,
+                    "score": s.score,
+                    "reason": s.reason,
+                }
+                for s in self.skill_priorities
+            ],
+            "jd_gap_skills": [
+                {
+                    "skill": g.skill,
+                    "jd_must_count": g.jd_must_count,
+                    "jd_plus_count": g.jd_plus_count,
+                    "mastery": g.mastery,
+                    "blocked": g.blocked,
+                }
+                for g in self.jd_gap_skills
+            ],
+            "prerequisite_blocked": [
+                {
+                    "skill": b.skill,
+                    "missing": list(b.missing),
+                }
+                for b in self.prerequisite_blocked
+            ],
+            "weekly_focus": [
+                {
+                    "date": w.date,
+                    "skills": list(w.skills),
+                }
+                for w in self.weekly_focus
             ],
             "estimated_minutes": self.estimated_minutes,
             "actual_completed_minutes": self.actual_completed_minutes,

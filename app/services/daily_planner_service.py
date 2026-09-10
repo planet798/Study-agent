@@ -23,8 +23,12 @@ from ..ai.planner_context import (
     ContextTask,
     ContextTopic,
     DaySummary,
+    JdGapSkill,
     KnowledgeEvidence,
     PlanningContext,
+    PrerequisiteBlocked,
+    SkillPriority,
+    WeeklyFocus,
 )
 from ..database.repository import Task, TaskRepository
 from ..database.schema import STATUS_ACTIVE, STATUS_DONE, STATUS_NOT_DONE
@@ -47,6 +51,8 @@ class DailyPlannerService:
         study_plan_service: StudyPlanService | None = None,
         max_daily_minutes: int = MAX_DAILY_STUDY_MINUTES,
         assessment_repo=None,
+        skill_service=None,
+        jd_service=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -58,6 +64,9 @@ class DailyPlannerService:
         self.max_daily_minutes = max_daily_minutes
         # 可选：读取 knowledge_points / assessment_attempts 作为掌握证据（Phase 8）
         self.assessment_repo = assessment_repo
+        # 可选：SkillService 与 JdService（Phase C）；不注入则字段为空、行为与旧版一致
+        self.skill_service = skill_service
+        self.jd_service = jd_service
 
     # ================= 幂等保护 =================
 
@@ -103,7 +112,68 @@ class DailyPlannerService:
         ctx.current_daily_limit = self.max_daily_minutes
         # Phase 8：把真实验收证据放进上下文（无证据的知识点不出现，不伪造 mastery）
         self._fill_knowledge_evidence(ctx, plan_next_date)
+        # Phase C：JD / 技能 / 四周优先级上下文（无注入时保持空、兼容）
+        self._fill_skill_context(ctx, plan_next_date)
         return ctx
+
+    def _fill_skill_context(self, ctx: PlanningContext, plan_date: str) -> None:
+        """用 SkillService/JdService 的结果填充技能上下文；不重复计算优先级。"""
+        skill_service = self.skill_service
+        if skill_service is None:
+            return
+
+        # 1) 近期技能优先级（SkillService 计算，仅 gate 放行的可学技能）
+        try:
+            candidates = skill_service.select_active_candidates(limit=8)
+        except Exception:  # noqa: BLE001 - 技能数据异常不影响规划
+            candidates = []
+        ctx.skill_priorities = [
+            SkillPriority(
+                skill=d["name"],
+                tier=d["tier"],
+                score=d["score"],
+                reason=_skill_reason(d),
+            )
+            for d in candidates
+        ]
+
+        # 2) JD 缺口（企业需求但未掌握）
+        all_skills = skill_service.skill_repo.list_all()
+        gaps = []
+        blocked_entries = []
+        for s in all_skills:
+            freq = s.get("jd_frequency") or {}
+            has_jd = bool(freq.get("must") or freq.get("plus"))
+            blocked = skill_service.is_blocked(s)
+            mastery = skill_service._mastery_for_skill(s)
+            if s["status"] in ("not_started", "learning") and (has_jd or blocked):
+                gaps.append(JdGapSkill(
+                    skill=s["name"],
+                    jd_must_count=int(freq.get("must") or 0),
+                    jd_plus_count=int(freq.get("plus") or 0),
+                    mastery=mastery,
+                    blocked=blocked,
+                ))
+            if blocked and has_jd:
+                blocked_entries.append(PrerequisiteBlocked(
+                    skill=s["name"],
+                    missing=list(skill_service.missing_prerequisites(s)),
+                ))
+        ctx.jd_gap_skills = gaps[:12]
+        ctx.prerequisite_blocked = blocked_entries[:10]
+
+        # 3) 未来 1~2 周学习形状（纯规则预览，不写 tasks）
+        if self.jd_service is not None:
+            try:
+                weekly = self.jd_service.preview_weekly_priorities(
+                    plan_date, days=7, top_each_day=3
+                )
+                ctx.weekly_focus = [
+                    WeeklyFocus(date=d["date"], skills=d["skills"])
+                    for d in weekly["daily_focus"]
+                ]
+            except Exception:  # noqa: BLE001 - 预览异常不影响规划
+                ctx.weekly_focus = []
 
     def _fill_knowledge_evidence(
         self, ctx: PlanningContext, plan_date: str
@@ -319,6 +389,11 @@ class DailyPlannerService:
 
             evidence_skip = skip_topic_ids(self.repo, self.assessment_repo)
 
+        # Phase C：技能视图（前置 gate；已掌握不重复由 Phase 8 验收证据负责）
+        blocked_ids, _ = self.study_plan_service.skill_topic_views(
+            current_phase.topics if current_phase is not None else []
+        )
+
         # 推荐任务校验（不实际创建，先全部校验）
         to_create: list = []
         seen_topic_ids: set[int] = set()
@@ -328,6 +403,12 @@ class DailyPlannerService:
                 continue
             if rec.topic_id in done_topic_ids:
                 problems.append(f"topic_id {rec.topic_id} 已完成，不应重新生成")
+                continue
+            if rec.topic_id in blocked_ids:
+                # 前置关键技能未满足：即使 JD 高分也不能越级安排
+                problems.append(
+                    f"topic_id {rec.topic_id} 对应技能前置未满足（gate blocked）"
+                )
                 continue
             if rec.topic_id in evidence_skip:
                 # 已掌握/复习进行中：不生成正式新任务，也不判为规划失败
@@ -466,3 +547,21 @@ def _is_recent_unfinished(task: Task, plan_date: str) -> bool:
         return True
     # active：只允许日期早于目标日，或已经排在目标日（延期进来）
     return task.scheduled_date <= plan_date
+
+
+def _skill_reason(d: dict) -> str:
+    """把 SkillService 的评分明细渲染成可读的优先级理由。"""
+    parts = []
+    freq = d.get("jd_frequency") or {}
+    if freq.get("must"):
+        parts.append(f"JD must×{freq['must']}")
+    if freq.get("plus"):
+        parts.append(f"JD plus×{freq['plus']}")
+    mastery = d.get("mastery_estimate")
+    parts.append(
+        f"mastery={mastery:.2f}" if mastery is not None else "未验收"
+    )
+    if d.get("gate") == "blocked":
+        parts.append("前置未满足")
+    suffix = "；".join(parts) if parts else "基础优先级"
+    return f"{d.get('tier', '')}级；{suffix}"

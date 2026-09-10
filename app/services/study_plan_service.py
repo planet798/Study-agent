@@ -121,6 +121,7 @@ class StudyPlanService:
         plan_repo: StudyPlanRepository | None = None,
         max_daily_minutes: int = MAX_DAILY_STUDY_MINUTES,
         assessment_repo=None,
+        skill_service=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -128,6 +129,9 @@ class StudyPlanService:
         self.max_daily_minutes = max_daily_minutes
         # 可选：读到知识掌握证据，用于“薄弱优先 / 高掌握与复习中不重复”（Phase 8）
         self.assessment_repo = assessment_repo
+        # 可选：SkillService，用于“JD/技能优先级 + 前置门禁”（Phase C）；
+        # 不注入时行为与旧版完全一致（无 jd_boost / 无 gate）
+        self.skill_service = skill_service
         self._default_plan_created = False
 
     # ================= 默认研一计划 =================
@@ -329,6 +333,7 @@ class StudyPlanService:
             "skipped_done": [],
             "skipped_duplicate": [],
             "skipped_budget": [],
+            "skipped_gate": [],
         }
         phase = self.get_current_phase(date_str)
         if phase is None:
@@ -361,12 +366,20 @@ class StudyPlanService:
             weak_ids = weak_topic_ids(self.repo, self.assessment_repo)
             skip_ids = skip_topic_ids(self.repo, self.assessment_repo)
 
-        # 按优先级高在前排；同优先级内薄弱主题提前（削弱“只按纯数字顺序”依赖）
+        # 技能视图（Phase C；仅在有 skill_service 时生效）
+        # blocked_ids : 前置未满足 → 绝不生成（skipped_gate）
+        # jd_boost    : topic_id -> 关联技能的 JD 频次强度（0~1，max over skills）
+        blocked_ids, jd_boost = self.skill_topic_views(phase.topics)
+
+        # 优先级排序（Phase C）：
+        # 1. 前置满足（gate ok 在前） 2. 薄弱点 3. JD must/plus 4. 主题优先级 5. 原始顺序
         topics = sorted(
             phase.topics,
             key=lambda t: (
-                -t.priority,
+                int(t.id in blocked_ids),
                 -int(t.id in weak_ids),
+                -jd_boost.get(t.id, 0.0),
+                -t.priority,
                 t.order_index,
             ),
         )
@@ -374,6 +387,10 @@ class StudyPlanService:
         for topic in topics:
             if topic.id in done_topic_ids or topic.id in skip_ids:
                 result["skipped_done"].append(topic.id)
+                continue
+            if topic.id in blocked_ids:
+                # 前置关键技能未满足：即使 JD 高频也不能生成
+                result["skipped_gate"].append(topic.id)
                 continue
             if topic.id in active_topic_ids:
                 result["skipped_duplicate"].append(topic.id)
@@ -419,3 +436,45 @@ class StudyPlanService:
             (STATUS_DONE,),
         ).fetchall()
         return {r["topic_id"] for r in rows}
+
+    # ================= 技能视图（Phase C） =================
+
+    def skill_topic_views(
+        self, topics
+    ) -> tuple[set[int], dict[int, float]]:
+        """按主题计算技能维度信息（仅当注入 skill_service 时不为空）。
+
+        :return: (blocked_topic_ids, jd_boost)
+        - blocked_ids : 关联技能被前置门禁阻塞的主题（绝不生成）
+        - jd_boost    : topic_id -> 关联技能 JD 频次强度的最大值（0~1）
+
+        注意：
+        - “已掌握不重复”不在此处处理——它由 Phase 8 的验收证据（mastery>=0.85
+          且最近 good/excellent）驱动（knowledge_evidence.skip_topic_ids），
+          而不是用 career_context 静态 seed 的 mastered status，
+          避免把“已会”误判成“不用学而卡住阶段”。
+        """
+        blocked: set[int] = set()
+        jd_boost: dict[int, float] = {}
+        if self.skill_service is None:
+            return blocked, jd_boost
+        for t in topics:
+            names = self.skill_service.skills_for_topic(t.id)
+            if not names:
+                continue
+            skill_blocked = False
+            boost = 0.0
+            for name in names:
+                skill = self.skill_service.skill_repo.get_by_name(name)
+                if skill is None:
+                    continue
+                detail = self.skill_service.compute_skill_score(skill)
+                if detail.get("gate") == "blocked":
+                    skill_blocked = True
+                boost = max(
+                    boost, self.skill_service.jd_factor(skill.get("jd_frequency"))
+                )
+            if skill_blocked:
+                blocked.add(t.id)
+            jd_boost[t.id] = boost
+        return blocked, jd_boost
