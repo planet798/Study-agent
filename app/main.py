@@ -296,6 +296,13 @@ def main() -> int:
     # 真正退出只由托盘菜单“退出”触发（QApplication.quit）
     app.setQuitOnLastWindowClosed(False)
 
+    # 单实例：若已有一个实例在运行，通知其恢复前台后本进程退出
+    from app.utils.single_instance import SingleInstanceGuard
+
+    guard = SingleInstanceGuard()
+    if not guard.acquire():
+        return 0
+
     # 3) 组装依赖：SQLite -> Repository -> Service -> UI（UI 不直接碰 SQLite）
     conn = get_connection()
     repo = TaskRepository(conn)
@@ -424,6 +431,9 @@ def main() -> int:
         outcome_service=outcome_service,
         notes_service=notes_service,
     )
+    # 新实例启动请求 → 恢复/前置已有唯一实例（从托盘恢复或直接激活）
+    if hasattr(window, "_restore_from_tray"):
+        guard.restore_requested.connect(window._restore_from_tray)
     window.show()
     return app.exec()
 

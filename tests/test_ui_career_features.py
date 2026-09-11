@@ -196,20 +196,7 @@ class TestJdPanel:
         assert len(env["jd"].jd_repo.list_all()) == before + 1
 
 
-class TestOutcomesPanel:
-    def test_outcomes_shown(self, qtbot, conn, plan_repo):
-        env = _make_env(conn, plan_repo)
-        w = _window(qtbot, env)
-        txt = _label_text(w)
-        assert "今日学习成果" in txt
-        assert "双塔召回实验" in txt
-        assert "技术栈" in txt
-
-    def test_outcomes_empty_state(self, qtbot, conn, plan_repo):
-        env = _make_env(conn, plan_repo, with_outcome=False)
-        w = _window(qtbot, env)
-        assert "暂无学习成果" in _label_text(w)
-
+class TestResumeMaterialDialog:
     def test_resume_material_dialog(self, qtbot, conn, plan_repo):
         env = _make_env(conn, plan_repo)
         dlg = ResumeMaterialDialog(env["lo"],
@@ -221,37 +208,6 @@ class TestOutcomesPanel:
         assert "双塔召回实验" in text
         assert "技术栈" in text
         assert "recall@20=0.31" in text  # 真实指标
-
-
-class TestObsidianExport:
-    def test_export_button_present(self, qtbot, conn, plan_repo):
-        env = _make_env(conn, plan_repo)
-        w = _window(qtbot, env)
-        btns = [b.text() for b in w.list_container.findChildren(QPushButton)]
-        assert any("导出今日 Obsidian 笔记" in b for b in btns)
-
-    def test_export_success(self, qtbot, conn, plan_repo, tmp_path, monkeypatch):
-        import app.services.notes_service as notes_module
-
-        env = _make_env(conn, plan_repo)
-        monkeypatch.setattr(notes_module, "DEFAULT_OUTPUT_DIR", tmp_path / "v")
-        w = _window(qtbot, env)
-        w._on_export_note()
-        assert "已导出" in w.statusBar().currentMessage()
-        assert (tmp_path / "v" / f"{TODAY}.md").exists()
-
-    def test_export_failure_shows_error_without_crash(
-        self, qtbot, conn, plan_repo, monkeypatch
-    ):
-        env = _make_env(conn, plan_repo)
-
-        def boom(date, output_dir=None):
-            raise OSError("磁盘不可写")
-
-        monkeypatch.setattr(env["ns"], "export_daily_note", boom)
-        w = _window(qtbot, env)
-        w._on_export_note()
-        assert "导出失败" in w.statusBar().currentMessage()
 
 
 class TestStates:
@@ -426,7 +382,7 @@ class TestReadableButtons:
         from PySide6.QtGui import QColor, QPalette
 
         w = self._window_with_all(qtbot, conn, plan_repo)
-        targets = ("继续学习 / 生成额外任务", "添加 JD", "导出今日 Obsidian 笔记")
+        targets = ("继续学习 / 生成额外任务", "添加 JD")
         found = self._buttons_by_text(w)
         assert set(targets) <= set(found)
         for text in targets:

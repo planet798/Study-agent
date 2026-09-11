@@ -25,10 +25,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -40,7 +38,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..database.schema import STATUS_DONE
 from ..services.date_service import DateService
 from ..services.task_review_service import TaskReviewService
 from ..services.task_service import TaskService
@@ -116,8 +113,6 @@ class MainWindow(QMainWindow):
         self.jd_service = jd_service
         self.outcome_service = outcome_service
         self.notes_service = notes_service
-        # Obsidian 笔记导出目录（None 用 NotesService 默认 docs/obsidian/）
-        self._note_dir: str | None = None
 
         self._task_widgets: list[TaskWidget] = []
         self._quit_requested = False
@@ -233,30 +228,6 @@ class MainWindow(QMainWindow):
         self.empty_hint.setObjectName("EmptyHint")
         self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root_today.addWidget(self.empty_hint)
-
-        # 今日统计栏
-        stats = QWidget()
-        stats.setObjectName("StatsBar")
-        sbox = QVBoxLayout(stats)
-        sbox.setContentsMargins(14, 10, 14, 10)
-        sbox.setSpacing(6)
-        self.stats_title = QLabel("今日进度")
-        self.stats_title.setObjectName("StatsTitle")
-        sbox.addWidget(self.stats_title)
-
-        self.stat_progress = QLabel("完成 0 / 总任务 0")
-        self.stat_rate = QLabel("完成率：0%")
-        self.stat_estimated = QLabel("预计学习时间：0 分钟")
-        self.stat_done_time = QLabel("已完成学习时间：0 分钟")
-        for lbl in (
-            self.stat_progress,
-            self.stat_rate,
-            self.stat_estimated,
-            self.stat_done_time,
-        ):
-            lbl.setObjectName("StatsValue")
-            sbox.addWidget(lbl)
-        root_today.addWidget(stats)
 
         self.stack.addWidget(today_page)
 
@@ -380,11 +351,10 @@ class MainWindow(QMainWindow):
             self._add_section_header("课外探索")
             self._add_exploration()
 
-        # Phase E：职业 / 技能 / JD / 成果面板（可选注入，异常不崩溃）
+        # Phase E：职业 / 技能 / JD 面板（可选注入，异常不崩溃）
         self._add_recent_focus_skills()
         self._add_skill_status()
         self._add_jd_panel()
-        self._add_today_outcomes()
 
         self.list_layout.addStretch()
 
@@ -398,7 +368,6 @@ class MainWindow(QMainWindow):
         )
         self.empty_hint.setVisible(not has_content)
         self.scroll.setVisible(scroll_visible)
-        self._refresh_stats(today_str)
 
     # ---------- 今日页区域构建 ----------
 
@@ -637,70 +606,6 @@ class MainWindow(QMainWindow):
         abw.setLayout(ab)
         self.list_layout.addWidget(abw)
 
-    def _add_today_outcomes(self) -> None:
-        """今日学习成果：概览 + 成果列表 + 简历素材 + Obsidian 导出。"""
-        if self.outcome_service is None:
-            return
-        self._career_panel_added = True
-        self._add_section_header("今日学习成果")
-        try:
-            outcomes = self.outcome_service.list_by_date(self.current_date)
-        except Exception:  # noqa: BLE001
-            self._add_label("学习成果服务异常", object_name="QErrorMessage")
-            return
-        tasks = getattr(self, "_today_tasks", None) or []
-        done = sum(1 for t in tasks if t.status == STATUS_DONE)
-        assessed = sum(1 for o in outcomes
-                       if o.get("source_attempt_id") is not None)
-        weak_count = 0
-        for o in outcomes:
-            if o.get("kind") == "note" and "薄弱" in o.get("title", ""):
-                weak_count += 1
-        self._add_label(
-            f"今日完成 {done} 个任务 ｜ 验收记录 {assessed} ｜ "
-            f"薄弱记录 {weak_count} ｜ 成果 {len(outcomes)} 条"
-        )
-        if outcomes:
-            for o in outcomes[-5:]:
-                meta = f"{o.get('title')}（{o.get('kind')}）"
-                if o.get("tech_stack"):
-                    meta += " ｜ 技术栈：" + "、".join(o["tech_stack"])
-                if o.get("metrics"):
-                    meta += " ｜ 指标：" + "、".join(
-                        f"{k}={v}" for k, v in o["metrics"].items())
-                if o.get("github_url"):
-                    meta += " ｜ 代码：" + o["github_url"]
-                if o.get("dataset"):
-                    meta += " ｜ 数据集：" + o["dataset"]
-                self._add_label(meta)
-        else:
-            self._add_label("暂无学习成果")
-        # 简历素材 + Obsidian 导出
-        bar = QWidget()
-        brow = QHBoxLayout(bar)
-        brow.setContentsMargins(0, 0, 0, 0)
-        resume_btn = QPushButton("简历素材")
-        resume_btn.setObjectName("SecondaryButton")
-        apply_secondary_button_text(resume_btn)
-        resume_btn.clicked.connect(self._on_view_resume)
-        export_btn = QPushButton("导出今日 Obsidian 笔记")
-        export_btn.setObjectName("SecondaryButton")
-        apply_secondary_button_text(export_btn)
-        export_btn.clicked.connect(self._on_export_note)
-        pick_btn = QPushButton("选择目录…")
-        pick_btn.setObjectName("PostponeButton")
-        pick_btn.clicked.connect(self._on_choose_note_dir)
-        brow.addWidget(resume_btn)
-        brow.addWidget(export_btn)
-        brow.addWidget(pick_btn)
-        brow.addStretch()
-        self.list_layout.addWidget(bar)
-        self._note_dir_label = QLabel(
-            self._note_dir or "默认导出目录：docs/obsidian/"
-        )
-        self._note_dir_label.setObjectName("TaskMeta")
-        self.list_layout.addWidget(self._note_dir_label)
-
     # ---------- 职业面板处理器 ----------
 
     def _on_add_jd(self) -> None:
@@ -719,39 +624,6 @@ class MainWindow(QMainWindow):
         from .career_dialogs import JdDetailDialog
 
         JdDetailDialog(self.jd_service, jd, parent=self).exec()
-
-    def _on_view_resume(self) -> None:
-        from .career_dialogs import ResumeMaterialDialog
-
-        outcomes = []
-        if self.outcome_service is not None:
-            try:
-                outcomes = self.outcome_service.list_by_date(self.current_date)
-            except Exception:  # noqa: BLE001
-                outcomes = []
-        ResumeMaterialDialog(self.outcome_service, outcomes, parent=self).exec()
-
-    def _on_export_note(self) -> None:
-        if self.notes_service is None:
-            self.statusBar().showMessage("笔记服务不可用", 3000)
-            return
-        try:
-            res = self.notes_service.export_daily_note(
-                self.current_date, output_dir=self._note_dir or None
-            )
-        except OSError as e:  # noqa: BLE001 - 导出失败只提示，不崩溃
-            self.statusBar().showMessage(f"导出失败：{e}", 6000)
-            return
-        self.statusBar().showMessage(f"已导出：{res['path']}", 8000)
-
-    def _on_choose_note_dir(self) -> None:
-        chosen = QFileDialog.getExistingDirectory(
-            self, "选择 Obsidian 笔记目录", self._note_dir or ""
-        )
-        if chosen:
-            self._note_dir = chosen
-            if getattr(self, "_note_dir_label", None) is not None:
-                self._note_dir_label.setText(chosen)
 
     # ---------- 验收流程 ----------
 
@@ -898,20 +770,6 @@ class MainWindow(QMainWindow):
             msg += f"，移除了 {len(cleaned_ids)} 个旧生成任务"
         self.statusBar().showMessage(msg, 5000)
 
-    def _refresh_stats(self, today_str: str) -> None:
-        stats = self.task_service.get_daily_stats(today_str)
-        time_stats = self.task_service.get_study_time_stats(today_str)
-        self.stat_progress.setText(
-            f"完成 {stats['done']} / 总任务 {stats['total']}"
-        )
-        self.stat_rate.setText(f"完成率：{stats['rate']:.0f}%")
-        self.stat_estimated.setText(
-            f"预计学习时间：{time_stats['total_minutes']} 分钟"
-        )
-        self.stat_done_time.setText(
-            f"已完成学习时间：{time_stats['done_minutes']} 分钟"
-        )
-
     # ---------- 操作处理 ----------
 
     def _on_complete(self, task_id: int) -> None:
@@ -969,7 +827,6 @@ class MainWindow(QMainWindow):
         """用户选择不延期：保持 not_done，刷新界面。"""
         self.refresh()
         self.statusBar().showMessage("已保持未完成状态", 3000)
-
 
     def _on_postpone(self, task_id: int) -> None:
         task = self.task_service.postpone_task(task_id)

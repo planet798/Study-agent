@@ -75,8 +75,6 @@ class TestCompleteFlow:
         assert len(w._task_widgets) == 1
         assert w._task_widgets[0].task().status == STATUS_DONE
         assert w._task_widgets[0].done_label is not None
-        # 统计更新
-        assert "完成 1 / 总任务 1" in w.stat_progress.text()
 
 
 class TestNotDoneDialog:
@@ -179,28 +177,6 @@ class TestPostponeFlow:
         got = task_service.get_task(t.id)
         assert got.postpone_count == 3
         assert POSTPONE_WARNING in w.statusBar().currentMessage()
-
-
-class TestTodayStats:
-    def test_stats_correct(self, make_window, task_service):
-        # 完成 1 个 30 分钟任务 + 未处理 1 个 40 分钟任务
-        a = task_service.create_task(
-            "数学", scheduled_date="2026-01-05", estimated_minutes=30
-        )
-        task_service.create_task(
-            "英语", scheduled_date="2026-01-05", estimated_minutes=40
-        )
-        task_service.complete_task(a.id)
-        w = make_window()
-        assert w.stat_progress.text() == "完成 1 / 总任务 2"
-        assert w.stat_rate.text() == "完成率：50%"
-        assert w.stat_estimated.text() == "预计学习时间：70 分钟"
-        assert w.stat_done_time.text() == "已完成学习时间：30 分钟"
-
-    def test_stats_empty(self, make_window):
-        w = make_window()
-        assert w.stat_progress.text() == "完成 0 / 总任务 0"
-        assert w.stat_rate.text() == "完成率：0%"
 
 
 class TestStartupDateProcessing:
