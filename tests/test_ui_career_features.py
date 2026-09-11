@@ -42,6 +42,8 @@ from app.database.skill_repository import (
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
 from app.services.date_service import DateService
+from app.services.exploration_service import ExplorationService
+from app.services.extra_task_service import ExtraTaskService
 from app.services.jd_service import JdService
 from app.services.learning_outcome_service import LearningOutcomeService
 from app.services.notes_service import NotesService
@@ -394,3 +396,64 @@ class TestNoRegression:
         # JD 高频但前置未满足的高级技能不被安排（不越级）
         assert "RAG 全流程搭建" not in titles
         assert "Agent 实现与多步编排" not in titles
+
+
+class TestReadableButtons:
+    """小样式修复：三个浅底白字按钮改为复用 SecondaryButton 蓝字风格。"""
+
+    def _window_with_all(self, qtbot, conn, plan_repo):
+        env = _make_env(conn, plan_repo, with_jd=True, with_outcome=True)
+        # 一个 active 任务 -> 出现“完成 / 未完成”按钮
+        env["repo"].create(title="学习任务", scheduled_date=TODAY,
+                           source="generated", task_type="new")
+        extra = ExtraTaskService(
+            env["repo"], study_plan_service=env["sps"],
+            assessment_repo=env["arepo"],
+        )
+        exploration = ExplorationService()
+        w = _window(qtbot, env, extra_service=extra,
+                    exploration_service=exploration)
+        return w
+
+    def _buttons_by_text(self, w):
+        out = {}
+        for b in w.list_container.findChildren(QPushButton):
+            out[b.text()] = b
+        return out
+
+    def test_three_target_buttons_reuse_secondary_blue(self, qtbot, conn,
+                                                        plan_repo):
+        from PySide6.QtGui import QColor, QPalette
+
+        w = self._window_with_all(qtbot, conn, plan_repo)
+        targets = ("继续学习 / 生成额外任务", "添加 JD", "导出今日 Obsidian 笔记")
+        found = self._buttons_by_text(w)
+        assert set(targets) <= set(found)
+        for text in targets:
+            btn = found[text]
+            assert btn.objectName() == "SecondaryButton", text
+            c = btn.palette().color(
+                QPalette.ColorGroup.Active, QPalette.ColorRole.ButtonText
+            )
+            assert (c.red(), c.green(), c.blue()) == QColor(
+                "#2c6fbb"
+            ).getRgb()[:3], f"{text} 文字应为主题蓝"
+
+    def test_shared_secondary_style_covers_all_states(self):
+        from app.ui.styles import APP_STYLE
+
+        assert "QPushButton#SecondaryButton" in APP_STYLE
+        assert "QPushButton#SecondaryButton:hover" in APP_STYLE
+        assert "QPushButton#SecondaryButton:disabled" in APP_STYLE
+        assert "#2c6fbb" in APP_STYLE  # 主题蓝文字
+
+    def test_reference_buttons_not_regressed(self, qtbot, conn, plan_repo):
+        w = self._window_with_all(qtbot, conn, plan_repo)
+        found = self._buttons_by_text(w)
+        # 已有按钮样式保持不变
+        assert found["完成"].objectName() == "SecondaryButton"
+        assert found["未完成"].objectName() == "DangerButton"
+        assert found["打开链接"].objectName() == "SecondaryButton"
+        # “重新规划今天”仍是普通按钮（无 PrimaryButton 白字；非滚动区）
+        assert w.planner_replan_btn.objectName() == ""
+        assert w.planner_replan_btn.text() == "重新规划今天"
