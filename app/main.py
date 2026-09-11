@@ -334,10 +334,14 @@ def main() -> int:
     # AI 配置读取环境变量；未配置时 GUI 正常运行（本地功能不受影响）
     ai_client = DeepSeekClient()
     outcome_service.ai_client = ai_client  # 简历素材的 AI 组织（可选）
-    from app.services.jd_service import JdService
+    from app.services.jd_service import JdService, build_default_parse_ai
 
     jd_service = JdService(
         JdRepository(conn), skill_repo, skill_service, ai_client=ai_client
+    )
+    # UI 里“分析 / 预览”也支持 AI 结构化解析（可选增强；失败回退规则）
+    jd_service.parse_ai = (
+        build_default_parse_ai(ai_client) if ai_client.is_configured() else None
     )
     # 长期学习上下文（职业目标/JD/技能路线/能力状态）：作为 AI 规划的长期依据；
     # 文件缺失/非法时返回 None，Planner 自动降级为旧行为，不影响启动。
@@ -392,6 +396,17 @@ def main() -> int:
 
     # 不显式传 today_provider：MainWindow 默认跟随 date_utils.today()，
     # 因此 --date 注入的日期会自动作用于整个应用（GUI 日期/阶段/任务/统计/AI）。
+    # Phase D：Obsidian 每日笔记（供 UI 导出；未注入则 UI 隐藏导出能力）
+    from app.services.notes_service import NotesService
+
+    notes_service = NotesService(
+        repo=repo,
+        study_plan_service=study_plan_service,
+        outcome_service=outcome_service,
+        assessment_repo=assessment_repo,
+        jd_service=jd_service,
+    )
+
     window = MainWindow(
         task_service=task_service,
         date_service=date_service,
@@ -404,6 +419,10 @@ def main() -> int:
         review_scheduler=review_scheduler,
         extra_service=extra_service,
         exploration_service=exploration_service,
+        skill_service=skill_service,
+        jd_service=jd_service,
+        outcome_service=outcome_service,
+        notes_service=notes_service,
     )
     window.show()
     return app.exec()

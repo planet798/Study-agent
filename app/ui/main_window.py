@@ -24,8 +24,11 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -84,6 +87,10 @@ class MainWindow(QMainWindow):
         review_scheduler=None,
         extra_service=None,
         exploration_service=None,
+        skill_service=None,
+        jd_service=None,
+        outcome_service=None,
+        notes_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -104,6 +111,13 @@ class MainWindow(QMainWindow):
         self.review_scheduler = review_scheduler
         self.extra_service = extra_service
         self.exploration_service = exploration_service
+        # Phase A~E 服务：可选；未传则对应职业面板隐藏（不回归旧行为）
+        self.skill_service = skill_service
+        self.jd_service = jd_service
+        self.outcome_service = outcome_service
+        self.notes_service = notes_service
+        # Obsidian 笔记导出目录（None 用 NotesService 默认 docs/obsidian/）
+        self._note_dir: str | None = None
 
         self._task_widgets: list[TaskWidget] = []
         self._quit_requested = False
@@ -322,9 +336,10 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh(self) -> None:
-        """重建今日页：新知识 / 复习 / 额外 / 课外探索 四个区域 + 统计。"""
+        """重建今日页：新知识 / 复习 / 额外 / 课外探索 + 职业面板 + 统计。"""
         today_str = self.current_date
         tasks = self.task_service.get_tasks_by_date(today_str)
+        self._today_tasks = tasks
 
         self._update_phase_info(today_str)
         self._update_planner_info()
@@ -333,6 +348,7 @@ class MainWindow(QMainWindow):
         self._clear_dynamic_list()
         self._task_widgets.clear()
         self._exploration_added = False
+        self._career_panel_added = False
 
         new_tasks = [t for t in tasks if t.task_type not in ("review", "extra")]
         review_tasks = [t for t in tasks if t.task_type == "review"]
@@ -364,11 +380,23 @@ class MainWindow(QMainWindow):
             self._add_section_header("课外探索")
             self._add_exploration()
 
+        # Phase E：职业 / 技能 / JD / 成果面板（可选注入，异常不崩溃）
+        self._add_recent_focus_skills()
+        self._add_skill_status()
+        self._add_jd_panel()
+        self._add_today_outcomes()
+
         self.list_layout.addStretch()
 
-        has_content = bool(self._task_widgets) or self._exploration_added
-        scroll_visible = bool(tasks) or self._exploration_added
-        self.empty_hint.setVisible(not tasks and not self._exploration_added)
+        has_content = (
+            bool(self._task_widgets)
+            or self._exploration_added
+            or self._career_panel_added
+        )
+        scroll_visible = (
+            bool(tasks) or self._exploration_added or self._career_panel_added
+        )
+        self.empty_hint.setVisible(not has_content)
         self.scroll.setVisible(scroll_visible)
         self._refresh_stats(today_str)
 
@@ -495,6 +523,232 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("已在浏览器中打开", 3000)
         else:
             self.statusBar().showMessage("无法打开链接", 3000)
+
+    # ---------- Phase E：职业面板 ----------
+
+    def _add_label(self, text: str, object_name: str = "TaskMeta",
+                   word_wrap: bool = True) -> None:
+        """往滚动区加一行文本。"""
+        lbl = QLabel(text)
+        lbl.setObjectName(object_name)
+        lbl.setWordWrap(word_wrap)
+        self.list_layout.addWidget(lbl)
+
+    def _add_recent_focus_skills(self) -> None:
+        """近期重点技能 + 当前阶段允许范围（来自 SkillService）。"""
+        if self.skill_service is None:
+            return
+        self._career_panel_added = True
+        self._add_section_header("近期重点技能")
+        try:
+            cands = self.skill_service.select_active_candidates(limit=5)
+            phase_name = ""
+            if self.study_plan_service is not None:
+                ph = self.study_plan_service.get_current_phase(self.current_date)
+                phase_name = ph.name if ph else ""
+            if cands:
+                self._add_label(
+                    "重点：" + " ｜ ".join(d["name"] for d in cands)
+                )
+            else:
+                self._add_label("暂无候选重点技能")
+            scope = (
+                f"当前阶段：{phase_name}；JD/技能只影响本阶段内优先级，"
+                "Agent / RAG 等前置未满足的技能不会被提前安排。"
+                if phase_name else
+                "JD/技能只影响当前阶段内优先级，不越级安排前置未满足的技能。"
+            )
+            self._add_label(scope, object_name="PostponeWarning")
+        except Exception:  # noqa: BLE001
+            self._add_label("技能服务异常", object_name="QErrorMessage")
+
+    def _add_skill_status(self) -> None:
+        """技能状态：S/A 核心 + 状态 + 掌握证据 + 前置阻塞。"""
+        if self.skill_service is None:
+            return
+        self._career_panel_added = True
+        self._add_section_header("技能状态")
+        try:
+            skills = sorted(
+                self.skill_service.skill_repo.list_all(),
+                key=lambda s: (-{"S": 4, "A": 3, "B": 2, "C": 1}.get(
+                    s.get("tier"), 0), s.get("status"), s.get("name")),
+            )
+        except Exception:  # noqa: BLE001
+            self._add_label("技能服务异常", object_name="QErrorMessage")
+            return
+        if not skills:
+            self._add_label("暂无技能数据")
+            return
+        shown = skills[:12]  # 展示上限，避免面板过长
+        for s in shown:
+            mastery = self.skill_service._mastery_for_skill(s)
+            m_txt = f"{mastery:.2f}" if mastery is not None else "暂无验收证据"
+            blocked = self.skill_service.is_blocked(s)
+            prereq = "前置未满足" if blocked else "OK"
+            self._add_label(
+                f"{s.get('name')}（{s.get('tier') or '?'}级 · "
+                f"{s.get('status')} · mastery:{m_txt} · 前置:{prereq}）"
+            )
+
+    def _add_jd_panel(self) -> None:
+        """最新 JD / 岗位需求：列表 + 查看影响 + 添加 JD。"""
+        if self.jd_service is None:
+            return
+        self._career_panel_added = True
+        self._add_section_header("最新 JD / 岗位需求")
+        try:
+            jds = self.jd_service.jd_repo.list_all()
+        except Exception:  # noqa: BLE001
+            self._add_label("JD 服务异常", object_name="QErrorMessage")
+            return
+        if not jds:
+            self._add_label("暂无已分析 JD")
+        for jd in jds[-5:]:  # 展示最近 5 条
+            parsed = jd.get("parsed") or {}
+            row_w = QWidget()
+            row = QHBoxLayout(row_w)
+            row.setContentsMargins(0, 0, 0, 0)
+            info = QLabel(
+                f"{jd.get('company') or '—'}｜{jd.get('title') or '—'}｜"
+                f"{jd.get('direction') or '—'}｜"
+                f"{'实习' if parsed.get('intern') else '全职'}｜"
+                f"{jd.get('uploaded_at') or '—'}"
+            )
+            info.setObjectName("TaskMeta")
+            btn = QPushButton("查看影响")
+            btn.setObjectName("SecondaryButton")
+            apply_secondary_button_text(btn)
+            btn.clicked.connect(
+                lambda _=False, jd=jd: self._show_jd_detail(jd)
+            )
+            row.addWidget(info, 1)
+            row.addWidget(btn)
+            self.list_layout.addWidget(row_w)
+        add_btn = QPushButton("添加 JD")
+        add_btn.setObjectName("PrimaryButton")
+        add_btn.clicked.connect(self._on_add_jd)
+        ab = QHBoxLayout()
+        ab.addStretch()
+        ab.addWidget(add_btn)
+        abw = QWidget()
+        abw.setLayout(ab)
+        self.list_layout.addWidget(abw)
+
+    def _add_today_outcomes(self) -> None:
+        """今日学习成果：概览 + 成果列表 + 简历素材 + Obsidian 导出。"""
+        if self.outcome_service is None:
+            return
+        self._career_panel_added = True
+        self._add_section_header("今日学习成果")
+        try:
+            outcomes = self.outcome_service.list_by_date(self.current_date)
+        except Exception:  # noqa: BLE001
+            self._add_label("学习成果服务异常", object_name="QErrorMessage")
+            return
+        tasks = getattr(self, "_today_tasks", None) or []
+        done = sum(1 for t in tasks if t.status == STATUS_DONE)
+        assessed = sum(1 for o in outcomes
+                       if o.get("source_attempt_id") is not None)
+        weak_count = 0
+        for o in outcomes:
+            if o.get("kind") == "note" and "薄弱" in o.get("title", ""):
+                weak_count += 1
+        self._add_label(
+            f"今日完成 {done} 个任务 ｜ 验收记录 {assessed} ｜ "
+            f"薄弱记录 {weak_count} ｜ 成果 {len(outcomes)} 条"
+        )
+        if outcomes:
+            for o in outcomes[-5:]:
+                meta = f"{o.get('title')}（{o.get('kind')}）"
+                if o.get("tech_stack"):
+                    meta += " ｜ 技术栈：" + "、".join(o["tech_stack"])
+                if o.get("metrics"):
+                    meta += " ｜ 指标：" + "、".join(
+                        f"{k}={v}" for k, v in o["metrics"].items())
+                if o.get("github_url"):
+                    meta += " ｜ 代码：" + o["github_url"]
+                if o.get("dataset"):
+                    meta += " ｜ 数据集：" + o["dataset"]
+                self._add_label(meta)
+        else:
+            self._add_label("暂无学习成果")
+        # 简历素材 + Obsidian 导出
+        bar = QWidget()
+        brow = QHBoxLayout(bar)
+        brow.setContentsMargins(0, 0, 0, 0)
+        resume_btn = QPushButton("简历素材")
+        resume_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(resume_btn)
+        resume_btn.clicked.connect(self._on_view_resume)
+        export_btn = QPushButton("导出今日 Obsidian 笔记")
+        export_btn.setObjectName("PrimaryButton")
+        export_btn.clicked.connect(self._on_export_note)
+        pick_btn = QPushButton("选择目录…")
+        pick_btn.setObjectName("PostponeButton")
+        pick_btn.clicked.connect(self._on_choose_note_dir)
+        brow.addWidget(resume_btn)
+        brow.addWidget(export_btn)
+        brow.addWidget(pick_btn)
+        brow.addStretch()
+        self.list_layout.addWidget(bar)
+        self._note_dir_label = QLabel(
+            self._note_dir or "默认导出目录：docs/obsidian/"
+        )
+        self._note_dir_label.setObjectName("TaskMeta")
+        self.list_layout.addWidget(self._note_dir_label)
+
+    # ---------- 职业面板处理器 ----------
+
+    def _on_add_jd(self) -> None:
+        from .career_dialogs import JdInputDialog
+
+        dlg = JdInputDialog(self.jd_service, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.statusBar().showMessage(
+                "JD 已保存，技能优先级已更新（只影响近期优先级）", 6000
+            )
+            if self.jd_service is not None:
+                self.skill_service.recompute_all_priority_scores()
+                self.refresh()
+
+    def _show_jd_detail(self, jd: dict) -> None:
+        from .career_dialogs import JdDetailDialog
+
+        JdDetailDialog(self.jd_service, jd, parent=self).exec()
+
+    def _on_view_resume(self) -> None:
+        from .career_dialogs import ResumeMaterialDialog
+
+        outcomes = []
+        if self.outcome_service is not None:
+            try:
+                outcomes = self.outcome_service.list_by_date(self.current_date)
+            except Exception:  # noqa: BLE001
+                outcomes = []
+        ResumeMaterialDialog(self.outcome_service, outcomes, parent=self).exec()
+
+    def _on_export_note(self) -> None:
+        if self.notes_service is None:
+            self.statusBar().showMessage("笔记服务不可用", 3000)
+            return
+        try:
+            res = self.notes_service.export_daily_note(
+                self.current_date, output_dir=self._note_dir or None
+            )
+        except OSError as e:  # noqa: BLE001 - 导出失败只提示，不崩溃
+            self.statusBar().showMessage(f"导出失败：{e}", 6000)
+            return
+        self.statusBar().showMessage(f"已导出：{res['path']}", 8000)
+
+    def _on_choose_note_dir(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "选择 Obsidian 笔记目录", self._note_dir or ""
+        )
+        if chosen:
+            self._note_dir = chosen
+            if getattr(self, "_note_dir_label", None) is not None:
+                self._note_dir_label.setText(chosen)
 
     # ---------- 验收流程 ----------
 
