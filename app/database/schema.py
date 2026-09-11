@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -399,6 +399,33 @@ def _migrate_v7(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[7] = _migrate_v7
+
+
+# ============================================================
+# v8: learning_outcomes 增加来源（Phase D，幂等去重）
+# ============================================================
+# 记录“成果由哪个 task / 哪次 assessment 产生”，用于幂等：
+# 同一 task/attempt 重复触发只更新或跳过，不重复生成新 outcome。
+
+
+def _migrate_v8(conn: sqlite3.Connection) -> None:
+    """v8：learning_outcomes 增加 task_id / source_attempt_id 列 + 索引（幂等）。"""
+    add_column_if_not_exists(conn, "learning_outcomes", "task_id", "INTEGER")
+    add_column_if_not_exists(
+        conn, "learning_outcomes", "source_attempt_id", "INTEGER"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_learning_outcomes_task "
+        "ON learning_outcomes(task_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_learning_outcomes_attempt "
+        "ON learning_outcomes(source_attempt_id)"
+    )
+    conn.commit()
+
+
+_MIGRATIONS[8] = _migrate_v8
 
 
 def get_schema_version(conn) -> int:

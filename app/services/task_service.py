@@ -36,8 +36,10 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 class TaskService:
     """对 Task 的业务操作入口。"""
 
-    def __init__(self, repo: TaskRepository):
+    def __init__(self, repo: TaskRepository, outcome_service=None):
         self.repo = repo
+        # 可选：学习成果沉淀服务（Phase D hook；不注入则完成流程与旧版完全一致）
+        self.outcome_service = outcome_service
 
     # ---------- 查询 ----------
 
@@ -134,10 +136,16 @@ class TaskService:
         )
 
     def complete_task(self, task_id: int) -> Task:
-        """标记任务完成：active -> done。"""
+        """标记任务完成：active -> done。可选：完成后沉淀学习成果（Phase D）。"""
         self._transition(task_id, STATUS_DONE)
         self.repo.mark_done(task_id)
-        return self.get_task(task_id)
+        task = self.get_task(task_id)
+        if self.outcome_service is not None:
+            try:
+                self.outcome_service.generate_from_task(task)
+            except Exception:  # noqa: BLE001 - 成果沉淀失败不影响任务完成
+                pass
+        return task
 
     def mark_not_done(self, task_id: int, reason: str) -> Task:
         """标记未完成：active -> not_done，reason 必须非空。"""

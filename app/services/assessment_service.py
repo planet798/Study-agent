@@ -63,11 +63,14 @@ class AssessmentService:
         client: AIClient,
         assessment_repo: AssessmentRepository | None = None,
         review_service: ReviewService | None = None,
+        outcome_service=None,
     ):
         self.client = client
         self.assessment_repo = assessment_repo
         # 可选注入：判题成功后联动复习调度（Phase 4）
         self.review_service = review_service
+        # 可选注入：验收后沉淀学习成果（Phase D hook；不注入行为不变）
+        self.outcome_service = outcome_service
 
     def is_configured(self) -> bool:
         """AI 是否已配置（未配置时上层应给出明确提示而非崩溃）。"""
@@ -192,6 +195,16 @@ class AssessmentService:
             self.review_service.record_assessment_result(
                 repo.get_attempt(attempt_id), today=today
             )
+        # Phase D：验收后沉淀学习成果/掌握证据（若注入了 outcome_service）
+        if self.outcome_service is not None:
+            try:
+                judged_attempt = repo.get_attempt(attempt_id)
+                kp = repo.get_knowledge_point(attempt["knowledge_point_id"])
+                self.outcome_service.generate_from_assessment(
+                    judged_attempt, kp=kp, date=today or ""
+                )
+            except Exception:  # noqa: BLE001 - 成果沉淀失败不影响验收流程
+                pass
         return repo.get_attempt(attempt_id)
 
     # ---------- 内部 ----------

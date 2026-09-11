@@ -320,6 +320,8 @@ class LearningOutcomeRepository:
         resume_keywords: list[str] | None = None,
         linked_kp_id: int | None = None,
         linked_topic_id: int | None = None,
+        task_id: int | None = None,
+        source_attempt_id: int | None = None,
     ) -> dict:
         date = (date or "").strip() or datetime.date.today().isoformat()
         kind = (kind or "note").strip()
@@ -327,8 +329,9 @@ class LearningOutcomeRepository:
         cur = self.conn.execute(
             "INSERT INTO learning_outcomes (date, kind, title, content,"
             " tech_stack, dataset, metrics, git_commit, github_url,"
-            " resume_keywords, linked_kp_id, linked_topic_id, created_at,"
-            " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " resume_keywords, linked_kp_id, linked_topic_id, task_id,"
+            " source_attempt_id, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 date, kind or "note", (title or "").strip(), content or "",
                 _enc(tech_stack or []), (dataset or "").strip(),
@@ -336,6 +339,8 @@ class LearningOutcomeRepository:
                 (github_url or "").strip(), _enc(resume_keywords or []),
                 int(linked_kp_id) if linked_kp_id is not None else None,
                 int(linked_topic_id) if linked_topic_id is not None else None,
+                int(task_id) if task_id is not None else None,
+                int(source_attempt_id) if source_attempt_id is not None else None,
                 now, now,
             ),
         )
@@ -364,6 +369,26 @@ class LearningOutcomeRepository:
         rows = self.conn.execute(sql, tuple(args)).fetchall()
         return [self._from_row(r) for r in rows]
 
+    def get_by_task_id(self, task_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM learning_outcomes WHERE task_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (int(task_id),),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    def get_by_source_attempt_id(self, attempt_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM learning_outcomes WHERE source_attempt_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (int(attempt_id),),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    def count(self) -> int:
+        return int(self.conn.execute(
+            "SELECT COUNT(*) FROM learning_outcomes").fetchone()[0])
+
     def update(self, outcome_id: int, **fields) -> dict | None:
         for key in ("tech_stack", "resume_keywords"):
             if key in fields:
@@ -374,7 +399,8 @@ class LearningOutcomeRepository:
         allowed = {
             "date", "kind", "title", "content", "tech_stack", "dataset",
             "metrics", "git_commit", "github_url", "resume_keywords",
-            "linked_kp_id", "linked_topic_id", "updated_at",
+            "linked_kp_id", "linked_topic_id", "task_id", "source_attempt_id",
+            "updated_at",
         }
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:

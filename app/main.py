@@ -191,10 +191,96 @@ def _print_weekly(weekly: dict) -> None:
         print("不优先项：" + "、".join(weekly["do_not_prioritize"]))
 
 
+def _run_export_note_cli(argv) -> int:
+    """export-note 子命令：导出某天的 Obsidian Markdown 学习笔记。
+
+    用法：
+      study-agent export-note [--date 2026-09-11] [--output 目录] [--db 路径]
+      幂等：同一天重复导出为覆盖写、内容稳定；路径不存在自动创建。
+    """
+    from app.database.assessment_repository import AssessmentRepository
+    from app.database.skill_repository import (
+        JdRepository,
+        LearningOutcomeRepository,
+        SkillRepository,
+    )
+    from app.services.learning_outcome_service import LearningOutcomeService
+    from app.services.notes_service import NotesService
+    from app.services.skill_service import SkillService
+    from app.services.study_plan_service import StudyPlanService
+
+    parser = argparse.ArgumentParser(
+        prog="study-agent export-note",
+        description="导出某天的 Obsidian Markdown 学习笔记（幂等，只读知识库）。",
+    )
+    parser.add_argument("--date", default=None)
+    parser.add_argument("--output", default=None)
+    parser.add_argument("--db", default=None)
+    args, _ = parser.parse_known_args(argv)
+
+    date = args.date or today()
+    if date and not re.fullmatch(_DATE_RE.pattern, date):
+        parser.error(f"--date 必须是 YYYY-MM-DD，收到：{date!r}")
+
+    conn = get_connection(args.db)
+    try:
+        repo = TaskRepository(conn)
+        plan_repo = StudyPlanRepository(conn)
+        assessment_repo = AssessmentRepository(conn)
+        # 需要学习计划阶段目标：确保默认计划存在（幂等，不破坏历史）
+        sps = StudyPlanService(repo, plan_repo,
+                               assessment_repo=assessment_repo)
+        sps.ensure_default_plan()
+
+        lo_repo = LearningOutcomeRepository(conn)
+        outcome_service = LearningOutcomeService(lo_repo)
+
+        ai_client = DeepSeekClient()
+        outcome_service.ai_client = ai_client
+
+        # 技能/JD（供“明日建议”纯规则预览；可选，出错不影响导出）
+        jd_service = None
+        try:
+            skill_repo = SkillRepository(conn)
+            skill_service = SkillService(
+                skill_repo, plan_repo=plan_repo, assessment_repo=assessment_repo
+            )
+            if not skill_repo.list_all():
+                skill_service.seed_from_career_context()
+                skill_service.recompute_all_priority_scores()
+            from app.services.jd_service import JdService
+
+            jd_service = JdService(
+                JdRepository(conn), skill_repo, skill_service,
+                ai_client=ai_client,
+            )
+        except Exception:  # noqa: BLE001 - JD 预览失败不影响导出
+            jd_service = None
+
+        notes = NotesService(
+            repo=repo,
+            study_plan_service=sps,
+            outcome_service=outcome_service,
+            assessment_repo=assessment_repo,
+            jd_service=jd_service,
+        )
+        try:
+            res = notes.export_daily_note(date, output_dir=args.output)
+        except OSError as e:
+            print(f"导出失败：{e}", file=sys.stderr)
+            return 2
+        print(f"已导出：{res['path']}（{res['chars']} 字符）")
+        return 0
+    finally:
+        conn.close()
+
+
 def main() -> int:
-    # 0) add-jd 子命令：不进 GUI，直接处理 JD 后退出
+    # 0) 子命令：不进 GUI
     if "add-jd" in sys.argv[1:]:
         return _run_add_jd_cli(sys.argv[2:])
+    if "export-note" in sys.argv[1:]:
+        return _run_export_note_cli(sys.argv[2:])
     # 1) 解析 --date（仅开发/测试）：注入“今天”。
     #    只在内存层面覆盖 date_utils.today()，不写数据库、不改系统时间；
     #    不传 --date 时保持默认（系统真实日期）。
@@ -213,7 +299,11 @@ def main() -> int:
     # 3) 组装依赖：SQLite -> Repository -> Service -> UI（UI 不直接碰 SQLite）
     conn = get_connection()
     repo = TaskRepository(conn)
-    task_service = TaskService(repo)
+    from app.database.skill_repository import LearningOutcomeRepository
+    from app.services.learning_outcome_service import LearningOutcomeService
+
+    outcome_service = LearningOutcomeService(LearningOutcomeRepository(conn))
+    task_service = TaskService(repo, outcome_service=outcome_service)
 
     # 学习计划：确保默认研一计划已创建，供每日任务生成与阶段显示；
     # 注入 assessment_repo（Phase 8）让规则生成能读取掌握证据（薄弱优先/不重复）。
@@ -243,6 +333,7 @@ def main() -> int:
 
     # AI 配置读取环境变量；未配置时 GUI 正常运行（本地功能不受影响）
     ai_client = DeepSeekClient()
+    outcome_service.ai_client = ai_client  # 简历素材的 AI 组织（可选）
     from app.services.jd_service import JdService
 
     jd_service = JdService(
@@ -283,6 +374,7 @@ def main() -> int:
         ai_client,
         assessment_repo=assessment_repo,
         review_service=review_scheduler,
+        outcome_service=outcome_service,
     )
     extra_service = ExtraTaskService(
         repo,
