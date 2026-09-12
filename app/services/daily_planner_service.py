@@ -397,6 +397,9 @@ class DailyPlannerService:
         # 推荐任务校验（不实际创建，先全部校验）
         to_create: list = []
         seen_topic_ids: set[int] = set()
+        topic_by_id: dict[int, object] = {
+            t.id: t for t in (current_phase.topics if current_phase else [])
+        }
         for rec in plan.recommended_tasks:
             if rec.topic_id not in valid_topic_ids:
                 problems.append(f"topic_id {rec.topic_id} 不属于当前阶段")
@@ -445,7 +448,9 @@ class DailyPlannerService:
 
         # 全部合法：先创建推荐任务
         for rec in to_create:
-            task = self._create_task_from_recommendation(rec, plan_date)
+            task = self._create_task_from_recommendation(
+                rec, plan_date, topic_by_id=topic_by_id
+            )
             created.append(task.id)
         # 再安排 carry_over（改期到今天，保留延期次数）
         for carry, task in to_carry:
@@ -464,11 +469,24 @@ class DailyPlannerService:
         ).fetchall()
         return {r["topic_id"] for r in rows}
 
-    def _create_task_from_recommendation(self, rec, plan_date: str) -> Task:
+    def _create_task_from_recommendation(
+        self, rec, plan_date: str, topic_by_id: dict | None = None
+    ) -> Task:
+        """创建 AI 推荐的任务；description 若无执行性则升级为结构化学习内容。"""
+        from .task_content import build_topic_task_content, has_actionable_content
+
+        if not has_actionable_content(rec.description):
+            topic = (topic_by_id or {}).get(rec.topic_id)
+            if topic is not None:
+                content = build_topic_task_content(topic.name, topic.description)
+            else:
+                content = build_topic_task_content(rec.title)
+        else:
+            content = rec.description
         return self.repo.create(
             title=rec.title,
             scheduled_date=plan_date,
-            description=rec.description,
+            description=content,
             category="学习",
             estimated_minutes=rec.estimated_minutes,
             priority=rec.priority,

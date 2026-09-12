@@ -284,6 +284,12 @@ PLANNER_OUTPUT_INSTRUCTION = """
 - topic_id 必须属于当前 Phase 的 available_topics
 - task_id 必须属于上下文中的历史未完成任务（unfinished/postponed）
 - 不要推荐已经完成的主题
+- 每个 recommended_tasks[].description 必须是“可直接执行”的学习内容，
+  至少包含：【学习目标】【具体学习事项】(3~5 条编号、能直接照做)
+  【实践】(理论讲清核心机制 / 编码给最小可运行实践)
+  【完成标准】(可检查的完成标志，含如何客观验收)。
+  要求用词具体、能直接指导开工；不要只是把标题扩写成一两句；
+  不要写成长篇教材（每个 description 控制在 10~20 行内）。
 """
 
 

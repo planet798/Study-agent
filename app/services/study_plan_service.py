@@ -413,7 +413,8 @@ class StudyPlanService:
         return result
 
     def _create_task_from_topic(self, topic, date_str: str):
-        """把一个主题落成 tasks 表中的一条任务。"""
+        """把一个主题落成 tasks 表中的一条任务（description 用可执行学习内容）。"""
+        from .task_content import build_topic_task_content
         from .task_service import TaskService
 
         # 直接走 repository（等价于 TaskService.create_task 的底层），
@@ -421,7 +422,7 @@ class StudyPlanService:
         return self.repo.create(
             title=topic.name,
             scheduled_date=date_str,
-            description=topic.description,
+            description=build_topic_task_content(topic.name, topic.description),
             category="学习",
             estimated_minutes=topic.estimated_minutes,
             priority=topic.priority,
