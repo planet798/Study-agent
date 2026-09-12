@@ -333,6 +333,14 @@ def main() -> int:
     )
     study_plan_service.ensure_default_plan()
 
+    # 存量“生成型新任务”description 回填（一次性、幂等；失败不阻止启动）
+    try:
+        repaired = study_plan_service.repair_existing_task_descriptions()
+        if repaired:
+            print(f"[startup] 已回填 {repaired} 条生成型任务的学习内容")
+    except Exception:  # noqa: BLE001 - 回填失败不影响启动
+        pass
+
     # 技能池为空时按 career_context 幂等 seed 并链接到现有主题（不覆盖已维护状态）
     if not skill_repo.list_all():
         skill_service.seed_from_career_context()

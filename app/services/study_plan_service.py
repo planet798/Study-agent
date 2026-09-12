@@ -479,3 +479,67 @@ class StudyPlanService:
                 blocked.add(t.id)
             jd_boost[t.id] = boost
         return blocked, jd_boost
+
+    # ================= 存量任务 description 回填（一次性修复） =================
+
+    def repair_existing_task_descriptions(self) -> int:
+        """把历史“生成型新任务”里占位/过短的 description 幂等回填为结构化学习内容。
+
+        只处理满足全部条件的任务：
+        - source = 'generated' 且 task_type = 'new'
+        - 未完成（status != 'done'，即 active / not_done）
+        - topic_id 非空且能找到对应 study_topic
+        - description 尚不具备“可执行内容”（名型占位 / 合格检查 / 过短）
+
+        写明规则：本方法只更新 description，不改 title / status /
+        scheduled_date / estimated_minutes / task_type / topic_id / source。
+        幂等：修复后 description 即具备可执行内容，下次调用不再改动。
+        单条失败不影响其它任务，也不影响启动。
+        :return: 本次实际修复的条数
+        """
+        from ..utils.date_utils import now_iso
+        from .task_content import build_topic_task_content, has_actionable_content
+
+        rows = self.repo.conn.execute(
+            "SELECT * FROM tasks WHERE source = 'generated' AND task_type = 'new'"
+        ).fetchall()
+        repaired = 0
+        for row in rows:
+            if row["status"] == "done":
+                continue
+            topic_id = row["topic_id"]
+            if topic_id is None:
+                continue
+            try:
+                topic = self.plan_repo.conn.execute(
+                    "SELECT id, name, description FROM study_topics WHERE id = ?",
+                    (topic_id,),
+                ).fetchone()
+                if topic is None:
+                    continue
+                desc = (row["description"] or "").strip()
+                # 1) 已经是完整可执行内容 → 不动（避免重复生成）
+                if has_actionable_content(desc):
+                    continue
+                # 2) 占位型（= 主题名/主题描述）或明显过短的短文本 → 回填
+                is_placeholder = (
+                    not desc
+                    or desc == (topic["name"] or "").strip()
+                    or desc == (topic["description"] or "").strip()
+                )
+                if not is_placeholder and len(desc) >= 80:
+                    # 已有较长的、人工维护过的描述 → 不覆盖
+                    continue
+                content = build_topic_task_content(
+                    topic["name"], topic["description"]
+                )
+                self.repo.conn.execute(
+                    "UPDATE tasks SET description = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (content, now_iso(), row["id"]),
+                )
+                repaired += 1
+            except Exception:  # noqa: BLE001 - 单条失败不影响其它任务与启动
+                continue
+        self.repo.conn.commit()
+        return repaired
