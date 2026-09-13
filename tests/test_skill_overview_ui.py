@@ -189,6 +189,55 @@ class TestSkillOverviewLimits:
         assert "当前暂无正在学习的技能" in _txt(w)
 
 
+class TestCurrentLearningClassification:
+    def test_learning_status_in_current(self, qtbot, conn):
+        env = _env(conn)
+        w = _window(qtbot, env)
+        items = "\n".join(_group_items(w, "当前学习"))
+        for s in env["sr"].list_all():
+            if s["status"] == "learning" and not env["ss"].is_blocked(s):
+                assert s["name"] in items
+
+    def test_phase_linked_skill_in_current(self, qtbot, conn):
+        env = _env(conn)
+        phase = env["sps"].get_current_phase(TODAY)
+        linked = set()
+        for t in phase.topics:
+            linked.update(env["ss"].skills_for_topic(t.id) or [])
+        assert linked  # 当前 phase 有明确关联技能
+        w = _window(qtbot, env)
+        items = "\n".join(_group_items(w, "当前学习"))
+        assert any(name in items for name in linked)
+
+    def test_gate_ok_future_skill_not_in_current(self, qtbot, conn):
+        """SQL 场景：A级 + gate 放行 + 高 priority，但无 phase 关联 → 不进入。"""
+        env = _env(conn)
+        sql = env["sr"].get_by_name("SQL")
+        assert sql is not None
+        env["sr"].update(sql["id"], status="not_started",
+                         prerequisites=[])
+        env["ss"].recompute_all_priority_scores()
+        sql = env["sr"].get_by_name("SQL")
+        # 确认它确实在 active candidates（gate=ok、未阻塞）里
+        cands = [d["name"] for d in env["ss"].select_active_candidates(limit=20)]
+        assert "SQL" in cands
+        assert not env["ss"].is_blocked(sql)
+        w = _window(qtbot, env)
+        assert "SQL" not in "\n".join(_group_items(w, "当前学习"))
+        # 未被阻塞 → 也不应出现在“待解锁”
+        assert "SQL" not in "\n".join(_group_items(w, "待解锁"))
+
+    def test_blocked_only_in_unlock(self, qtbot, conn):
+        env = _env(conn)
+        w = _window(qtbot, env)
+        unlock = "\n".join(_group_items(w, "待解锁"))
+        current = "\n".join(_group_items(w, "当前学习"))
+        for s in env["sr"].list_all():
+            if env["ss"].is_blocked(s):
+                assert s["name"] not in current
+        assert "缺：" in unlock
+
+
 class TestNoRegression:
     def test_today_and_jd_panels_still_present(self, qtbot, conn):
         env = _env(conn)

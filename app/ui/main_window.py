@@ -576,15 +576,14 @@ class MainWindow(QMainWindow):
             self._add_label("暂无技能数据", object_name="EmptyHint")
             return
 
-        by_name = {s["name"]: s for s in all_skills}
-
-        def _by_score(items):
-            return sorted(
+        def _by_score(items):            return sorted(
                 items,
                 key=lambda s: (-(s.get("priority_score") or 0.0), s["name"]),
             )
 
-        # ---- 当前学习：learning → 当前阶段关联 → 门禁放行的候选 ----
+        # ---- 当前学习：仅 (status==learning) 或 (当前 phase active topic 关联) ----
+        # 注意：不能仅因为 priority_score 高 / gate 已放行(select_active_candidates)
+        # 就把“未来阶段”的技能塞进“当前学习”。
         current: list[dict] = []
         seen: set[str] = set()
 
@@ -602,9 +601,11 @@ class MainWindow(QMainWindow):
             seen.add(skill["name"])
             current.append(skill)
 
+        # 1) 真正在学习的技能
         for s in _by_score(all_skills):
             if s.get("status") == "learning":
                 _push(s)
+        # 2) 与当前 phase 的 active study_topic 明确关联的技能
         if self.study_plan_service is not None:
             try:
                 phase = self.study_plan_service.get_current_phase(self.current_date)
@@ -620,11 +621,6 @@ class MainWindow(QMainWindow):
                 for s in _by_score(all_skills):
                     if s["name"] in names:
                         _push(s)
-        try:
-            for d in self.skill_service.select_active_candidates(limit=8):
-                _push(by_name.get(d["name"]))
-        except Exception:  # noqa: BLE001
-            pass
         current = current[: self._MAX_CURRENT]
 
         # ---- 待解锁：前置未满足的技能（S/A 优先，再按 priority） ----
