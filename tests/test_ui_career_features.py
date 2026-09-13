@@ -123,15 +123,24 @@ class TestSkillPanel:
         env = _make_env(conn, plan_repo)
         w = _window(qtbot, env)
         txt = _label_text(w)
-        assert "技能状态" in txt
+        # 新版“技能概览”三个区域
+        assert "技能概览" in txt
+        assert "当前学习" in txt
+        assert "待解锁" in txt
+        assert "已掌握" in txt
         assert "PyTorch" in txt
-        assert "近期重点技能" in txt
-        assert "当前阶段" in txt
+        # 不再暴露内部字段 / 旧文案
+        for raw in ("技能状态", "近期重点技能", "not_started", "deferred",
+                    "priority_score", "mastery:", "前置:"):
+            assert raw not in txt
 
     def test_no_mastery_shows_placeholder(self, qtbot, conn, plan_repo):
         env = _make_env(conn, plan_repo)
         w = _window(qtbot, env)
-        assert "暂无验收证据" in _label_text(w)
+        txt = _label_text(w)
+        # 无真实验收证据时，不显示任何 mastery 占位/文案
+        assert "暂无验收证据" not in txt
+        assert "AI验收" not in txt
 
     def test_high_mastery_shown(self, qtbot, conn, plan_repo):
         env = _make_env(conn, plan_repo)
@@ -144,12 +153,17 @@ class TestSkillPanel:
         env["skill_repo"].update(pytorch["id"], mastery_ref=f"kp:{kp['id']}")
         w = _window(qtbot, env)
         w.refresh()
-        assert "mastery:0.90" in _label_text(w)
+        txt = _label_text(w)
+        assert "AI验收 90%" in txt
+        assert "掌握度来自客观验收的 AI 估计" in txt
 
     def test_blocked_skill_shown(self, qtbot, conn, plan_repo):
         env = _make_env(conn, plan_repo)
         w = _window(qtbot, env)
-        assert "前置未满足" in _label_text(w)
+        txt = _label_text(w)
+        assert "待解锁" in txt
+        assert "缺：" in txt
+        assert "前置未满足" not in txt
 
 
 class TestJdPanel:

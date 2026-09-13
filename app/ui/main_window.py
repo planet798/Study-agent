@@ -352,8 +352,7 @@ class MainWindow(QMainWindow):
             self._add_exploration()
 
         # Phase E：职业 / 技能 / JD 面板（可选注入，异常不崩溃）
-        self._add_recent_focus_skills()
-        self._add_skill_status()
+        self._add_skill_overview()
         self._add_jd_panel()
 
         self.list_layout.addStretch()
@@ -513,62 +512,180 @@ class MainWindow(QMainWindow):
         lbl.setWordWrap(word_wrap)
         self.list_layout.addWidget(lbl)
 
-    def _add_recent_focus_skills(self) -> None:
-        """近期重点技能 + 当前阶段允许范围（来自 SkillService）。"""
-        if self.skill_service is None:
-            return
-        self._career_panel_added = True
-        self._add_section_header("近期重点技能")
-        try:
-            cands = self.skill_service.select_active_candidates(limit=5)
-            phase_name = ""
-            if self.study_plan_service is not None:
-                ph = self.study_plan_service.get_current_phase(self.current_date)
-                phase_name = ph.name if ph else ""
-            if cands:
-                self._add_label(
-                    "重点：" + " ｜ ".join(d["name"] for d in cands)
-                )
-            else:
-                self._add_label("暂无候选重点技能")
-            scope = (
-                f"当前阶段：{phase_name}；JD/技能只影响本阶段内优先级，"
-                "Agent / RAG 等前置未满足的技能不会被提前安排。"
-                if phase_name else
-                "JD/技能只影响当前阶段内优先级，不越级安排前置未满足的技能。"
-            )
-            self._add_label(scope, object_name="PostponeWarning")
-        except Exception:  # noqa: BLE001
-            self._add_label("技能服务异常", object_name="QErrorMessage")
+    # ---------- 技能概览（Phase E 简化版） ----------
 
-    def _add_skill_status(self) -> None:
-        """技能状态：S/A 核心 + 状态 + 掌握证据 + 前置阻塞。"""
+    # 内部状态 -> 面向用户的文案（不暴露 learning / not_started 等）
+    _STATUS_TEXT = {
+        "learning": "学习中",
+        "not_started": "待学习",
+        "mastered": "已掌握",
+        "deferred": "暂缓",
+    }
+    _TIER_RANK = {"S": 4, "A": 3, "B": 2, "C": 1}
+    _MAX_CURRENT = 5
+    _MAX_BLOCKED = 5
+    _MAX_MASTERED_NAMES = 5
+
+    def _skill_mastery_text(self, skill: dict) -> str | None:
+        """只有存在真实验收证据时才返回“AI验收 NN%”，否则 None。
+
+        只读现有 assessment evidence（knowledge_points.mastery_estimate +
+        last_assessed_at），不改变任何 mastery 计算。
+        """
+        ref = (skill.get("mastery_ref") or "").strip()
+        repo = self.assessment_repo or getattr(
+            self.skill_service, "assessment_repo", None
+        )
+        if not ref.startswith("kp:") or repo is None:
+            return None
+        try:
+            kp = repo.get_knowledge_point(int(ref[3:]))
+        except (TypeError, ValueError):
+            return None
+        if not kp or not kp.get("last_assessed_at") \
+                or kp.get("mastery_estimate") is None:
+            return None
+        pct = round(float(kp["mastery_estimate"]) * 100)
+        return f"AI验收 {pct}%"
+
+    def _skill_row(self, skill: dict, status_text: str) -> str:
+        """一行技能：名称 + tier + 面向用户状态 +（可选）掌握度。"""
+        line = (
+            f"{skill.get('name')}    {skill.get('tier') or '?'}级 · "
+            f"{status_text}"
+        )
+        m = self._skill_mastery_text(skill)
+        if m:
+            line += f" · {m}"
+        return line
+
+    def _add_skill_overview(self) -> None:
+        """技能概览：当前学习 / 待解锁 / 已掌握（替代旧的技能状态面板）。"""
         if self.skill_service is None:
             return
         self._career_panel_added = True
-        self._add_section_header("技能状态")
         try:
-            skills = sorted(
-                self.skill_service.skill_repo.list_all(),
-                key=lambda s: (-{"S": 4, "A": 3, "B": 2, "C": 1}.get(
-                    s.get("tier"), 0), s.get("status"), s.get("name")),
-            )
+            all_skills = self.skill_service.skill_repo.list_all()
         except Exception:  # noqa: BLE001
+            self._add_section_header("技能概览")
             self._add_label("技能服务异常", object_name="QErrorMessage")
             return
-        if not skills:
-            self._add_label("暂无技能数据")
+
+        self._add_section_header("技能概览")
+        if not all_skills:
+            self._add_label("暂无技能数据", object_name="EmptyHint")
             return
-        shown = skills[:12]  # 展示上限，避免面板过长
-        for s in shown:
-            mastery = self.skill_service._mastery_for_skill(s)
-            m_txt = f"{mastery:.2f}" if mastery is not None else "暂无验收证据"
-            blocked = self.skill_service.is_blocked(s)
-            prereq = "前置未满足" if blocked else "OK"
-            self._add_label(
-                f"{s.get('name')}（{s.get('tier') or '?'}级 · "
-                f"{s.get('status')} · mastery:{m_txt} · 前置:{prereq}）"
+
+        by_name = {s["name"]: s for s in all_skills}
+
+        def _by_score(items):
+            return sorted(
+                items,
+                key=lambda s: (-(s.get("priority_score") or 0.0), s["name"]),
             )
+
+        # ---- 当前学习：learning → 当前阶段关联 → 门禁放行的候选 ----
+        current: list[dict] = []
+        seen: set[str] = set()
+
+        def _push(skill):
+            if not skill or skill["name"] in seen:
+                return
+            # 当前学习只包含可学习的技能（排除已掌握 / 前置未满足）
+            try:
+                if self.skill_service.effective_status(skill) not in (
+                    "learning", "not_started"
+                ):
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+            seen.add(skill["name"])
+            current.append(skill)
+
+        for s in _by_score(all_skills):
+            if s.get("status") == "learning":
+                _push(s)
+        if self.study_plan_service is not None:
+            try:
+                phase = self.study_plan_service.get_current_phase(self.current_date)
+            except Exception:  # noqa: BLE001
+                phase = None
+            if phase is not None:
+                names: set[str] = set()
+                for topic in phase.topics:
+                    try:
+                        names.update(self.skill_service.skills_for_topic(topic.id) or [])
+                    except Exception:  # noqa: BLE001
+                        pass
+                for s in _by_score(all_skills):
+                    if s["name"] in names:
+                        _push(s)
+        try:
+            for d in self.skill_service.select_active_candidates(limit=8):
+                _push(by_name.get(d["name"]))
+        except Exception:  # noqa: BLE001
+            pass
+        current = current[: self._MAX_CURRENT]
+
+        # ---- 待解锁：前置未满足的技能（S/A 优先，再按 priority） ----
+        blocked: list[tuple[dict, list[str]]] = []
+        for s in all_skills:
+            if s["name"] in seen:
+                continue
+            try:
+                if not self.skill_service.is_blocked(s):
+                    continue
+                missing = self.skill_service.missing_prerequisites(s)
+            except Exception:  # noqa: BLE001
+                continue
+            blocked.append((s, missing))
+        blocked.sort(key=lambda p: (
+            -self._TIER_RANK.get(p[0].get("tier"), 0),
+            -(p[0].get("priority_score") or 0.0),
+            p[0]["name"],
+        ))
+        blocked = blocked[: self._MAX_BLOCKED]
+
+        # ---- 已掌握：摘要 ----
+        mastered = [s["name"] for s in all_skills if s.get("status") == "mastered"]
+
+        # 只在确实展示了掌握度时，才写一次来源说明
+        if any(self._skill_mastery_text(s) for s in current):
+            self._add_label(
+                "掌握度来自客观验收的 AI 估计。", object_name="TaskMeta"
+            )
+
+        # 1) 当前学习
+        self._add_label("当前学习", object_name="TaskTitle")
+        if current:
+            for s in current:
+                self._add_label(
+                    self._skill_row(
+                        s, self._STATUS_TEXT.get(s.get("status"), "待学习")
+                    )
+                )
+        else:
+            self._add_label("当前暂无正在学习的技能", object_name="EmptyHint")
+
+        # 2) 待解锁
+        self._add_label("待解锁", object_name="TaskTitle")
+        if blocked:
+            for s, missing in blocked:
+                miss = "、".join(missing) if missing else "-"
+                self._add_label(f"{s.get('name')}    缺：{miss}")
+        else:
+            self._add_label("当前无前置阻塞", object_name="EmptyHint")
+
+        # 3) 已掌握（摘要，不逐条展开）
+        self._add_label("已掌握", object_name="TaskTitle")
+        if mastered:
+            head = mastered[: self._MAX_MASTERED_NAMES]
+            names = " / ".join(head)
+            if len(mastered) > self._MAX_MASTERED_NAMES:
+                names += " / …"
+            self._add_label(f"已掌握 {len(mastered)} 项：{names}")
+        else:
+            self._add_label("暂无已掌握技能记录", object_name="EmptyHint")
 
     def _add_jd_panel(self) -> None:
         """最新 JD / 岗位需求：列表 + 查看影响 + 添加 JD。"""
