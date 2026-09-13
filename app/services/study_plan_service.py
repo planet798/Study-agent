@@ -548,14 +548,17 @@ class StudyPlanService:
 
     # ================= topic -> knowledge_point 关联（Review 链路修复） =================
 
-    def link_task_knowledge_point(self, task, topic=None):
-        """把一个 generated/new 正式任务幂等关联到其 topic 的唯一知识点。
+    # 允许建立 topic -> kp 关联的任务种类（source, task_type）
+    _LINKABLE_TASK_KINDS = {("generated", "new"), ("extra", "extra")}
 
-        这是 topic -> knowledge_point -> task 的**唯一实现**（AI path 与
-        fallback path 都复用它，不各写一套）。
+    def link_task_knowledge_point(self, task, topic=None):
+        """把一个正式新知识任务 / 额外任务幂等关联到其 topic 的唯一知识点。
+
+        这是 topic -> knowledge_point -> task 的**唯一实现**（AI path、
+        fallback path 与 ExtraTaskService 都复用它，不各写一套）。
 
         约束：
-        - 只处理 source='generated' 且 task_type='new' 的任务；
+        - 只处理 (source,task_type) ∈ {('generated','new'), ('extra','extra')}；
         - 只处理 topic_id 非空且能查到 topic 的任务；
         - 只写 tasks.knowledge_point_id（以及 updated_at），其它字段一律不动；
         - 幂等：已有 knowledge_point_id 直接返回，不重复建 kp；
@@ -565,7 +568,8 @@ class StudyPlanService:
             return task
         if task.knowledge_point_id is not None:
             return task
-        if task.source != "generated" or task.task_type != "new":
+        # 正式新知识任务与额外任务都可关联知识点（manual/review 不在此列）
+        if (task.source, task.task_type) not in self._LINKABLE_TASK_KINDS:
             return task
         if task.topic_id is None or self.assessment_repo is None:
             return task

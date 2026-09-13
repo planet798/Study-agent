@@ -391,7 +391,16 @@ class MainWindow(QMainWindow):
         self.list_layout.addWidget(hint)
 
     def _add_task_widget(self, task) -> None:
-        widget = TaskWidget(task)
+        label = "开始验收"
+        if self.assessment_repo is not None and (
+            task.knowledge_point_id is not None or task.topic_id is not None
+        ):
+            try:
+                if self.assessment_repo.find_pending_attempt_for_task(task.id):
+                    label = "继续验收"
+            except Exception:  # noqa: BLE001 - 仅影响按钮文案
+                pass
+        widget = TaskWidget(task, assessment_label=label)
         widget.complete_requested.connect(self._on_complete)
         widget.not_done_requested.connect(self._on_not_done)
         widget.postpone_requested.connect(self._on_postpone)

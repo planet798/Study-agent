@@ -60,10 +60,16 @@ class TaskWidget(QFrame):
     assessment_requested = Signal(int)  # 开始验收（Phase 7）
 
 
-    def __init__(self, task: Task, parent: QWidget | None = None):
+    def __init__(
+        self,
+        task: Task,
+        parent: QWidget | None = None,
+        assessment_label: str = "开始验收",
+    ):
         super().__init__(parent)
         self.setObjectName("TaskCard")
         self._task = task
+        self._assessment_label = assessment_label
 
         # 便于测试定位
         self._build_ui()
@@ -121,8 +127,31 @@ class TaskWidget(QFrame):
         self.action_row.setSpacing(8)
         root.addLayout(self.action_row)
 
+    @staticmethod
+    def _can_assess(task: Task) -> bool:
+        """该任务是否应该展示验收入口。
+
+        只要任务有 knowledge_point_id，或至少有 topic_id（可在点击时由
+        安全网现场补 kp），就显示验收入口；无 topic 的 manual / 临时任务
+        不显示，也不会被乱建 kp。
+        """
+        return (
+            task.knowledge_point_id is not None or task.topic_id is not None
+        )
+
+    def _add_assessment_button(self) -> None:
+        """统一添加验收入口（避免重复创建同一个按钮）。"""
+        if getattr(self, "assessment_btn", None) is not None:
+            return
+        self.assessment_btn = QPushButton(self._assessment_label)
+        self.assessment_btn.setObjectName("PrimaryButton")
+        self.assessment_btn.clicked.connect(
+            lambda: self.assessment_requested.emit(self._task.id)
+        )
+        self.action_row.addWidget(self.assessment_btn)
+
     def _add_action_buttons(self) -> None:
-        """active 状态显示 [完成] [未完成]（关联知识点的任务另加 [验收]）。"""
+        """active 状态显示 [完成] [未完成]（可验收任务另加验收入口）。"""
         self.complete_btn = QPushButton("完成")
         self.complete_btn.setObjectName("SecondaryButton")
         apply_secondary_button_text(self.complete_btn)
@@ -136,21 +165,21 @@ class TaskWidget(QFrame):
         )
         self.action_row.addWidget(self.complete_btn)
         self.action_row.addWidget(self.not_done_btn)
-        # 已关联知识点的任务支持“开始验收”（复习/额外任务）
-        if self._task.knowledge_point_id is not None:
-            self.assessment_btn = QPushButton("开始验收")
-            self.assessment_btn.setObjectName("PrimaryButton")
-            self.assessment_btn.clicked.connect(
-                lambda: self.assessment_requested.emit(self._task.id)
-            )
-            self.action_row.addWidget(self.assessment_btn)
+        if self._can_assess(self._task):
+            self._add_assessment_button()
         self.action_row.addStretch()
 
     def _add_done_state(self) -> None:
-        """done 状态显示：已完成。"""
+        """done 状态显示：已完成。
+
+        完成任务 ≠ 掌握知识：done 的正式/额外任务仍保留验收入口，
+        验收才产生 mastery / weak_points / next_review_date。
+        """
         self.done_label = QLabel("已完成")
         self.done_label.setObjectName("DoneBadge")
         self.action_row.addWidget(self.done_label)
+        if self._can_assess(self._task):
+            self._add_assessment_button()
         self.action_row.addStretch()
 
     def _add_not_done_state(self) -> None:
@@ -215,7 +244,15 @@ class TaskWidget(QFrame):
             item = self.action_row.takeAt(0)
             w = item.widget()
             if w is not None:
+                # 立即脱离父对象，避免 deleteLater 延迟删除期间：
+                # 旧按钮仍作为子对象存在（重复显示 / findChildren 重复）。
+                w.setParent(None)
                 w.deleteLater()
+        # 删除旧的按钮引用，避免重渲染时误判“已存在”而漏加，
+        # 同时让 hasattr(widget, "assessment_btn") 真实反映是否展示了验收入口。
+        for name in ("assessment_btn", "complete_btn", "not_done_btn"):
+            if hasattr(self, name):
+                delattr(self, name)
 
     def task(self) -> Task:
         return self._task

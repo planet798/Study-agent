@@ -184,7 +184,7 @@ class ExtraTaskService:
     def _create_extra_task(self, cand: dict, date_str: str, difficulty: str):
         label = DIFFICULTY_LABELS[difficulty]
         minutes = DIFFICULTY_MINUTES[difficulty]
-        return self.repo.create(
+        task = self.repo.create(
             title=f"【额外·{label}】{cand['title']}",
             description="用户主动的额外学习任务，不推进正式学习计划。",
             category="额外学习",
@@ -199,3 +199,13 @@ class ExtraTaskService:
             scheduled_date=date_str,
             difficulty=difficulty,
         )
+        # 复用 StudyPlanService 的统一 topic -> knowledge_point 关联实现，
+        # 让“只有 topic_id”的额外任务创建后就直接获得 kp（幂等）。
+        if self.study_plan_service is not None:
+            try:
+                linked = self.study_plan_service.link_task_knowledge_point(task)
+                if linked is not None:
+                    task = linked
+            except Exception:  # noqa: BLE001 - 关联失败不影响额外任务生成
+                pass
+        return task
