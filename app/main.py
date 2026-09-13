@@ -161,6 +161,143 @@ def _run_add_jd_cli(argv) -> int:
         conn.close()
 
 
+def _print_summary_preview(preview: dict, dry_run: bool) -> None:
+    tag = "[dry-run 预览]" if dry_run else "[已保存]"
+    print(f"== 每日 JD 汇总 {tag} ==")
+    print(f"日期: {preview.get('summary_date')} | 目标: {preview.get('target_type')} "
+          f"| 样本岗位数: {preview.get('sample_count')}")
+    if preview.get("errors"):
+        print("数据错误（未写入）：")
+        for e in preview["errors"]:
+            print(f"  ! {e}")
+        return
+    sample = preview.get("sample_count") or 0
+    print("已匹配技能：")
+    for r in preview["matched"]:
+        extra = (f" | must {r['must_count']} plus {r['plus_count']}"
+                 if (r.get("must_count") or r.get("plus_count")) else "")
+        print(f"  {r['name']}: {r['mention_count']}/{sample} "
+              f"({r['frequency'] * 100:.1f}%){extra}")
+    if preview.get("unmatched"):
+        print("未匹配技能（已保留原始写法）：")
+        for r in preview["unmatched"]:
+            print(f"  {r['raw_skill_name']}: {r['mention_count']}/{sample} "
+                  f"({r['frequency'] * 100:.1f}%)")
+
+
+def _run_add_jd_summary_cli(argv):
+    """add-jd-summary 子命令：录入/更新“某天 N 家岗位的技术汇总”。
+
+    用法：
+      study-agent add-jd-summary --date 2026-09-14 --sample-count 15
+        --file summary.txt [--target internship] [--note ...] [--dry-run] [--db ...]
+    """
+    from app.database.jd_summary_repository import JdDailySummaryRepository
+    from app.database.skill_repository import SkillRepository
+    from app.services.jd_summary_service import (
+        DEFAULT_TARGET_TYPE,
+        JdSummaryService,
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="study-agent add-jd-summary",
+        description="录入每日 JD 技术汇总（同一天同一目标幂等更新）。",
+    )
+    parser.add_argument("--date", required=True, help="汇总日期 YYYY-MM-DD")
+    parser.add_argument("--sample-count", type=int, required=True,
+                        help="当天人工查看的岗位总数（必须 > 0）")
+    parser.add_argument("--target", default=DEFAULT_TARGET_TYPE)
+    parser.add_argument("--file", default=None, help="汇总文本文件")
+    parser.add_argument("--text", default=None, help="汇总文本")
+    parser.add_argument("--note", default="")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--db", default=None)
+    args, _ = parser.parse_known_args(argv)
+
+    if args.text is not None and args.file is not None:
+        parser.error("--file 与 --text 只能提供其中一个")
+    if args.text is None and args.file is None:
+        parser.error("必须提供 --file 或 --text")
+    if args.text is not None:
+        text = args.text
+    else:
+        try:
+            text = Path(args.file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"读取汇总文件失败: {e}", file=sys.stderr)
+            return 1
+
+    conn = get_connection(args.db)
+    try:
+        svc = JdSummaryService(
+            JdDailySummaryRepository(conn), SkillRepository(conn)
+        )
+        if args.dry_run:
+            preview = svc.preview_summary(
+                text, args.sample_count, args.target, args.date
+            )
+            _print_summary_preview(preview, dry_run=True)
+            return 0 if preview["valid"] else 1
+        try:
+            svc.save_summary(
+                args.date, text, args.sample_count, args.target, note=args.note
+            )
+        except ValueError as e:
+            print(f"保存失败：{e}", file=sys.stderr)
+            return 1
+        preview = svc.preview_summary(
+            text, args.sample_count, args.target, args.date
+        )
+        _print_summary_preview(preview, dry_run=False)
+        return 0
+    finally:
+        conn.close()
+
+
+def _run_jd_trends_cli(argv):
+    """jd-trends 子命令：输出近期市场频率（只基于每日汇总）。"""
+    from app.database.jd_summary_repository import JdDailySummaryRepository
+    from app.database.skill_repository import SkillRepository
+    from app.services.jd_summary_service import (
+        DEFAULT_TARGET_TYPE,
+        JdSummaryService,
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="study-agent jd-trends",
+        description="近期 JD 技术趋势（默认只看每日汇总，不并入单条 JD）。",
+    )
+    parser.add_argument("--days", type=int, default=14)
+    parser.add_argument("--target", default=DEFAULT_TARGET_TYPE)
+    parser.add_argument("--end", default=None, help="窗口结束日，默认今天")
+    parser.add_argument("--db", default=None)
+    args, _ = parser.parse_known_args(argv)
+
+    conn = get_connection(args.db)
+    try:
+        svc = JdSummaryService(
+            JdDailySummaryRepository(conn), SkillRepository(conn)
+        )
+        end = args.end or today()
+        trend = svc.compute_skill_trends(end, args.days, args.target)
+        print(f"== 近 {trend['window_days']} 天 JD 技术趋势 "
+              f"[{trend['start_date']} ~ {trend['end_date']}] "
+              f"| 目标 {trend['target_type']} | 样本 {trend['sample_count']} 个岗位 ==")
+        if not trend["skills"]:
+            print("窗口内暂无每日汇总数据。")
+        for r in trend["skills"]:
+            print(f"  {r['name']}: {r['mention_count']}"
+                  f" ({r['frequency'] * 100:.1f}%)")
+        if trend.get("unmatched"):
+            print("未匹配技能：")
+            for r in trend["unmatched"]:
+                print(f"  {r['name']}: {r['mention_count']}"
+                      f" ({r['frequency'] * 100:.1f}%)")
+        return 0
+    finally:
+        conn.close()
+
+
 def _print_impact(impact: dict, dry_run: bool) -> None:
     tag = "[dry-run 预览]" if dry_run else "[已应用]"
     print(f"== 影响分析 {tag} ==")
@@ -277,6 +414,10 @@ def _run_export_note_cli(argv) -> int:
 
 def main() -> int:
     # 0) 子命令：不进 GUI
+    if "add-jd-summary" in sys.argv[1:]:
+        return _run_add_jd_summary_cli(sys.argv[2:])
+    if "jd-trends" in sys.argv[1:]:
+        return _run_jd_trends_cli(sys.argv[2:])
     if "add-jd" in sys.argv[1:]:
         return _run_add_jd_cli(sys.argv[2:])
     if "export-note" in sys.argv[1:]:

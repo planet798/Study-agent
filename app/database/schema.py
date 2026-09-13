@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -426,6 +426,56 @@ def _migrate_v8(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[8] = _migrate_v8
+
+
+# ============================================================
+# v9：每日 JD 技术汇总（Step 4）
+# ============================================================
+# jd_daily_summaries：人工汇总的“某天看了 N 家岗位”的市场样本。
+#   UNIQUE(summary_date, target_type) 保证同一天同一目标只有一份，
+#   重新整理时走 update/replace，不会叠加造成 double count。
+# jd_daily_skill_stats：该样本的技能统计。skill_id 可为空（未匹配技能），
+#   raw_skill_name 永远保留用户原始写法。
+
+_V9_SQL = """
+CREATE TABLE IF NOT EXISTS jd_daily_summaries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    summary_date TEXT    NOT NULL,
+    target_type  TEXT    NOT NULL DEFAULT 'internship',
+    sample_count INTEGER NOT NULL,
+    raw_text     TEXT    NOT NULL DEFAULT '',
+    note         TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL,
+    updated_at   TEXT    NOT NULL,
+    UNIQUE(summary_date, target_type)
+);
+CREATE INDEX IF NOT EXISTS idx_jd_daily_summaries_date
+    ON jd_daily_summaries(summary_date, target_type);
+
+CREATE TABLE IF NOT EXISTS jd_daily_skill_stats (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    summary_id     INTEGER NOT NULL,
+    skill_id       INTEGER,
+    raw_skill_name TEXT    NOT NULL DEFAULT '',
+    mention_count  INTEGER NOT NULL DEFAULT 0,
+    must_count     INTEGER NOT NULL DEFAULT 0,
+    plus_count     INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(summary_id) REFERENCES jd_daily_summaries(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_jd_daily_stats_summary
+    ON jd_daily_skill_stats(summary_id);
+CREATE INDEX IF NOT EXISTS idx_jd_daily_stats_skill
+    ON jd_daily_skill_stats(skill_id);
+"""
+
+
+def _migrate_v9(conn: sqlite3.Connection) -> None:
+    """v9：创建每日 JD 汇总两张表（幂等）。"""
+    conn.executescript(_V9_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[9] = _migrate_v9
 
 
 def get_schema_version(conn) -> int:

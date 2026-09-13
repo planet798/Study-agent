@@ -230,14 +230,12 @@ def test_v5_adds_difficulty_column(tmp_path):
 
 
 def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
-    """模拟未来 v9 迁移：能按序执行，且重复 migrate 不重复执行。
+    """模拟未来迁移：能按序执行，且重复 migrate 不重复执行。
 
-    注：v6（skills/jds/learning_outcomes）、v7（jds.content_hash）、
-    v8（learning_outcomes.task_id/source_attempt_id）已真实存在，
-    因此这里用 v9 模拟。
+    真实 v6/v7/v8/v9 已存在，因此动态使用 SCHEMA_VERSION + 1 模拟“下一个版本”。
     """
     path = tmp_path / "future.db"
-    # 先建到真实最新版本（v1..v8）
+    # 先建到真实最新版本
     raw = sqlite3.connect(str(path))
     try:
         migrate(raw)
@@ -246,24 +244,25 @@ def test_future_migration_applied_and_idempotent(tmp_path, monkeypatch):
         raw.close()
 
     calls = []
+    next_v = schema_module.SCHEMA_VERSION + 1
 
-    def _v9(conn):
+    def _future(conn):
         calls.append(1)
         add_column_if_not_exists(
             conn, "tasks", "extra_flag", "TEXT NOT NULL DEFAULT 'x'"
         )
 
-    monkeypatch.setitem(schema_module._MIGRATIONS, 9, _v9)
-    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", 9)
+    monkeypatch.setitem(schema_module._MIGRATIONS, next_v, _future)
+    monkeypatch.setattr(schema_module, "SCHEMA_VERSION", next_v)
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == 9
+        assert get_schema_version(conn) == next_v
         cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
         assert "extra_flag" in cols
-        # 再次迁移：版本不变，真实 v9 迁移函数不再执行
-        assert migrate(conn) == 9
-        assert migrate(conn) == 9
+        # 再次迁移：版本不变，迁移函数不再执行
+        assert migrate(conn) == next_v
+        assert migrate(conn) == next_v
         assert len(calls) == 1
     finally:
         conn.close()
