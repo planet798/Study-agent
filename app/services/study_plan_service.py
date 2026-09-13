@@ -419,7 +419,7 @@ class StudyPlanService:
 
         # 直接走 repository（等价于 TaskService.create_task 的底层），
         # 保留 source='generated' 与 topic_id 关联，且与 TaskService 兼容。
-        return self.repo.create(
+        task = self.repo.create(
             title=topic.name,
             scheduled_date=date_str,
             description=build_topic_task_content(topic.name, topic.description),
@@ -429,6 +429,8 @@ class StudyPlanService:
             source="generated",
             topic_id=topic.id,
         )
+        # 新建正式任务即建立 topic -> knowledge_point -> task 关联（幂等）
+        return self.link_task_knowledge_point(task, topic)
 
     def _done_topic_ids(self) -> set[int]:
         """返回所有已完成过的主主题 id。"""
@@ -543,3 +545,87 @@ class StudyPlanService:
                 continue
         self.repo.conn.commit()
         return repaired
+
+    # ================= topic -> knowledge_point 关联（Review 链路修复） =================
+
+    def link_task_knowledge_point(self, task, topic=None):
+        """把一个 generated/new 正式任务幂等关联到其 topic 的唯一知识点。
+
+        这是 topic -> knowledge_point -> task 的**唯一实现**（AI path 与
+        fallback path 都复用它，不各写一套）。
+
+        约束：
+        - 只处理 source='generated' 且 task_type='new' 的任务；
+        - 只处理 topic_id 非空且能查到 topic 的任务；
+        - 只写 tasks.knowledge_point_id（以及 updated_at），其它字段一律不动；
+        - 幂等：已有 knowledge_point_id 直接返回，不重复建 kp；
+        - 绝不伪造验收证据（kp 的 mastery/复习字段保持原样）。
+        """
+        if task is None:
+            return task
+        if task.knowledge_point_id is not None:
+            return task
+        if task.source != "generated" or task.task_type != "new":
+            return task
+        if task.topic_id is None or self.assessment_repo is None:
+            return task
+        if topic is None:
+            topic = self.plan_repo.get_topic(task.topic_id)
+        if topic is None:
+            return task
+        from ..utils.date_utils import now_iso
+        from .task_content import build_topic_task_content
+
+        description = (getattr(topic, "description", "") or "") or \
+            build_topic_task_content(topic.name, "")
+        kp = self.assessment_repo.get_or_create_knowledge_point_for_topic(
+            topic.id, topic.name, description
+        )
+        if kp is None:
+            return task
+        self.repo.conn.execute(
+            "UPDATE tasks SET knowledge_point_id = ?, updated_at = ? "
+            "WHERE id = ?",
+            (kp["id"], now_iso(), task.id),
+        )
+        self.repo.conn.commit()
+        return self.repo.get(task.id)
+
+    def repair_task_knowledge_points(self) -> dict:
+        """启动时修复历史任务：为 generated/new 且有 topic_id 的任务补 kp 关联。
+
+        只补“关系”，不补“证据”：不会创建 assessment、不会设置 mastery、
+        不会因为任务 done 就推断“已掌握”。
+
+        处理条件（全部满足）：
+        - source='generated'
+        - task_type='new'
+        - topic_id IS NOT NULL
+        - knowledge_point_id IS NULL
+
+        :return: {"repaired": int, "skipped": int, "error": int}
+        """
+        rows = self.repo.conn.execute(
+            "SELECT * FROM tasks WHERE source = 'generated' AND task_type = 'new'"
+        ).fetchall()
+        repaired = skipped = errors = 0
+        for row in rows:
+            if row["knowledge_point_id"] is not None:
+                skipped += 1
+                continue
+            if row["topic_id"] is None:
+                skipped += 1
+                continue
+            try:
+                task = self.repo.get(row["id"])
+                before = task.knowledge_point_id
+                after = self.link_task_knowledge_point(task)
+                if after is not None and after.knowledge_point_id != before \
+                        and after.knowledge_point_id is not None:
+                    repaired += 1
+                else:
+                    skipped += 1
+            except Exception:  # noqa: BLE001 - 单条失败不影响其它任务与启动
+                errors += 1
+                continue
+        return {"repaired": repaired, "skipped": skipped, "error": errors}

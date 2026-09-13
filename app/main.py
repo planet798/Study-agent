@@ -341,6 +341,17 @@ def main() -> int:
     except Exception:  # noqa: BLE001 - 回填失败不影响启动
         pass
 
+    # 存量“生成型新任务”topic -> knowledge_point 关联修复（一次性、幂等；
+    # 只补关系、不补证据；失败不阻止启动）
+    try:
+        kp_result = study_plan_service.repair_task_knowledge_points()
+        print(
+            "[startup] 知识点关联修复：repaired={repaired} skipped={skipped} "
+            "error={error}".format(**kp_result)
+        )
+    except Exception:  # noqa: BLE001 - 修复失败不影响启动
+        pass
+
     # 技能池为空时按 career_context 幂等 seed 并链接到现有主题（不覆盖已维护状态）
     if not skill_repo.list_all():
         skill_service.seed_from_career_context()

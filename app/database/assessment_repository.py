@@ -89,6 +89,55 @@ class AssessmentRepository:
         ).fetchone()
         return _row(row)
 
+    def get_knowledge_point_by_topic(self, topic_id: int) -> dict | None:
+        """按 study_topic.id 取该主题唯一的知识点（不存在返回 None）。"""
+        if topic_id is None:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM knowledge_points WHERE topic_id = ? "
+            "ORDER BY id ASC LIMIT 1",
+            (topic_id,),
+        ).fetchone()
+        return _row(row)
+
+    def get_or_create_knowledge_point_for_topic(
+        self, topic_id: int, name: str, description: str = ""
+    ) -> dict:
+        """幂等地取得/创建某个 study_topic 对应的唯一知识点。
+
+        一个 topic 只允许对应一个 knowledge_point。幂等保证（无需改 schema）：
+        1. 先按 topic_id 命中直接复用，**不修改任何 mastery / 复习字段**；
+        2. 未命中再按 name 查找（knowledge_points.name 有 UNIQUE 约束）：旧数据
+           可能已有同名但 topic_id 为空的 kp，此时复用并补上 topic_id（只改关系）；
+        3. 仍未命中才 INSERT；INSERT 由 name 的 UNIQUE 约束兜底，若并发/重复触发
+           IntegrityError 则回查返回既有记录，绝不产生第二个 kp。
+
+        所有分支都只写 topic_id（以及 updated_at），绝不伪造验收证据。
+        """
+        if topic_id is None:
+            raise ValueError("topic_id 不能为空")
+        existing = self.get_knowledge_point_by_topic(topic_id)
+        if existing is not None:
+            return existing
+        clean = (name or "").strip()
+        if not clean:
+            raise ValueError("知识点名不能为空")
+        by_name = self.get_knowledge_point_by_name(clean)
+        if by_name is not None:
+            if by_name.get("topic_id") is None:
+                return self.update_knowledge_point(
+                    by_name["id"], topic_id=topic_id
+                )
+            return by_name
+        try:
+            return self.create_knowledge_point(clean, description, topic_id)
+        except sqlite3.IntegrityError:
+            again = self.get_knowledge_point_by_topic(topic_id) or \
+                self.get_knowledge_point_by_name(clean)
+            if again is not None:
+                return again
+            raise
+
     def list_knowledge_points(self) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM knowledge_points ORDER BY id ASC"

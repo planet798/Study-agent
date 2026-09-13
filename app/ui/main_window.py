@@ -638,8 +638,17 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("验收功能不可用", 3000)
             return
         if task.knowledge_point_id is None:
-            self.statusBar().showMessage("该任务暂不支持验收（无关联知识点）", 3000)
-            return
+            # 安全网：正常应由启动 repair / 新任务创建链路完成关联。
+            # 若某任务漏了（如本次会话内新生成），只要它有 topic_id 就现场
+            # 幂等补齐 topic -> knowledge_point 关联（只补关系、不补证据）；
+            # 没有 topic 的任务（manual / extra 等）仍明确不支持验收。
+            healed = self._ensure_task_knowledge_point(task)
+            if healed is None or healed.knowledge_point_id is None:
+                self.statusBar().showMessage(
+                    "该任务暂不支持验收（无关联知识点）", 3000
+                )
+                return
+            task = healed
         if not svc.is_configured():
             from .dialogs import show_warning
 
@@ -665,6 +674,19 @@ class MainWindow(QMainWindow):
         worker.finished.connect(lambda w=worker: self._release_worker(w))
         self._ai_workers.append(worker)
         worker.start()
+
+    def _ensure_task_knowledge_point(self, task):
+        """验收安全网：为缺 knowledge_point_id 的 generated/new 任务幂等补关联。
+
+        只补关系、不补证据（不创建 assessment、不设置 mastery）。无 topic 或
+        非 generated/new 的任务原样返回（knowledge_point_id 仍为 None）。
+        """
+        if self.study_plan_service is None:
+            return task
+        try:
+            return self.study_plan_service.link_task_knowledge_point(task)
+        except Exception:  # noqa: BLE001 - 安全网失败不应崩溃
+            return task
 
     def _on_assessment_ready(self, attempt) -> None:
         self.statusBar().clearMessage()

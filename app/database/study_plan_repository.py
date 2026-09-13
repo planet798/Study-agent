@@ -170,6 +170,12 @@ class StudyPlanRepository:
         ).fetchall()
         return [self._topic_from_row(r) for r in rows]
 
+    def get_topic(self, topic_id: int) -> StudyTopic | None:
+        row = self.conn.execute(
+            "SELECT * FROM study_topics WHERE id = ?", (topic_id,)
+        ).fetchone()
+        return self._topic_from_row(row) if row else None
+
     # ---------- 就地更新（迁移 / 同步长期学习路线用） ----------
 
     _PHASE_UPDATABLE = ("name", "description", "start_date", "end_date",

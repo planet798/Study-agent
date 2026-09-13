@@ -59,6 +59,10 @@ class DailyPlannerService:
         self.study_plan_service = study_plan_service or StudyPlanService(
             repo, self.plan_repo
         )
+        # 保证共用的 StudyPlanService 具备 knowledge_point 关联能力
+        if self.study_plan_service.assessment_repo is None and \
+                assessment_repo is not None:
+            self.study_plan_service.assessment_repo = assessment_repo
         self.planner = planner
         self.decision_repo = PlannerDecisionRepository(repo.conn)
         self.max_daily_minutes = max_daily_minutes
@@ -483,7 +487,7 @@ class DailyPlannerService:
                 content = build_topic_task_content(rec.title)
         else:
             content = rec.description
-        return self.repo.create(
+        task = self.repo.create(
             title=rec.title,
             scheduled_date=plan_date,
             description=content,
@@ -493,6 +497,9 @@ class DailyPlannerService:
             source="generated",
             topic_id=rec.topic_id,
         )
+        # 与 fallback path 复用同一个 topic -> knowledge_point 关联实现
+        topic = (topic_by_id or {}).get(rec.topic_id)
+        return self.study_plan_service.link_task_knowledge_point(task, topic)
 
     def _done_topic_ids(self) -> set[int]:
         rows = self.repo.conn.execute(
