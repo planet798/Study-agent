@@ -7,6 +7,7 @@ LearningOutcomeService / NotesService；本模块不重算任何优先级。
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -298,3 +301,253 @@ class ResumeMaterialDialog(QDialog):
         row.addStretch()
         row.addWidget(close_btn)
         layout.addLayout(row)
+
+
+def format_summary_preview(preview: dict) -> str:
+    """把 JdSummaryService.preview_summary 渲染成文本（UI 不算任何统计）。"""
+    lines: list[str] = []
+    if preview.get("errors"):
+        lines.append("数据错误（不会保存）：")
+        for e in preview["errors"]:
+            lines.append(f"  ! {e}")
+        lines.append("")
+    sample = preview.get("sample_count") or 0
+    lines.append(f"样本岗位数：{sample}")
+    lines.append("")
+    matched = preview.get("matched") or []
+    if matched:
+        lines.append("已匹配技能：")
+        for r in matched:
+            lines.append(
+                f"  {r['name']}    {r['mention_count']} / {sample}    "
+                f"{r['frequency'] * 100:.1f}%"
+            )
+    else:
+        lines.append("本次汇总暂无可映射技能")
+    unmatched = preview.get("unmatched") or []
+    if unmatched:
+        lines.append("")
+        lines.append("未匹配技能（已保存原始写法）：")
+        for r in unmatched:
+            lines.append(
+                f"  {r['raw_skill_name']}    {r['mention_count']} / {sample}"
+            )
+        lines.append(
+            "这些技术已保存，但暂未映射到 Study Agent 技能体系，"
+            "因此当前不会参与技能趋势/规划。"
+        )
+    return "\n".join(lines)
+
+
+class JdSummaryInputDialog(QDialog):
+    """添加今日 JD 技术汇总：日期 + 目标 + 样本数 + 汇总文本 → 预览 → 保存。
+
+    所有解析 / alias / 校验 / 频率都由 JdSummaryService 完成，UI 不做任何统计。
+    """
+
+    def __init__(self, jd_summary_service, today: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.service = jd_summary_service
+        self.saved: dict | None = None
+        self._last_valid: dict | None = None
+        self.setWindowTitle("添加今日 JD 技术汇总")
+        self.setModal(True)
+        self.resize(660, 640)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        title = QLabel("添加今日 JD 技术汇总（人工统计，仅作为市场样本）")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        row = QHBoxLayout()
+        self.date_edit = QLineEdit(today)
+        self.date_edit.setPlaceholderText("YYYY-MM-DD")
+        self.target_combo = QComboBox()
+        for label, value in (("实习", "internship"), ("校招", "campus"),
+                             ("社招", "fulltime")):
+            self.target_combo.addItem(label, value)
+        self.sample_spin = QSpinBox()
+        self.sample_spin.setRange(1, 100000)
+        self.sample_spin.setValue(1)
+        row.addWidget(QLabel("日期："))
+        row.addWidget(self.date_edit, 1)
+        row.addWidget(QLabel("目标："))
+        row.addWidget(self.target_combo)
+        row.addWidget(QLabel("样本岗位数："))
+        row.addWidget(self.sample_spin)
+        layout.addLayout(row)
+
+        self.notice = QLabel("")
+        self.notice.setObjectName("TaskMeta")
+        self.notice.setWordWrap(True)
+        layout.addWidget(self.notice)
+
+        self.text_edit = QPlainTextEdit()
+        self.text_edit.setPlaceholderText(
+            "每行一个技能，例如：\nPython 13\nPyTorch 11\nEmbedding 9\n"
+            "也可用 Python: 13 / Python：13 / HF 4 / Python must=10 plus=2"
+        )
+        layout.addWidget(self.text_edit, 2)
+
+        btn_row = QHBoxLayout()
+        self.preview_btn = QPushButton("分析预览")
+        self.preview_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(self.preview_btn)
+        self.preview_btn.clicked.connect(self._preview)
+        self.save_btn = QPushButton("确认保存")
+        self.save_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(self.save_btn)
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self._save)
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(self.preview_btn)
+        btn_row.addWidget(self.save_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+        self.preview_edit = QPlainTextEdit()
+        self.preview_edit.setReadOnly(True)
+        self.preview_edit.setPlaceholderText("点击“分析预览”查看结果（不写库）")
+        layout.addWidget(self.preview_edit, 2)
+
+        self._load_existing(today)
+
+    # ---------- 同日已有数据 ----------
+
+    def _target(self) -> str:
+        return self.target_combo.currentData() or "internship"
+
+    def _load_existing(self, today: str) -> None:
+        if self.service is None:
+            return
+        try:
+            summary = self.service.get_summary(today, self._target())
+        except Exception:  # noqa: BLE001
+            summary = None
+        if summary:
+            self.sample_spin.setValue(int(summary.get("sample_count") or 1))
+            self.text_edit.setPlainText(summary.get("raw_text") or "")
+            self.notice.setText(
+                "今天已有一份 JD 汇总，保存后将更新原记录，不会重复累计。"
+            )
+
+    # ---------- 预览 ----------
+
+    def _preview(self) -> dict | None:
+        if self.service is None:
+            self.preview_edit.setPlainText("JD 汇总服务不可用")
+            return None
+        text = self.text_edit.toPlainText()
+        try:
+            preview = self.service.preview_summary(
+                text, self.sample_spin.value(), self._target(),
+                self.date_edit.text().strip(),
+            )
+        except Exception as e:  # noqa: BLE001 - 不崩溃
+            self.preview_edit.setPlainText(f"分析失败：{e}")
+            self.save_btn.setEnabled(False)
+            self._last_valid = None
+            return None
+        self.preview_edit.setPlainText(format_summary_preview(preview))
+        self._last_valid = preview if preview.get("valid") else None
+        self.save_btn.setEnabled(bool(self._last_valid))
+        return preview
+
+    # ---------- 保存 ----------
+
+    def _save(self) -> None:
+        preview = self._preview()  # 始终以当前输入重新校验
+        if not preview or not preview.get("valid"):
+            return
+        date = self.date_edit.text().strip()
+        try:
+            row = self.service.save_summary(
+                date, self.text_edit.toPlainText(), self.sample_spin.value(),
+                self._target(),
+            )
+        except Exception as e:  # noqa: BLE001 - 保存失败不崩溃
+            self.preview_edit.setPlainText(f"保存失败：{e}")
+            return
+        self.saved = {
+            "summary_date": row["summary_date"],
+            "sample_count": row["sample_count"],
+            "target_type": row["target_type"],
+        }
+        self.accept()
+
+
+class JdHistoryDialog(QDialog):
+    """历史 individual JD：列表 + 查看详情（复用 JdDetailDialog）+ 兼容“添加 JD”。"""
+
+    def __init__(self, jd_service, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.jd_service = jd_service
+        self.setWindowTitle("历史 JD")
+        self.setModal(True)
+        self.resize(680, 520)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        title = QLabel("历史 JD（单条记录，保留作为历史证据）")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        try:
+            jds = self.jd_service.jd_repo.list_all() if jd_service else []
+        except Exception:  # noqa: BLE001
+            jds = []
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        col = QVBoxLayout(inner)
+        col.setContentsMargins(0, 0, 0, 0)
+        if not jds:
+            empty = QLabel("暂无历史 JD")
+            empty.setObjectName("EmptyHint")
+            col.addWidget(empty)
+        for jd in jds:
+            parsed = jd.get("parsed") or {}
+            row_w = QWidget()
+            row = QHBoxLayout(row_w)
+            row.setContentsMargins(0, 0, 0, 0)
+            info = QLabel(
+                f"{jd.get('uploaded_at') or '—'}｜{jd.get('company') or '—'}｜"
+                f"{jd.get('title') or '—'}｜{jd.get('direction') or '—'}｜"
+                f"{'实习' if parsed.get('intern') else '全职'}"
+            )
+            info.setObjectName("TaskMeta")
+            btn = QPushButton("查看详情")
+            btn.setObjectName("SecondaryButton")
+            apply_secondary_button_text(btn)
+            btn.clicked.connect(lambda _=False, jd=jd: self._show_detail(jd))
+            row.addWidget(info, 1)
+            row.addWidget(btn)
+            col.addWidget(row_w)
+        col.addStretch()
+        scroll.setWidget(inner)
+        layout.addWidget(scroll, 1)
+
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("添加 JD（兼容入口）")
+        add_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(add_btn)
+        add_btn.clicked.connect(self._add_jd)
+        close_btn = QPushButton("关闭")
+        close_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(close_btn)
+        close_btn.clicked.connect(self.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _show_detail(self, jd: dict) -> None:
+        JdDetailDialog(self.jd_service, jd, parent=self).exec()
+
+    def _add_jd(self) -> None:
+        JdInputDialog(self.jd_service, parent=self).exec()

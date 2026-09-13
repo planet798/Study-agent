@@ -79,7 +79,7 @@ def _group_items(w, group):
     """取某个分组标题后面、下一个分组/区域前的条目行。"""
     labels = _labels(w)
     boundaries = {"当前学习", "待解锁", "已掌握", "技能概览",
-                  "最新 JD / 岗位需求"}
+                  "近期 JD 技术趋势"}
     if group not in labels:
         return []
     i = labels.index(group)
@@ -244,7 +244,7 @@ class TestNoRegression:
         w = _window(qtbot, env)
         txt = _txt(w)
         assert "技能概览" in txt
-        assert "最新 JD / 岗位需求" in txt
+        assert "近期 JD 技术趋势" in txt
         # 今日页任务区仍在
         assert w.scroll is not None
 

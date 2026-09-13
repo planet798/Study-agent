@@ -510,6 +510,13 @@ def main() -> int:
     jd_service.parse_ai = (
         build_default_parse_ai(ai_client) if ai_client.is_configured() else None
     )
+    # Step 5：每日 JD 技术汇总（市场样本）；只保存/展示，不接 Planner
+    from app.database.jd_summary_repository import JdDailySummaryRepository
+    from app.services.jd_summary_service import JdSummaryService
+
+    jd_summary_service = JdSummaryService(
+        JdDailySummaryRepository(conn), skill_repo
+    )
     # 长期学习上下文（职业目标/JD/技能路线/能力状态）：作为 AI 规划的长期依据；
     # 文件缺失/非法时返回 None，Planner 自动降级为旧行为，不影响启动。
     long_term_context = load_long_term_context()
@@ -588,6 +595,7 @@ def main() -> int:
         exploration_service=exploration_service,
         skill_service=skill_service,
         jd_service=jd_service,
+        jd_summary_service=jd_summary_service,
         outcome_service=outcome_service,
         notes_service=notes_service,
     )

@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
         exploration_service=None,
         skill_service=None,
         jd_service=None,
+        jd_summary_service=None,
         outcome_service=None,
         notes_service=None,
     ):
@@ -111,6 +112,9 @@ class MainWindow(QMainWindow):
         # Phase A~E 服务：可选；未传则对应职业面板隐藏（不回归旧行为）
         self.skill_service = skill_service
         self.jd_service = jd_service
+        # 每日 JD 技术汇总服务（Step 5）：只读展示 + 保存，不接 Planner
+        self.jd_summary_service = jd_summary_service
+        self._jd_trend_days = 14
         self.outcome_service = outcome_service
         self.notes_service = notes_service
 
@@ -353,7 +357,7 @@ class MainWindow(QMainWindow):
 
         # Phase E：职业 / 技能 / JD 面板（可选注入，异常不崩溃）
         self._add_skill_overview()
-        self._add_jd_panel()
+        self._add_jd_trend_panel()
 
         self.list_layout.addStretch()
 
@@ -683,50 +687,157 @@ class MainWindow(QMainWindow):
         else:
             self._add_label("暂无已掌握技能记录", object_name="EmptyHint")
 
-    def _add_jd_panel(self) -> None:
-        """最新 JD / 岗位需求：列表 + 查看影响 + 添加 JD。"""
-        if self.jd_service is None:
+    def _add_jd_trend_panel(self) -> None:
+        """近期 JD 技术趋势（Step 5）：只展示 Service 结果，不算频率、不接 Planner。"""
+        if self.jd_summary_service is None and self.jd_service is None:
             return
         self._career_panel_added = True
-        self._add_section_header("最新 JD / 岗位需求")
-        try:
-            jds = self.jd_service.jd_repo.list_all()
-        except Exception:  # noqa: BLE001
-            self._add_label("JD 服务异常", object_name="QErrorMessage")
+        self._add_section_header("近期 JD 技术趋势")
+
+        trend = None
+        error = None
+        if self.jd_summary_service is not None:
+            try:
+                trend = self.jd_summary_service.compute_skill_trends(
+                    self.current_date, self._jd_trend_days, "internship"
+                )
+            except Exception:  # noqa: BLE001 - 趋势异常不崩溃
+                error = "JD 趋势服务异常"
+
+        # 14 / 30 天切换
+        toggle = QHBoxLayout()
+        toggle.setContentsMargins(0, 0, 0, 0)
+        for days, text in ((14, "近14天"), (30, "近30天")):
+            btn = QPushButton(text)
+            if days == self._jd_trend_days:
+                btn.setObjectName("PrimaryButton")
+            else:
+                btn.setObjectName("SecondaryButton")
+                apply_secondary_button_text(btn)
+            btn.clicked.connect(lambda _=False, d=days: self._set_jd_trend_days(d))
+            toggle.addWidget(btn)
+        toggle.addStretch()
+        toggle_w = QWidget()
+        toggle_w.setLayout(toggle)
+        self.list_layout.addWidget(toggle_w)
+
+        if error is not None:
+            self._add_label(error, object_name="QErrorMessage")
+        elif trend is None or (
+            not trend["skills"] and not trend.get("unmatched")
+        ):
+            self._add_label("暂无近期 JD 技术汇总", object_name="EmptyHint")
+        else:
+            self._add_label(
+                f"近{trend['window_days']}天样本：{trend['sample_count']} 个实习岗位"
+            )
+            self._add_label(
+                "以下趋势基于你最近收集的目标岗位样本。",
+                object_name="TaskMeta",
+            )
+            for r in trend["skills"][:8]:
+                self._add_label(
+                    f"{r['name']}    {r['frequency'] * 100:.1f}%"
+                )
+            if trend.get("unmatched"):
+                self._add_label("未匹配技能", object_name="TaskTitle")
+                for r in trend["unmatched"][:5]:
+                    self._add_label(f"{r['name']}    {r['mention_count']} 次")
+                self._add_label(
+                    "这些技术已保存，但暂未映射到 Study Agent 技能体系，"
+                    "因此当前不会参与技能趋势/规划。",
+                    object_name="TaskMeta",
+                )
+            self._add_skill_gap_from_trend(trend)
+            self._add_label(
+                "频率 = 近期汇总中提到该技能的岗位数 / 总样本岗位数。",
+                object_name="TaskMeta",
+            )
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        if self.jd_summary_service is not None:
+            add_btn = QPushButton("添加今日 JD 技术汇总")
+            add_btn.setObjectName("SecondaryButton")
+            apply_secondary_button_text(add_btn)
+            add_btn.clicked.connect(self._on_add_jd_summary)
+            btn_row.addWidget(add_btn)
+        if self.jd_service is not None:
+            hist_btn = QPushButton("查看历史 JD")
+            hist_btn.setObjectName("SecondaryButton")
+            apply_secondary_button_text(hist_btn)
+            hist_btn.clicked.connect(self._on_view_history_jd)
+            btn_row.addWidget(hist_btn)
+        btn_row.addStretch()
+        btn_w = QWidget()
+        btn_w.setLayout(btn_row)
+        self.list_layout.addWidget(btn_w)
+
+    def _add_skill_gap_from_trend(self, trend: dict) -> None:
+        """只读展示“高频但未掌握 / 前置未满足”，gate 全部来自 SkillService。"""
+        if self.skill_service is None:
             return
-        if not jds:
-            self._add_label("暂无已分析 JD")
-        for jd in jds[-5:]:  # 展示最近 5 条
-            parsed = jd.get("parsed") or {}
-            row_w = QWidget()
-            row = QHBoxLayout(row_w)
-            row.setContentsMargins(0, 0, 0, 0)
-            info = QLabel(
-                f"{jd.get('company') or '—'}｜{jd.get('title') or '—'}｜"
-                f"{jd.get('direction') or '—'}｜"
-                f"{'实习' if parsed.get('intern') else '全职'}｜"
-                f"{jd.get('uploaded_at') or '—'}"
+        try:
+            by_name = {s["name"]: s for s in self.skill_service.skill_repo.list_all()}
+        except Exception:  # noqa: BLE001
+            return
+        gaps: list[str] = []
+        blocked: list[tuple[str, list[str]]] = []
+        for r in trend.get("skills") or []:
+            skill = by_name.get(r["name"])
+            if skill is None:
+                continue
+            try:
+                if self.skill_service.is_blocked(skill):
+                    blocked.append((
+                        r["name"],
+                        self.skill_service.missing_prerequisites(skill),
+                    ))
+                elif skill.get("status") != "mastered":
+                    gaps.append(r["name"])
+            except Exception:  # noqa: BLE001
+                continue
+        if gaps:
+            self._add_label("当前主要技能缺口", object_name="TaskTitle")
+            for name in gaps[:5]:
+                self._add_label(f"{name}    高频 · 尚未掌握")
+        if blocked:
+            self._add_label("暂不提前", object_name="TaskTitle")
+            for name, missing in blocked[:5]:
+                self._add_label(f"{name}    缺：{'、'.join(missing)}")
+
+    def _set_jd_trend_days(self, days: int) -> None:
+        self._jd_trend_days = int(days)
+        self.refresh()
+
+    def _on_add_jd_summary(self) -> None:
+        """添加今日 JD 技术汇总：只保存 + 刷新 UI；不重规划、不改 active task。"""
+        if self.jd_summary_service is None:
+            return
+        from .career_dialogs import JdSummaryInputDialog
+
+        dlg = JdSummaryInputDialog(
+            self.jd_summary_service, self.current_date, parent=self
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.saved:
+            saved = dlg.saved
+            self.statusBar().showMessage(
+                f"{saved['summary_date']} JD 技术汇总已保存，共 "
+                f"{saved['sample_count']} 个岗位样本。",
+                6000,
             )
-            info.setObjectName("TaskMeta")
-            btn = QPushButton("查看影响")
-            btn.setObjectName("SecondaryButton")
-            apply_secondary_button_text(btn)
-            btn.clicked.connect(
-                lambda _=False, jd=jd: self._show_jd_detail(jd)
-            )
-            row.addWidget(info, 1)
-            row.addWidget(btn)
-            self.list_layout.addWidget(row_w)
-        add_btn = QPushButton("添加 JD")
-        add_btn.setObjectName("SecondaryButton")
-        apply_secondary_button_text(add_btn)
-        add_btn.clicked.connect(self._on_add_jd)
-        ab = QHBoxLayout()
-        ab.addStretch()
-        ab.addWidget(add_btn)
-        abw = QWidget()
-        abw.setLayout(ab)
-        self.list_layout.addWidget(abw)
+            self.refresh()
+
+    def _on_view_history_jd(self) -> None:
+        if self.jd_service is None:
+            return
+        from .career_dialogs import JdHistoryDialog
+
+        JdHistoryDialog(self.jd_service, parent=self).exec()
+
+    def _add_jd_panel(self) -> None:
+        """兼容保留：旧“最新 JD / 岗位需求”面板（已由 _add_jd_trend_panel 取代）。"""
+        self._add_jd_trend_panel()
 
     # ---------- 职业面板处理器 ----------
 

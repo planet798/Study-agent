@@ -88,9 +88,13 @@ def _make_env(conn, plan_repo, with_jd=True, with_outcome=True, seed=True,
         )
     ns = NotesService(repo=repo, study_plan_service=sps, outcome_service=lo,
                       assessment_repo=arepo, jd_service=jd)
+    from app.database.jd_summary_repository import JdDailySummaryRepository
+    from app.services.jd_summary_service import JdSummaryService
+
+    jd_summary = JdSummaryService(JdDailySummaryRepository(conn), skill_repo)
     return {
         "repo": repo, "arepo": arepo, "sps": sps, "skill_repo": skill_repo,
-        "ss": ss, "jd": jd, "lo": lo, "ns": ns,
+        "ss": ss, "jd": jd, "jd_summary": jd_summary, "lo": lo, "ns": ns,
     }
 
 
@@ -102,6 +106,7 @@ def _window(qtbot, env, **extra):
         study_plan_service=env["sps"],
         skill_service=env["ss"],
         jd_service=env["jd"],
+        jd_summary_service=env["jd_summary"],
         outcome_service=env["lo"],
         notes_service=env["ns"],
         **extra,
@@ -167,18 +172,29 @@ class TestSkillPanel:
 
 
 class TestJdPanel:
-    def test_jd_list_shown(self, qtbot, conn, plan_repo):
+    def test_trend_panel_and_history_entry(self, qtbot, conn, plan_repo):
         env = _make_env(conn, plan_repo)
         w = _window(qtbot, env)
         txt = _label_text(w)
-        assert "最新 JD / 岗位需求" in txt
-        assert "推荐算法实习生" in txt
-        assert "某公司" in txt
+        assert "近期 JD 技术趋势" in txt
+        assert "暂无近期 JD 技术汇总" in txt
+        labels = _labels(w)
+        btns = [b.text() for b in w.list_container.findChildren(QPushButton)]
+        assert any("添加今日 JD 技术汇总" in x for x in btns)
+        assert any("查看历史 JD" in x for x in btns)
 
-    def test_jd_empty_state(self, qtbot, conn, plan_repo):
-        env = _make_env(conn, plan_repo, with_jd=True, add_jd_data=False)
-        w = _window(qtbot, env)
-        assert "暂无已分析 JD" in _label_text(w)
+    def test_individual_jd_still_viewable_in_history(self, qtbot, conn,
+                                                    plan_repo):
+        from app.ui.career_dialogs import JdHistoryDialog
+
+        env = _make_env(conn, plan_repo)
+        dlg = JdHistoryDialog(env["jd"])
+        qtbot.addWidget(dlg)
+        from PySide6.QtWidgets import QLabel
+
+        texts = "\n".join(l.text() for l in dlg.findChildren(QLabel))
+        assert "推荐算法实习生" in texts
+        assert "某公司" in texts
 
     def test_jd_detail_dialog_renders_impact(self, qtbot, conn, plan_repo):
         env = _make_env(conn, plan_repo)
@@ -228,13 +244,15 @@ class TestStates:
     def test_error_state_panel(self, qtbot, conn, plan_repo, monkeypatch):
         env = _make_env(conn, plan_repo)
 
-        def boom():
-            raise RuntimeError("repo down")
+        def boom(*_a, **_k):
+            raise RuntimeError("trend down")
 
-        monkeypatch.setattr(env["jd"].jd_repo, "list_all", boom)
+        monkeypatch.setattr(
+            env["jd_summary"], "compute_skill_trends", boom
+        )
         w = _window(qtbot, env)
         w.refresh()
-        assert "JD 服务异常" in _label_text(w)
+        assert "JD 趋势服务异常" in _label_text(w)
 
 
 class TestNoRegression:
@@ -396,7 +414,8 @@ class TestReadableButtons:
         from PySide6.QtGui import QColor, QPalette
 
         w = self._window_with_all(qtbot, conn, plan_repo)
-        targets = ("继续学习 / 生成额外任务", "添加 JD")
+        targets = ("继续学习 / 生成额外任务", "添加今日 JD 技术汇总",
+                   "查看历史 JD")
         found = self._buttons_by_text(w)
         assert set(targets) <= set(found)
         for text in targets:
