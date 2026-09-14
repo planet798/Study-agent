@@ -45,13 +45,19 @@ class TestDefaultPlan:
     def test_default_plan_has_career_phases(self, sps):
         plan = sps.get_active_plan_full()
         assert plan is not None
-        assert len(plan.phases) == 5
+        assert len(plan.phases) == 6
         names = [p.name for p in plan.phases]
         assert "Python + Linux + Git" in names
         assert "阶段二：深度学习与 LLM 基础" in names
         assert "阶段三：LLM 应用" in names
-        assert "阶段四：模型训练与部署" in names
-        assert "阶段五：后续扩展" in names
+        assert "阶段四：推荐 / 搜索系统基础" in names
+        assert "阶段五：模型训练与部署" in names
+        assert "阶段六：后续扩展" in names
+        # 推荐/搜索阶段位于 LLM 应用之后、模型训练与部署之前
+        assert names.index("阶段三：LLM 应用") < names.index(
+            "阶段四：推荐 / 搜索系统基础")
+        assert names.index("阶段四：推荐 / 搜索系统基础") < names.index(
+            "阶段五：模型训练与部署")
 
     def test_ensure_default_plan_idempotent(self, sps, plan_repo):
         # 再次调用不产生重复
@@ -89,7 +95,7 @@ class TestCurrentPhase:
         assert sps.get_current_phase("2026-08-31") is None
 
     def test_date_after_plan_returns_none(self, sps):
-        assert sps.get_current_phase("2027-09-01") is None
+        assert sps.get_current_phase("2027-11-01") is None
 
     def test_phase_priority_order(self, sps):
         # 阶段按起始日期升序：Phase1 最早

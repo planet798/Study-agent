@@ -748,7 +748,11 @@ class SkillService:
             "Transformer": ["Transformer：Attention / MHA / FFN"],
             "Embedding": ["Embedding 与向量检索"],
             "RAG": ["RAG 全流程搭建"],
-            "Ranking": ["Reranker 重排序", "RRF 排序融合"],
+            "Ranking": [
+                "Reranker 重排序",
+                "RRF 排序融合",
+                "Ranking 基础",
+            ],
             "Agent": ["Agent 实现与多步编排"],
             "模型评估": ["Evaluation / Badcase / LLM-as-Judge"],
             # ---- 补齐：已有真实 topic、语义明确，但之前漏链的技能 ----
@@ -770,6 +774,20 @@ class SkillService:
             "分布式训练底层": ["DDP / ZeRO / DeepSpeed（先理解）"],
             "CUDA": ["C/C++ / CUDA（方向确定后深入）"],
             "复杂推理优化": ["推理优化基础"],
+            # ---- 阶段四：推荐 / 搜索系统基础（搜广推主线） ----
+            # 注意：每个 topic 只归属一个“覆盖 owner”技能，避免 shared topic
+            # 造成 推荐系统基础 -> Recall -> Ranking -> CTR 的循环死锁。
+            "SQL": ["SQL 数据分析基础"],
+            "推荐系统基础": ["推荐系统整体架构", "协同过滤基础"],
+            "Recall": [
+                "Embedding Recall / 向量召回",
+                "双塔召回 Two-Tower",
+                "多路召回与 Candidate Generation",
+            ],
+            "CTR": ["CTR 预估基础", "Wide & Deep / DeepFM 基础"],
+            "Rerank": ["Rerank / 重排基础"],
+            "用户画像": ["用户画像与特征工程"],
+            "LLM + Recommendation": ["LLM + Recommendation 基础"],
         }
         for skill_name in skill_names:
             for topic_name in keywords.get(skill_name, []):

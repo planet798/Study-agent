@@ -80,9 +80,32 @@ _DEFAULT_PHASES = [
         ],
     },
     {
-        "name": "阶段四：模型训练与部署",
-        "desc": "高效微调与生产部署",
+        "name": "阶段四：推荐 / 搜索系统基础",
+        "desc": "搜广推基础链路：召回 / 排序 / 重排 / 特征 / 评估",
         "start": "2027-04-01", "end": "2027-06-30",
+        "priority": 2,
+        "goals": "能从数据到召回/排序/重排跑通推荐系统基础链路，并做离线评估与 badcase 分析",
+        "topics": [
+            ("SQL 数据分析基础", 45, 2),
+            ("推荐系统整体架构", 60, 3),
+            ("协同过滤基础", 60, 2),
+            ("Embedding Recall / 向量召回", 60, 2),
+            ("双塔召回 Two-Tower", 60, 2),
+            ("多路召回与 Candidate Generation", 60, 2),
+            ("Ranking 基础", 60, 3),
+            ("CTR 预估基础", 60, 2),
+            ("Wide & Deep / DeepFM 基础", 60, 2),
+            ("推荐系统评估指标", 45, 2),
+            ("Rerank / 重排基础", 45, 2),
+            ("用户画像与特征工程", 45, 2),
+            ("推荐系统 Badcase 分析", 45, 2),
+            ("LLM + Recommendation 基础", 60, 2),
+        ],
+    },
+    {
+        "name": "阶段五：模型训练与部署",
+        "desc": "高效微调与生产部署",
+        "start": "2027-07-01", "end": "2027-08-31",
         "priority": 2,
         "goals": "掌握 LoRA/SFT 微调与 vLLM 部署基础",
         "topics": [
@@ -96,9 +119,9 @@ _DEFAULT_PHASES = [
         ],
     },
     {
-        "name": "阶段五：后续扩展",
+        "name": "阶段六：后续扩展",
         "desc": "多模态与推理优化（按方向选择深入）",
-        "start": "2027-07-01", "end": "2027-08-31",
+        "start": "2027-09-01", "end": "2027-10-31",
         "priority": 1,
         "goals": "了解多模态与推理优化方向，按需深入",
         "topics": [
@@ -112,6 +135,12 @@ _DEFAULT_PHASES = [
 ]
 
 _EXPECTED_PHASE_NAMES = tuple(p["name"] for p in _DEFAULT_PHASES)
+
+# 新增「阶段四：推荐 / 搜索系统基础」后，把旧的后两个阶段改名（保留 phase_id/topics）。
+_LEGACY_PHASE_RENAMES = {
+    "阶段四：模型训练与部署": "阶段五：模型训练与部署",
+    "阶段五：后续扩展": "阶段六：后续扩展",
+}
 
 
 class StudyPlanService:
@@ -156,7 +185,8 @@ class StudyPlanService:
             name="USTC AI 研一大厂算法路线",
             description=(
                 "基于真实 JD 与 docs/career_context.json 的长期算法学习路线："
-                "工程底座 → 深度学习与 LLM 基础 → LLM 应用 → 模型训练与部署 → 扩展。"
+                "工程底座 → 深度学习与 LLM 基础 → LLM 应用 → 推荐 / 搜索系统基础 "
+                "→ 模型训练与部署 → 扩展。"
             ),
             start_date="2026-09-01",
             end_date="2027-08-31",
@@ -184,8 +214,17 @@ class StudyPlanService:
         """把已有计划就地同步到 _DEFAULT_PHASES（幂等，不触碰任务历史）。
 
         - 对每个预期阶段/主题按 name 做 upsert（不存在创建、存在更新）；
+        - 先把旧阶段名（阶段四/五）改名为阶段五/六，保留 phase_id 与 topics；
         - 移除“预期之外”且没有任何任务引用的过期阶段（如旧的八阶段计划）。
         """
+        # 0) 历史阶段改名（幂等；保留原 phase_id / topics / tasks）
+        for old_name, new_name in _LEGACY_PHASE_RENAMES.items():
+            old = self._find_phase_by_name(plan.id, old_name)
+            if old is not None and self._find_phase_by_name(
+                plan.id, new_name
+            ) is None:
+                self.plan_repo.update_phase(old.id, name=new_name)
+
         for spec in _DEFAULT_PHASES:
             phase = self._find_phase_by_name(plan.id, spec["name"])
             if phase is None:
