@@ -485,6 +485,13 @@ def main() -> int:
     skill_service.current_phase_provider = (
         lambda: study_plan_service.get_current_phase(today())
     )
+    # 从 career_context 幂等同步正式 skill（存量库补缺；不覆盖已维护状态）
+    try:
+        skills_sync = skill_service.sync_skills_from_career_context()
+        if skills_sync.get("added"):
+            print(f"[startup] 已补入技能：{'、'.join(skills_sync['added'])}")
+    except Exception:  # noqa: BLE001
+        pass
     # 幂等补齐 skill→topic 映射（存量库修复；不删除历史 link）
     try:
         sync = skill_service.sync_skill_topic_links()
@@ -517,10 +524,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001 - 修复失败不影响启动
         pass
 
-    # 技能池为空时按 career_context 幂等 seed 并链接到现有主题（不覆盖已维护状态）
-    if not skill_repo.list_all():
-        skill_service.seed_from_career_context()
-        skill_service.recompute_all_priority_scores()
+    # 技能同步已在 ensure_default_plan 之后完成（见上）；此处不再按“空池”条件 seed。
 
     # AI 配置读取环境变量；未配置时 GUI 正常运行（本地功能不受影响）
     ai_client = DeepSeekClient()

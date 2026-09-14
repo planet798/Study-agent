@@ -793,6 +793,28 @@ class SkillService:
             for topic_name in keywords.get(skill_name, []):
                 self.link_topic_by_name(skill_name, topic_name)
 
+    def sync_skills_from_career_context(
+        self, data: dict | None = None, path: str | Path | None = None
+    ) -> dict:
+        """幂等同步 career_context.skill_pool 到 skills（存量库补缺）。
+
+        通用机制（不为单个技能写特例）：career_context.skill_pool 是正式 skill
+        定义来源；缺哪个 skill → 补哪个。
+        - 已存在 → 只更新非受保护字段（不覆盖 status / mastery_ref /
+          jd_frequency / priority_score）；
+        - 不删除 DB 中已有 skill；不建 assessment；不改 task。
+
+        :return: {"seeded": [...], "total": int, "added": [...]}
+        """
+        before = {s["name"] for s in self.skill_repo.list_all()}
+        seeded = self.seed_from_career_context(data=data, path=path)
+        after = {s["name"] for s in self.skill_repo.list_all()}
+        return {
+            "seeded": seeded,
+            "total": len(after),
+            "added": sorted(after - before),
+        }
+
     def sync_skill_topic_links(self) -> dict:
         """幂等补齐全部 skill→topic 映射（存量库修复用）。
 
