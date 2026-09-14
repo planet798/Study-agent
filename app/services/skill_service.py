@@ -751,10 +751,53 @@ class SkillService:
             "Ranking": ["Reranker 重排序", "RRF 排序融合"],
             "Agent": ["Agent 实现与多步编排"],
             "模型评估": ["Evaluation / Badcase / LLM-as-Judge"],
+            # ---- 补齐：已有真实 topic、语义明确，但之前漏链的技能 ----
+            # 这些 topic 以前故意不链（旧门禁只认 mastery 会卡死）；
+            # 现在门禁已支持“材料已覆盖”（done）解锁，链上是安全且正确的。
+            "LLM 基础": [
+                "Tokenizer 与分词",
+                "RoPE 位置编码",
+                "KV Cache",
+                "generate / sampling 解码策略",
+                "Qwen / LLaMA 架构：GQA / SwiGLU",
+            ],
+            "Hugging Face": ["Hugging Face Transformers"],
+            "SFT": ["SFT 指令微调"],
+            "LoRA / QLoRA": ["LoRA / QLoRA"],
+            "Docker": ["Docker"],
+            "vLLM": ["vLLM 与 PagedAttention"],
+            "VLM": ["VLM / 多模态基础"],
+            "分布式训练底层": ["DDP / ZeRO / DeepSpeed（先理解）"],
+            "CUDA": ["C/C++ / CUDA（方向确定后深入）"],
+            "复杂推理优化": ["推理优化基础"],
         }
         for skill_name in skill_names:
             for topic_name in keywords.get(skill_name, []):
                 self.link_topic_by_name(skill_name, topic_name)
+
+    def sync_skill_topic_links(self) -> dict:
+        """幂等补齐全部 skill→topic 映射（存量库修复用）。
+
+        - 缺失 link → 补；已有 link → 跳过；**不删除任何历史 link**；
+        - 不重复 insert；不改 skill status；不改 mastery；不建 assessment；不改 task。
+        每次启动可安全调用。
+
+        :return: {"added": {skill: [新增 topic_id...]}, "added_count": int}
+        """
+        before = {
+            s["name"]: set(s.get("linked_topics") or [])
+            for s in self.skill_repo.list_all()
+        }
+        if not before:
+            return {"added": {}, "added_count": 0}
+        self._seed_links_from_keywords(list(before))
+        added: dict[str, list[int]] = {}
+        for s in self.skill_repo.list_all():
+            new_ids = set(s.get("linked_topics") or []) - before.get(s["name"], set())
+            if new_ids:
+                added[s["name"]] = sorted(int(x) for x in new_ids)
+        return {"added": added,
+                "added_count": sum(len(v) for v in added.values())}
 
     # ---------- 工具 ----------
 

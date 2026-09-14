@@ -485,6 +485,13 @@ def main() -> int:
     skill_service.current_phase_provider = (
         lambda: study_plan_service.get_current_phase(today())
     )
+    # 幂等补齐 skill→topic 映射（存量库修复；不删除历史 link）
+    try:
+        sync = skill_service.sync_skill_topic_links()
+        if sync.get("added_count"):
+            print(f"[startup] 已补齐 {sync['added_count']} 条技能-主题映射")
+    except Exception:  # noqa: BLE001
+        pass
     try:
         skill_service.refresh_market()
         skill_service.recompute_all_priority_scores()
