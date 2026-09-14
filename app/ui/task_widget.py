@@ -144,7 +144,10 @@ class TaskWidget(QFrame):
         if getattr(self, "assessment_btn", None) is not None:
             return
         self.assessment_btn = QPushButton(self._assessment_label)
-        self.assessment_btn.setObjectName("PrimaryButton")
+        # 蓝色文字：复用次级按钮样式 + palette 兜底（Windows 原生样式可能忽略
+        # QSS 的 color），不改尺寸 / 布局，也不影响其它按钮。
+        self.assessment_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(self.assessment_btn)
         self.assessment_btn.clicked.connect(
             lambda: self.assessment_requested.emit(self._task.id)
         )

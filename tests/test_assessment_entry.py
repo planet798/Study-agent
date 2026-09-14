@@ -205,6 +205,21 @@ class TestWidgetVisibility:
         w.render(repo.get(t.id))
         assert _btns(w).count("开始验收") == 1
 
+    def test_assessment_button_text_is_blue(self, qtbot, repo, conn):
+        from PySide6.QtGui import QPalette
+
+        _, topics = _plan(conn)
+        t = repo.create(title="t", scheduled_date=TODAY, source="generated",
+                        topic_id=topics["Transformer"].id)
+        w = self._widget(qtbot, t)
+        btn = w.assessment_btn
+        assert btn.text() == "开始验收"
+        # 蓝字（次级按钮样式 + palette 兜底），不改尺寸 / 布局
+        assert btn.objectName() == "SecondaryButton"
+        for grp in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+            color = btn.palette().color(grp, QPalette.ColorRole.ButtonText)
+            assert color.name() == "#2c6fbb"
+
 
 # ================= UI 流程：done new / extra 可验收 =================
 
