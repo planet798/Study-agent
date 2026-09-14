@@ -369,7 +369,7 @@ class StudyPlanService:
         # 技能视图（Phase C；仅在有 skill_service 时生效）
         # blocked_ids : 前置未满足 → 绝不生成（skipped_gate）
         # jd_boost    : topic_id -> 关联技能的 JD 频次强度（0~1，max over skills）
-        blocked_ids, jd_boost = self.skill_topic_views(phase.topics)
+        blocked_ids, jd_boost = self.skill_topic_views(phase.topics, date_str)
 
         # 优先级排序（Phase C）：
         # 1. 前置满足（gate ok 在前） 2. 薄弱点 3. JD must/plus 4. 主题优先级 5. 原始顺序
@@ -443,24 +443,26 @@ class StudyPlanService:
     # ================= 技能视图（Phase C） =================
 
     def skill_topic_views(
-        self, topics
+        self, topics, end_date: str | None = None
     ) -> tuple[set[int], dict[int, float]]:
         """按主题计算技能维度信息（仅当注入 skill_service 时不为空）。
 
         :return: (blocked_topic_ids, jd_boost)
         - blocked_ids : 关联技能被前置门禁阻塞的主题（绝不生成）
-        - jd_boost    : topic_id -> 关联技能 JD 频次强度的最大值（0~1）
+        - jd_boost    : topic_id -> 关联技能的市场需求因子最大值（0~1）
 
-        注意：
-        - “已掌握不重复”不在此处处理——它由 Phase 8 的验收证据（mastery>=0.85
-          且最近 good/excellent）驱动（knowledge_evidence.skip_topic_ids），
-          而不是用 career_context 静态 seed 的 mastered status，
-          避免把“已会”误判成“不用学而卡住阶段”。
+        Step 6：jd_boost 改用 SkillService.market_factor（Daily Summary 优先，
+        individual JD fallback），使规则 fallback 同样利用近期市场信号。
         """
         blocked: set[int] = set()
         jd_boost: dict[int, float] = {}
         if self.skill_service is None:
             return blocked, jd_boost
+        if end_date is not None:
+            try:
+                self.skill_service.refresh_market(end_date)
+            except Exception:  # noqa: BLE001
+                pass
         for t in topics:
             names = self.skill_service.skills_for_topic(t.id)
             if not names:
@@ -475,7 +477,7 @@ class StudyPlanService:
                 if detail.get("gate") == "blocked":
                     skill_blocked = True
                 boost = max(
-                    boost, self.skill_service.jd_factor(skill.get("jd_frequency"))
+                    boost, self.skill_service.market_factor(skill)
                 )
             if skill_blocked:
                 blocked.add(t.id)

@@ -474,6 +474,23 @@ def main() -> int:
     )
     study_plan_service.ensure_default_plan()
 
+    # Step 6：近期市场需求（Daily Summary 优先，individual JD fallback）
+    from app.database.jd_summary_repository import JdDailySummaryRepository
+    from app.services.jd_summary_service import JdSummaryService as _JdSumSvc
+    from app.services.market_signal import MarketSignal
+
+    jd_summary_service = _JdSumSvc(JdDailySummaryRepository(conn), skill_repo)
+    skill_service.market_signal = MarketSignal(jd_summary_service)
+    # stage alignment 排序偏好：当前 phase 有对应 topic 的技能优先
+    skill_service.current_phase_provider = (
+        lambda: study_plan_service.get_current_phase(today())
+    )
+    try:
+        skill_service.refresh_market()
+        skill_service.recompute_all_priority_scores()
+    except Exception:  # noqa: BLE001
+        pass
+
     # 存量“生成型新任务”description 回填（一次性、幂等；失败不阻止启动）
     try:
         repaired = study_plan_service.repair_existing_task_descriptions()
@@ -510,13 +527,7 @@ def main() -> int:
     jd_service.parse_ai = (
         build_default_parse_ai(ai_client) if ai_client.is_configured() else None
     )
-    # Step 5：每日 JD 技术汇总（市场样本）；只保存/展示，不接 Planner
-    from app.database.jd_summary_repository import JdDailySummaryRepository
-    from app.services.jd_summary_service import JdSummaryService
-
-    jd_summary_service = JdSummaryService(
-        JdDailySummaryRepository(conn), skill_repo
-    )
+    # Step 5/6：每日 JD 技术汇总（市场样本）已在上方构造
     # 长期学习上下文（职业目标/JD/技能路线/能力状态）：作为 AI 规划的长期依据；
     # 文件缺失/非法时返回 None，Planner 自动降级为旧行为，不影响启动。
     long_term_context = load_long_term_context()

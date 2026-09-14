@@ -117,10 +117,15 @@ PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是个人学习规划助手。
 13. 已完成且掌握度较高的知识点不要重复安排基础任务；已存在 active/not_done 的
     同知识点正式任务不要重复创建。
 14. skill_priorities / jd_gap_skills / weekly_focus 由 SkillService 依据
-    技能池 + 真实 JD 频率 + 掌握证据 + 前置门禁计算，只决定当前阶段内“下一步”的
+    技能池 + 近期市场需求 + 掌握证据 + 前置门禁计算，只决定当前阶段内“下一步”的
     相对优先级，不是路线控制器：不得仅凭 JD 高频或高分跳过当前阶段；不得为
     prerequisite_blocked（前置未满足）的技能越级安排任务；已掌握技能不因 JD 高频
     而重复安排。
+15. market_trends / skill_priorities.market_14d 来自用户人工收集的“目标岗位样本”
+    （每日 JD 技术汇总），只代表用户近期看的目标岗位，**不代表全行业需求**；
+    引用时必须写成“近期目标岗位样本需求”。
+16. 高频但被前置阻塞的技能（如 RAG 高需求但缺 LLM 基础 / Embedding）不得直接
+    安排；应改为提升其必要前置技能的近期优先级。
 
 你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
 
@@ -151,6 +156,9 @@ def build_planner_user_prompt(context: "object", long_term: "object | None" = No
     skill_section = build_skill_priority_section(context)
     if skill_section:
         lines.extend(["", skill_section])
+    market_section = build_market_trend_section(context)
+    if market_section:
+        lines.extend(["", market_section])
     long_term_section = build_long_term_context_section(long_term)
     if long_term_section:
         lines.extend(["", long_term_section])
@@ -193,6 +201,36 @@ def build_knowledge_evidence_section(context: "object") -> str:
     return "\n".join(lines)
 
 
+def build_market_trend_section(context: "object") -> str:
+    """把 Step 6 的近期目标岗位技术趋势渲染为 Prompt 段；无则返回空串。
+
+    明确说明：这是用户人工收集的目标岗位样本，不代表全行业需求。
+    """
+    trends = getattr(context, "market_trends", None)
+    source = getattr(context, "market_source", "none")
+    n14 = int(getattr(context, "market_sample_count_14d", 0) or 0)
+    n30 = int(getattr(context, "market_sample_count_30d", 0) or 0)
+    if not trends or source != "daily_summary":
+        return ""
+    lines = [
+        "【近期目标岗位技术趋势】（来自用户人工汇总的每日 JD 样本；"
+        "仅代表其近期收集的目标岗位，不代表全行业需求）",
+        f"近 14 天样本：{n14} 个目标实习岗位；近 30 天样本：{n30} 个。",
+    ]
+    for t in list(trends)[:10]:
+        lines.append(
+            f"  - {t.skill}：14天 {t.market_14d * 100:.0f}%"
+            f"（{t.mention_14d} 次）｜30天 {t.market_30d * 100:.0f}%"
+        )
+    lines.append(
+        "使用要求：① 作为市场需求证据，与 mastery / weak_points 联合判断；"
+        "② 不得越过 prerequisite；③ 不得跳阶段；④ 不重复已掌握基础内容；"
+        "⑤ 高频但 blocked 的技能，应优先推动其必要前置技能；"
+        "⑥ 仍只能从 available_topics 中选择。"
+    )
+    return "\n".join(lines)
+
+
 def build_skill_priority_section(context: "object") -> str:
     """把 Phase C 的 技能优先级 / JD 缺口 / 前置阻塞 / 每周预览 渲染为 Prompt 段。
 
@@ -205,22 +243,35 @@ def build_skill_priority_section(context: "object") -> str:
     if not any([sp, gap, blocked, weekly]):
         return ""
     lines = [
-        "【技能优先级 / JD 缺口】（SkillService 依据 技能池 + 真实 JD 频率 + 掌握证据 + 前置门禁 计算；"
-        "只决定当前阶段内“下一步”的相对优先级）"
+        "【技能优先级 / JD 缺口】（SkillService 依据 技能池 + 近期市场需求/历史单条 JD"
+        " + 掌握证据 + 前置门禁 计算；只决定当前阶段内“下一步”的相对优先级）"
     ]
     if sp:
-        lines.append("- 近期技能优先级：")
+        lines.append("- 近期技能优先级（near = 近期目标岗位样本需求）：")
         for i, s in enumerate(list(sp)[:8], 1):
-            lines.append(f"  {i}. {s.skill}（{s.tier}级，score={s.score:.3f}）：{s.reason}")
+            mkt = ""
+            if getattr(s, "market_14d", None) is not None:
+                mkt = f"，近14天目标岗位 {s.market_14d * 100:.0f}%"
+            stage = getattr(s, "stage_alignment", "unknown")
+            stage_txt = {"current": "，当前阶段相关",
+                         "next": "，下一阶段",
+                         "far": "，较后阶段"}.get(stage, "")
+            lines.append(
+                f"  {i}. {s.skill}（{s.tier}级，score={s.score:.3f}{mkt}{stage_txt}）"
+                f"：{s.reason}"
+            )
     if gap:
-        lines.append("- JD 缺口（企业需求但未掌握）：")
+        lines.append("- JD 缺口（近期目标岗位需求高但未掌握）：")
         for g in list(gap)[:10]:
             mastery_txt = (
                 f"{g.mastery:.2f}" if g.mastery is not None else "无验收"
             )
-            flag = "（前置阻塞，不得直接安排）" if g.blocked else ""
+            flag = "（前置阻塞，不得直接安排，先补前置）" if g.blocked else ""
+            mkt = ""
+            if getattr(g, "market_14d", None) is not None:
+                mkt = f"近14天 {g.market_14d * 100:.0f}% / "
             lines.append(
-                f"  - {g.skill}：must×{g.jd_must_count} / plus×{g.jd_plus_count}，"
+                f"  - {g.skill}：{mkt}must×{g.jd_must_count} / plus×{g.jd_plus_count}，"
                 f"mastery={mastery_txt}{flag}"
             )
     if blocked:

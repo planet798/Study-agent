@@ -25,6 +25,7 @@ from ..ai.planner_context import (
     DaySummary,
     JdGapSkill,
     KnowledgeEvidence,
+    MarketTrend,
     PlanningContext,
     PrerequisiteBlocked,
     SkillPriority,
@@ -121,49 +122,111 @@ class DailyPlannerService:
         return ctx
 
     def _fill_skill_context(self, ctx: PlanningContext, plan_date: str) -> None:
-        """用 SkillService/JdService 的结果填充技能上下文；不重复计算优先级。"""
+        """用 SkillService/JdService 的结果填充技能上下文；不重复计算优先级。
+
+        Step 6：使用近期市场信号（Daily Summary 14/30 天趋势优先，
+        individual JD fallback），并区分 active_gap / blocked_gap。
+        """
         skill_service = self.skill_service
         if skill_service is None:
             return
 
+        # 刷新近期市场（用计划日作为窗口结束日，保证与当天一致）
+        market = None
+        try:
+            market = skill_service.refresh_market(plan_date)
+        except Exception:  # noqa: BLE001
+            market = None
+        if market:
+            ctx.market_source = market.get("source", "none")
+            ctx.market_sample_count_14d = int(market.get("sample_count_14d") or 0)
+            ctx.market_sample_count_30d = int(market.get("sample_count_30d") or 0)
+            trends = []
+            for name, rec in (market.get("skills") or {}).items():
+                trends.append(MarketTrend(
+                    skill=name,
+                    market_14d=float(rec.get("freq14") or 0.0),
+                    market_30d=float(rec.get("freq30") or 0.0),
+                    mention_14d=int(rec.get("mention_14d") or 0),
+                    mention_30d=int(rec.get("mention_30d") or 0),
+                ))
+            trends.sort(key=lambda t: (-t.market_14d, -t.market_30d, t.skill))
+            ctx.market_trends = trends[:10]
+
+        # 当前 phase（用于 stage alignment 排序偏好）
+        current_phase = None
+        try:
+            current_phase = self.study_plan_service.get_current_phase(plan_date)
+        except Exception:  # noqa: BLE001
+            current_phase = None
+
         # 1) 近期技能优先级（SkillService 计算，仅 gate 放行的可学技能）
         try:
-            candidates = skill_service.select_active_candidates(limit=8)
+            candidates = skill_service.select_active_candidates(
+                limit=8, current_phase=current_phase
+            )
         except Exception:  # noqa: BLE001 - 技能数据异常不影响规划
             candidates = []
-        ctx.skill_priorities = [
-            SkillPriority(
-                skill=d["name"],
-                tier=d["tier"],
-                score=d["score"],
-                reason=_skill_reason(d),
-            )
-            for d in candidates
-        ]
+        priorities: list[SkillPriority] = []
+        for d in candidates:
+            skill = skill_service.skill_repo.get_by_name(d["name"])
+            explain = skill_service.explain_skill(
+                skill, current_phase=current_phase
+            ) if skill else d
+            priorities.append(SkillPriority(
+                skill=explain.get("name", d["name"]),
+                tier=explain.get("tier", d.get("tier", "")),
+                score=float(explain.get("score", d.get("score", 0.0))),
+                reason=" · ".join(explain.get("reasons") or []) or _skill_reason(d),
+                market_14d=explain.get("market_14d"),
+                market_30d=explain.get("market_30d"),
+                sample_count=int(explain.get("sample_count_14d") or 0),
+                market_source=explain.get("market_source", "none"),
+                stage_alignment=explain.get("stage_alignment", "unknown"),
+                blocked=bool(explain.get("blocked")),
+                reasons=tuple(explain.get("reasons") or ()),
+            ))
+        ctx.skill_priorities = priorities
 
-        # 2) JD 缺口（企业需求但未掌握）
+        # 2) JD 缺口：近期市场高频 + 未掌握；区分 active_gap / blocked_gap
         all_skills = skill_service.skill_repo.list_all()
-        gaps = []
-        blocked_entries = []
+        active_gap: list[JdGapSkill] = []
+        blocked_entries: list[PrerequisiteBlocked] = []
         for s in all_skills:
+            name = s["name"]
+            rec = (market or {}).get("skills", {}).get(name) if market else None
+            m14 = float(rec.get("freq14") or 0.0) if rec else 0.0
+            m30 = float(rec.get("freq30") or 0.0) if rec else 0.0
+            sig = skill_service._market_signal_value(market, name)
             freq = s.get("jd_frequency") or {}
             has_jd = bool(freq.get("must") or freq.get("plus"))
+            has_market = sig > 0 or m14 > 0 or m30 > 0
             blocked = skill_service.is_blocked(s)
             mastery = skill_service._mastery_for_skill(s)
-            if s["status"] in ("not_started", "learning") and (has_jd or blocked):
-                gaps.append(JdGapSkill(
-                    skill=s["name"],
+            if s["status"] in ("not_started", "learning") and (
+                has_market or has_jd or blocked
+            ):
+                gap = JdGapSkill(
+                    skill=name,
                     jd_must_count=int(freq.get("must") or 0),
                     jd_plus_count=int(freq.get("plus") or 0),
                     mastery=mastery,
                     blocked=blocked,
-                ))
-            if blocked and has_jd:
+                    market_14d=m14 if has_market else None,
+                    market_30d=m30 if has_market else None,
+                    sample_count=int((market or {}).get("sample_count_14d") or 0),
+                )
+                active_gap.append(gap)
+            if blocked and has_market:
                 blocked_entries.append(PrerequisiteBlocked(
-                    skill=s["name"],
+                    skill=name,
                     missing=list(skill_service.missing_prerequisites(s)),
                 ))
-        ctx.jd_gap_skills = gaps[:12]
+        # 高频优先
+        active_gap.sort(key=lambda g: (
+            g.blocked, -(g.market_14d or 0.0), -(g.market_30d or 0.0), g.skill
+        ))
+        ctx.jd_gap_skills = active_gap[:12]
         ctx.prerequisite_blocked = blocked_entries[:10]
 
         # 3) 未来 1~2 周学习形状（纯规则预览，不写 tasks）
@@ -395,7 +458,8 @@ class DailyPlannerService:
 
         # Phase C：技能视图（前置 gate；已掌握不重复由 Phase 8 验收证据负责）
         blocked_ids, _ = self.study_plan_service.skill_topic_views(
-            current_phase.topics if current_phase is not None else []
+            current_phase.topics if current_phase is not None else [],
+            plan_date,
         )
 
         # 推荐任务校验（不实际创建，先全部校验）

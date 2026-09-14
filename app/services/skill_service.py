@@ -65,6 +65,15 @@ STATUS_ACTIVE_BASE = {
 # 共享能力（推荐/搜索/RAG 共同连接点）；名称不区分大小写匹配
 CONNECTOR_DEFAULT = ("Embedding", "Recall", "Ranking", "Rerank")
 
+# ---- Step 6：近期市场需求信号 ----
+DEFAULT_MARKET_TARGET = "internship"
+# 前置需求传播：Ranking 高频且 blocked → 向直接前置传递有限需求
+PREREQ_PROP_DECAY = 0.5      # 每深一层衰减一半
+PREREQ_PROP_MAX_DEPTH = 2    # 只传播两层（直接前置 + 其前置）
+PREREQ_PROP_CAP = 0.5        # 单个技能最多获得的传播加成
+# 当前阶段适配度（排序偏好；不属于 score 公式，避免改变既有尺度）
+STAGE_RANK = {"current": 2, "next": 1, "far": 0, "unknown": 0}
+
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, value))
@@ -78,10 +87,106 @@ class SkillService:
         skill_repo: SkillRepository,
         plan_repo=None,
         assessment_repo=None,
+        market_signal=None,
+        current_phase_provider=None,
     ):
         self.skill_repo = skill_repo
         self.plan_repo = plan_repo
         self.assessment_repo = assessment_repo
+        # Step 6：近期市场需求（Daily Summary 优先，individual JD fallback）
+        self.market_signal = market_signal
+        # 可选：
+        # 返回当前 phase 的回调（仅用于 stage_alignment 排序偏好）
+        self.current_phase_provider = current_phase_provider
+        self._market: dict | None = None
+        self._prereq_boost: dict[str, float] = {}
+
+    # ================= Step 6：近期市场需求 =================
+
+    def refresh_market(
+        self,
+        end_date: str | None = None,
+        target_type: str = DEFAULT_MARKET_TARGET,
+    ) -> dict | None:
+        """重新计算近期市场信号（含前置需求传播）。
+
+        无 market_signal 注入时置空 → market_factor 回退 individual JD。
+        """
+        if self.market_signal is None:
+            self._market = None
+            self._prereq_boost = {}
+            return None
+        if end_date is None:
+            from ..utils.date_utils import today as _today
+
+            end_date = _today()
+        market = self.market_signal.compute(end_date, target_type)
+        self._market = market
+        self._prereq_boost = self._compute_prereq_boost(market)
+        return market
+
+    def market(self) -> dict | None:
+        return self._market
+
+    @staticmethod
+    def _market_signal_value(market: dict | None, name: str) -> float:
+        if not market or market.get("source") != "daily_summary":
+            return 0.0
+        rec = (market.get("skills") or {}).get(name)
+        return float(rec.get("signal") or 0.0) if rec else 0.0
+
+    def _compute_prereq_boost(self, market: dict | None) -> dict[str, float]:
+        """高频但被阻塞的技能 → 向其前置链传递有限需求（确定性、有限深度）。
+
+        - 只从“有市场信号且当前被阻塞”的技能出发；
+        - 直接前置得 signal*0.5，再上一层 *0.5（最多两层）；
+        - 同一技能取最大值（不累加）并 capped，绝不无限扩散。
+        """
+        boost: dict[str, float] = {}
+        if not market or market.get("source") != "daily_summary":
+            return boost
+        skills = {s["name"]: s for s in self.skill_repo.list_all()}
+        status_by_name = self._default_status_by_name()
+        mastery_by_name = self._default_mastery_by_name()
+        for name, skill in skills.items():
+            sig = self._market_signal_value(market, name)
+            if sig <= 0:
+                continue
+            if not self.is_blocked(skill, status_by_name, mastery_by_name):
+                continue
+            layer = [
+                (p, sig * PREREQ_PROP_DECAY)
+                for p in (skill.get("prerequisites") or [])
+            ]
+            for depth in range(PREREQ_PROP_MAX_DEPTH):
+                nxt: list[tuple[str, float]] = []
+                for pname, val in layer:
+                    capped = min(val, PREREQ_PROP_CAP)
+                    if capped > boost.get(pname, 0.0):
+                        boost[pname] = capped
+                    if depth + 1 < PREREQ_PROP_MAX_DEPTH:
+                        ps = skills.get(pname)
+                        if ps:
+                            for pp in (ps.get("prerequisites") or []):
+                                nxt.append((pp, val * PREREQ_PROP_DECAY))
+                layer = nxt
+        return boost
+
+    def market_factor(self, skill: dict) -> float:
+        """近期市场需求因子（0~1）。
+
+        - 有 Daily Summary：用市场信号 + 有限的“前置需求传播”加成；
+        - 无 Daily Summary：回退到旧 individual JD 的 jd_factor。
+        """
+        market = self._market
+        if market and market.get("source") == "daily_summary":
+            base = self._market_signal_value(market, skill.get("name"))
+            return _clamp(base + self._prereq_boost.get(skill.get("name"), 0.0))
+        return self.jd_factor(skill.get("jd_frequency"))
+
+    @staticmethod
+    def _stage_rank_from_label(label: str) -> int:
+        return int(STAGE_RANK.get(label, 0))
 
     # ================= 确定性计算 =================
 
@@ -142,12 +247,13 @@ class SkillService:
 
     # ---------- 全量重算 ----------
 
-    def recompute_all_priority_scores(self) -> list[dict]:
+    def recompute_all_priority_scores(self, end_date: str | None = None) -> list[dict]:
         """遍历 skills 重算 priority_score 并落库；返回排序明细。
 
         返回值按 score 降序：每个元素包含 component 明细与门禁信息，
         便于展示/测试“为什么是这个分数”。
         """
+        self.refresh_market(end_date)
         skills = self.skill_repo.list_all()
         status_by_name = self._default_status_by_name()
         mastery_by_name = self._default_mastery_by_name()
@@ -187,7 +293,7 @@ class SkillService:
 
         tier = skill["tier"]
         tier_v = self.tier_weight(tier)
-        jd_v = self.jd_factor(skill.get("jd_frequency"))
+        jd_v = self.market_factor(skill)
         conn_v = self.connector_value(
             skill["name"], bool(skill.get("shared_connector"))
         )
@@ -217,6 +323,8 @@ class SkillService:
             "score": round(score, 6),
             "tier_term": round(W_TIER * tier_v, 6),
             "jd_term": round(W_JD * jd_v, 6),
+            "market_term": round(W_JD * jd_v, 6),
+            "market_factor": round(jd_v, 6),
             "active_term": round(W_ACTIVE * active_v, 6),
             "connector_term": round(W_CONNECTOR * conn_v, 6),
             "jd_frequency": skill.get("jd_frequency", {}),
@@ -291,11 +399,16 @@ class SkillService:
         self,
         statuses: tuple[str, ...] = ("not_started", "learning"),
         limit: int | None = None,
+        current_phase=None,
     ) -> list[dict]:
         """返回“门禁放行 + 状态可学习”的技能，按 score 降序。
 
         这是 Phase A 的确定性候选视图，不写 planner、不改每日任务。
         被阻塞（前置未满足）技能被排除（视为 deferred）。
+
+        Step 6：加入 current-stage alignment 作为**排序偏好**（不改 score）：
+        当前阶段直接相关 > 下一阶段较近 > 很远/未知。这样“gate ok +
+        A 级”很远期技能（如 SQL）不会仅因分数就排到最近重点前三。
         """
         status_by_name = self._default_status_by_name()
         mastery_by_name = self._default_mastery_by_name()
@@ -304,13 +417,132 @@ class SkillService:
             eff = self.effective_status(skill, status_by_name, mastery_by_name)
             if eff not in statuses:
                 continue
-            candidates.append(
-                self.compute_skill_score(skill, mastery_by_name, status_by_name)
+            detail = self.compute_skill_score(
+                skill, mastery_by_name, status_by_name
             )
-        candidates.sort(key=lambda d: (-d["score"], d["name"]))
+            label, _ = self.stage_alignment(skill["name"], current_phase)
+            detail["stage_alignment"] = label
+            candidates.append(detail)
+        candidates.sort(key=lambda d: (
+            -self._stage_rank_from_label(d.get("stage_alignment", "unknown")),
+            -d["score"],
+            d["name"],
+        ))
         if limit is not None:
             candidates = candidates[: max(0, limit)]
         return candidates
+
+    # ---------- current-stage alignment（仅排序偏好，不改 score） ----------
+
+    def _resolve_current_phase(self, current_phase=None):
+        if current_phase is not None:
+            return current_phase
+        if self.current_phase_provider is not None:
+            try:
+                return self.current_phase_provider()
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def stage_alignment(self, skill_name: str, current_phase=None):
+        """返回 (label, factor)。
+
+        label ∈ {current, next, far, unknown}；factor 仅供展示。
+        current = 当前 phase 有对应 topic；next = 下一阶段；其它 = far/unknown。
+        """
+        if self.plan_repo is None:
+            return "unknown", 0.0
+        try:
+            linked = set(self.topics_for_skill(skill_name) or [])
+        except Exception:  # noqa: BLE001
+            return "unknown", 0.0
+        if not linked:
+            return "unknown", 0.0
+        phase = self._resolve_current_phase(current_phase)
+        if phase is None:
+            return "unknown", 0.0
+        phase_topics = list(getattr(phase, "topics", None) or [])
+        if not phase_topics:
+            # 传入的 phase 可能未展开 topics；主动补全（保证确定性）
+            try:
+                phase_topics = self.plan_repo.list_topics(phase.id)
+            except Exception:  # noqa: BLE001
+                phase_topics = []
+        if linked & {t.id for t in phase_topics}:
+            return "current", 1.0
+        # 下一阶段：按 start_date 排序中紧邻 current 的那一个
+        try:
+            plan = self.plan_repo.get_active_plan()
+            phases = self.plan_repo.list_phases(plan.id) if plan else []
+        except Exception:  # noqa: BLE001
+            phases = []
+        after = [p for p in phases if p.start_date > (phase.end_date or "")]
+        if after:
+            nxt = min(after, key=lambda p: p.start_date)
+            nxt_topics = list(getattr(nxt, "topics", None) or [])
+            if not nxt_topics:
+                try:
+                    nxt_topics = self.plan_repo.list_topics(nxt.id)
+                except Exception:  # noqa: BLE001
+                    nxt_topics = []
+            if linked & {t.id for t in nxt_topics}:
+                return "next", 0.6
+        return "far", 0.25
+
+    def explain_skill(
+        self, skill: dict, mastery_by_name=None, status_by_name=None,
+        current_phase=None,
+    ) -> dict:
+        """可解释的技能优先级（含近期市场 / 前置传播 / 阶段适配）。"""
+        detail = self.compute_skill_score(
+            skill, mastery_by_name, status_by_name
+        )
+        market = self._market or {}
+        name = skill["name"]
+        rec = None
+        if market.get("source") == "daily_summary":
+            rec = (market.get("skills") or {}).get(name)
+        label, _ = self.stage_alignment(name, current_phase)
+        mastery = detail.get("mastery_estimate")
+        detail.update({
+            "market_source": market.get("source", "none"),
+            "market_14d": (rec or {}).get("freq14"),
+            "market_30d": (rec or {}).get("freq30"),
+            "market_signal": self._market_signal_value(market, name),
+            "sample_count_14d": market.get("sample_count_14d", 0),
+            "sample_count_30d": market.get("sample_count_30d", 0),
+            "prerequisite_demand_boost": round(
+                self._prereq_boost.get(name, 0.0), 6
+            ),
+            "stage_alignment": label,
+            "weak": (mastery is not None and float(mastery) <= MASTERY_LOW),
+            "blocked": detail.get("gate") == "blocked",
+        })
+        detail["reasons"] = self._explain_reasons(detail)
+        return detail
+
+    @staticmethod
+    def _explain_reasons(detail: dict) -> list[str]:
+        reasons = [f"{detail['tier']}级"]
+        if detail.get("market_source") == "daily_summary":
+            m14 = detail.get("market_14d")
+            if m14 is not None:
+                reasons.append(f"近14天目标岗位需求 {m14 * 100:.0f}%")
+        elif detail.get("market_factor"):
+            reasons.append("使用历史单条 JD 需求")
+        if detail.get("prerequisite_demand_boost"):
+            reasons.append("为高频下游技能补前置")
+        if detail.get("stage_alignment") == "current":
+            reasons.append("当前阶段直接相关")
+        elif detail.get("stage_alignment") == "far":
+            reasons.append("属于较后阶段")
+        if detail.get("weak"):
+            reasons.append("存在薄弱验收证据")
+        if detail.get("blocked"):
+            reasons.append("前置未满足")
+        if detail.get("status") == "mastered":
+            reasons.append("已掌握（不重复基础）")
+        return reasons
 
     # ---------- mastery 证据 ----------
 

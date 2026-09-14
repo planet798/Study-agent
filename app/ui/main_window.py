@@ -821,9 +821,23 @@ class MainWindow(QMainWindow):
         )
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.saved:
             saved = dlg.saved
+            # Step 6：市场信号变化 → 重算技能优先级（不重写当前 active task）
+            if self.skill_service is not None:
+                try:
+                    market = self.skill_service.refresh_market(
+                        saved["summary_date"]
+                    )
+                    self.skill_service.recompute_all_priority_scores(
+                        saved["summary_date"]
+                    )
+                    if not market or market.get("source") != "daily_summary":
+                        pass
+                except Exception:  # noqa: BLE001 - 重算失败不影响保存
+                    pass
             self.statusBar().showMessage(
                 f"{saved['summary_date']} JD 技术汇总已保存，共 "
-                f"{saved['sample_count']} 个岗位样本。",
+                f"{saved['sample_count']} 个岗位样本。"
+                "近期岗位需求已更新，将影响后续学习规划。",
                 6000,
             )
             self.refresh()

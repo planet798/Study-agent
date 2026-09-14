@@ -76,6 +76,25 @@ class SkillPriority:
     tier: str = ""
     score: float = 0.0
     reason: str = ""
+    # Step 6：近期市场信号 + 阶段适配（仅说明/排序，不改阶段）
+    market_14d: float | None = None
+    market_30d: float | None = None
+    sample_count: int = 0
+    market_source: str = "none"
+    stage_alignment: str = "unknown"
+    blocked: bool = False
+    reasons: tuple[str, ...] = ()
+
+
+@dataclass
+class MarketTrend:
+    """近期目标岗位技术趋势（人工样本，不代表全市场）。"""
+
+    skill: str
+    market_14d: float = 0.0
+    market_30d: float = 0.0
+    mention_14d: int = 0
+    mention_30d: int = 0
 
 
 @dataclass
@@ -87,6 +106,9 @@ class JdGapSkill:
     jd_plus_count: int = 0
     mastery: float | None = None
     blocked: bool = False
+    market_14d: float | None = None
+    market_30d: float | None = None
+    sample_count: int = 0
 
 
 @dataclass
@@ -121,6 +143,11 @@ class PlanningContext:
     # Phase C：JD / Skill 优先级上下文
     skill_priorities: list[SkillPriority] = field(default_factory=list)
     jd_gap_skills: list[JdGapSkill] = field(default_factory=list)
+    # Step 6：近期目标岗位技术趋势（Daily Summary；无则空）
+    market_trends: list[MarketTrend] = field(default_factory=list)
+    market_source: str = "none"
+    market_sample_count_14d: int = 0
+    market_sample_count_30d: int = 0
     prerequisite_blocked: list[PrerequisiteBlocked] = field(
         default_factory=list
     )
@@ -184,6 +211,13 @@ class PlanningContext:
                     "tier": s.tier,
                     "score": s.score,
                     "reason": s.reason,
+                    "market_14d": s.market_14d,
+                    "market_30d": s.market_30d,
+                    "sample_count": s.sample_count,
+                    "market_source": s.market_source,
+                    "stage_alignment": s.stage_alignment,
+                    "blocked": s.blocked,
+                    "reasons": list(s.reasons),
                 }
                 for s in self.skill_priorities
             ],
@@ -194,9 +228,25 @@ class PlanningContext:
                     "jd_plus_count": g.jd_plus_count,
                     "mastery": g.mastery,
                     "blocked": g.blocked,
+                    "market_14d": g.market_14d,
+                    "market_30d": g.market_30d,
+                    "sample_count": g.sample_count,
                 }
                 for g in self.jd_gap_skills
             ],
+            "market_trends": [
+                {
+                    "skill": m.skill,
+                    "market_14d": m.market_14d,
+                    "market_30d": m.market_30d,
+                    "mention_14d": m.mention_14d,
+                    "mention_30d": m.mention_30d,
+                }
+                for m in self.market_trends
+            ],
+            "market_source": self.market_source,
+            "market_sample_count_14d": self.market_sample_count_14d,
+            "market_sample_count_30d": self.market_sample_count_30d,
             "prerequisite_blocked": [
                 {
                     "skill": b.skill,
