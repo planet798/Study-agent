@@ -21,18 +21,32 @@
 
 from __future__ import annotations
 
+import json
+from datetime import date as _date
+
 from ..database.assessment_repository import AssessmentRepository
 from ..database.repository import TaskRepository
 from ..database.schema import STATUS_DONE
 from ..utils.date_utils import add_days, now_iso, today as _today
+from .task_content import build_retention_task_content
 
 # 每日复习预算（可配置，不硬编码在调用处）
 DEFAULT_MAX_DAILY_REVIEWS = 5
 DEFAULT_REVIEW_MINUTES = 15
 
+# 每日巩固（Daily Retention）：在到期复习不足时补足“今日复习”总量。
+DEFAULT_RETENTION_TARGET = 3
+DEFAULT_RETENTION_MINUTES = 10
+RETENTION_SOURCE = "daily_retention"
+
 # 首次验收的初始间隔
 _INITIAL_INTERVALS = {"excellent": 7, "good": 3, "ok": 2, "poor": 1}
 _MAX_INTERVAL = 30
+
+# 弱项判定（简单确定性规则）：验收等级偏低或掌握度低于阈值。
+_WEAK_RESULTS = {"poor", "ok"}
+_STRONG_RESULTS = {"good", "excellent"}
+_WEAK_MASTERY_THRESHOLD = 0.6
 
 
 class ReviewService:
@@ -42,11 +56,23 @@ class ReviewService:
         assessment_repo: AssessmentRepository,
         max_daily_reviews: int = DEFAULT_MAX_DAILY_REVIEWS,
         review_minutes: int = DEFAULT_REVIEW_MINUTES,
+        retention_target: int = DEFAULT_RETENTION_TARGET,
+        retention_minutes: int = DEFAULT_RETENTION_MINUTES,
+        retention_cooldown: int = 2,
+        retention_weak_cooldown: int = 1,
+        weak_mastery: float = _WEAK_MASTERY_THRESHOLD,
+        plan_repo=None,
     ):
         self.repo = repo
         self.assessment_repo = assessment_repo
         self.max_daily_reviews = max_daily_reviews
         self.review_minutes = review_minutes
+        self.retention_target = retention_target
+        self.retention_minutes = retention_minutes
+        self.retention_cooldown = retention_cooldown
+        self.retention_weak_cooldown = retention_weak_cooldown
+        self.weak_mastery = weak_mastery
+        self.plan_repo = plan_repo
 
     # ================= 间隔调整（纯函数，可独立测试） =================
 
@@ -93,9 +119,17 @@ class ReviewService:
     # ================= 去重 =================
 
     def has_unfinished_review_task(self, knowledge_point_id: int) -> bool:
-        """该知识点是否已存在未完成的复习任务（active / not_done）。"""
+        """该知识点是否已存在未完成的“正式复习”任务（active / not_done）。
+
+        只统计正式到期复习（source='review'）；每日巩固（daily_retention）是
+        轻量补足，不应阻塞正式间隔复习。
+        """
         for task in self.repo.list_by_knowledge_point(knowledge_point_id):
-            if task.task_type == "review" and task.status != STATUS_DONE:
+            if (
+                task.task_type == "review"
+                and task.status != STATUS_DONE
+                and task.source != RETENTION_SOURCE
+            ):
                 return True
         return False
 
@@ -213,3 +247,233 @@ class ReviewService:
             interval_days=interval,
             next_review_date=add_days(date, interval),
         )
+
+    # ================= 每日巩固复习（Daily Retention） =================
+    #
+    # 目的：到期复习（assessment 驱动）不足时，补足“今日复习”总量，
+    # 帮刚学过的知识做短期巩固。它不取代间隔复习，也不产生任何验收证据：
+    #   - 不写/不改 knowledge_points 的 mastery / next_review_date / interval；
+    #   - 不写 review_schedule；
+    #   - 不创建 assessment_attempts。
+    # 与到期复习共用 tasks 表（task_type='review', source='daily_retention'），
+    # 所以 UI 仍统一显示在【今日复习】。
+
+    def generate_daily_retention_reviews(
+        self, today: str | None = None, target_total: int | None = None
+    ) -> dict:
+        """在到期复习不足时，为“今日复习”补足每日巩固任务（幂等）。
+
+        总量目标：due + retention <= target_total（默认 3）。
+        同一天重复调用不会重复创建（以当日已有任务为准）。
+
+        :return: {"created": [...], "due_count": int,
+                  "existing_retention": int, "remaining": int}
+        """
+        date_str = today or _today()
+        target = int(
+            target_total if target_total is not None else self.retention_target
+        )
+        todays = [
+            t for t in self.repo.list_by_date(date_str)
+            if t.task_type == "review"
+        ]
+        due_count = sum(1 for t in todays if t.source == "review")
+        existing_retention = sum(
+            1 for t in todays if t.source == RETENTION_SOURCE
+        )
+        remaining = target - due_count - existing_retention
+        result = {
+            "created": [],
+            "due_count": due_count,
+            "existing_retention": existing_retention,
+            "remaining": max(0, remaining),
+            "candidates": [],
+        }
+        if remaining <= 0:
+            return result
+
+        used = {t.knowledge_point_id for t in todays if t.knowledge_point_id}
+        candidates = self.retention_candidates(
+            date_str, exclude_kp_ids=used
+        )
+        result["candidates"] = [c["knowledge_point_id"] for c in candidates]
+        for cand in candidates:
+            if len(result["created"]) >= remaining:
+                break
+            result["created"].append(
+                self._create_retention_task(cand, date_str)
+            )
+        result["remaining"] = max(0, remaining - len(result["created"]))
+        return result
+
+    def retention_candidates(
+        self, today: str | None = None, exclude_kp_ids=None
+    ) -> list[dict]:
+        """返回今日可用的每日巩固候选（已排序、已应用冷却）。
+
+        候选只能来自真正学过的正式任务（见
+        TaskRepository.list_done_learning_tasks_before）。
+        排序信号：weak 优先 → 最近学习优先（1~3 > 4~7 > 8~14 > 14+）
+        → 越久未巩固优先 → topic priority → 学习日期。
+        """
+        date_str = today or _today()
+        exclude = {
+            int(k) for k in (exclude_kp_ids or []) if k is not None
+        }
+
+        learned: dict[int, str] = {}
+        for t in self.repo.list_done_learning_tasks_before(date_str):
+            kp_id = t.knowledge_point_id
+            if kp_id is None or kp_id in exclude:
+                continue
+            if kp_id not in learned or t.scheduled_date > learned[kp_id]:
+                learned[kp_id] = t.scheduled_date
+
+        cooldown_max = max(
+            self.retention_cooldown, self.retention_weak_cooldown
+        )
+        window_start = add_days(date_str, -(cooldown_max * 4 + 1))
+        last_retention: dict[int, str] = {}
+        for t in self.repo.list_review_tasks_by_source(
+            RETENTION_SOURCE, window_start, date_str
+        ):
+            kp_id = t.knowledge_point_id
+            if kp_id is None:
+                continue
+            if (
+                kp_id not in last_retention
+                or t.scheduled_date > last_retention[kp_id]
+            ):
+                last_retention[kp_id] = t.scheduled_date
+
+        evidence = self._latest_evidence_by_kp()
+        out: list[dict] = []
+        for kp_id, learned_date in learned.items():
+            kp = self.assessment_repo.get_knowledge_point(kp_id)
+            if kp is None:
+                continue
+            attempt = evidence.get(kp_id)
+            weak = self._is_weak(kp, attempt)
+            cooldown = (
+                self.retention_weak_cooldown
+                if weak
+                else self.retention_cooldown
+            )
+            last_date = last_retention.get(kp_id)
+            gap = self._days_between(last_date, date_str) if last_date else None
+            if gap is not None and gap < cooldown:
+                continue  # 冷却中：避免连续多天重复同一知识点
+            out.append({
+                "kp": kp,
+                "knowledge_point_id": kp_id,
+                "weak": weak,
+                "attempt": attempt,
+                "days_since_learned": self._days_between(learned_date, date_str),
+                "gap_since_retention": gap,
+                "topic_priority": self._topic_priority(kp),
+            })
+        out.sort(key=self._retention_sort_key)
+        return out
+
+    def _retention_sort_key(self, cand: dict):
+        days = cand["days_since_learned"]
+        if days <= 3:
+            bucket = 0
+        elif days <= 7:
+            bucket = 1
+        elif days <= 14:
+            bucket = 2
+        else:
+            bucket = 3  # 超过 14 天：优先交给正式间隔复习
+        gap = cand["gap_since_retention"]
+        gap_key = -10 ** 6 if gap is None else -gap
+        return (
+            0 if cand["weak"] else 1,
+            bucket,
+            gap_key,
+            -int(cand.get("topic_priority") or 0),
+            -days,
+            cand["knowledge_point_id"],
+        )
+
+    def _create_retention_task(self, cand: dict, date_str: str) -> dict:
+        """创建每日巩固任务（不写 review_schedule / 不改知识点）。"""
+        kp = cand["kp"]
+        weak_points = self._weak_points(cand.get("attempt"))
+        task = self.repo.create(
+            title=f"每日巩固 {kp['name']}",
+            description=build_retention_task_content(
+                kp["name"], kp.get("description") or "", weak_points
+            ),
+            category="复习",
+            estimated_minutes=self.retention_minutes,
+            priority=2,
+            source=RETENTION_SOURCE,
+            task_type="review",
+            knowledge_point_id=kp["id"],
+            scheduled_date=date_str,
+        )
+        return {
+            "task_id": task.id,
+            "knowledge_point_id": kp["id"],
+            "title": task.title,
+        }
+
+    def _is_weak(self, kp: dict, attempt: dict | None) -> bool:
+        """是否有“弱项”证据（验收等级低或掌握度低于阈值）。
+
+        无验收证据时不视为弱项（只是没评估过）。
+        """
+        level = (attempt or {}).get("result_level")
+        if level in _WEAK_RESULTS:
+            return True
+        if level in _STRONG_RESULTS:
+            return False
+        if kp.get("last_assessed_at") and kp.get("mastery_estimate") is not None:
+            return float(kp["mastery_estimate"]) < self.weak_mastery
+        return False
+
+    def _latest_evidence_by_kp(self) -> dict[int, dict]:
+        """每个知识点最新一次已判题的验收记录（无则不在结果中）。"""
+        out: dict[int, dict] = {}
+        for a in self.assessment_repo.list_attempts():
+            if a.get("judge_status") != "judged":
+                continue
+            kp_id = a.get("knowledge_point_id")
+            if kp_id is None:
+                continue
+            prev = out.get(kp_id)
+            if prev is None or a["id"] > prev["id"]:
+                out[kp_id] = a
+        return out
+
+    def _weak_points(self, attempt: dict | None) -> list[str]:
+        raw = (attempt or {}).get("weak_points_json")
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+        if isinstance(data, list):
+            return [str(x) for x in data if str(x).strip()]
+        return []
+
+    def _topic_priority(self, kp: dict) -> int:
+        topic_id = kp.get("topic_id")
+        if self.plan_repo is None or topic_id is None:
+            return 0
+        try:
+            topic = self.plan_repo.get_topic(topic_id)
+        except Exception:  # noqa: BLE001 - 优先级仅用于排序，失败不影响生成
+            return 0
+        return int(getattr(topic, "priority", 0) or 0) if topic else 0
+
+    @staticmethod
+    def _days_between(earlier: str | None, later: str) -> int:
+        if not earlier:
+            return 0
+        try:
+            return (_date.fromisoformat(later) - _date.fromisoformat(earlier)).days
+        except (TypeError, ValueError):
+            return 0

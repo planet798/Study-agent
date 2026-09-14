@@ -306,6 +306,13 @@ class MainWindow(QMainWindow):
                 self.review_scheduler.generate_due_reviews(today=today_str)
             except Exception:  # noqa: BLE001 - 复习生成失败不影响启动
                 pass
+            # 到期不足时补足“每日巩固”（幂等；总量目标默认 3）
+            try:
+                self.review_scheduler.generate_daily_retention_reviews(
+                    today=today_str
+                )
+            except Exception:  # noqa: BLE001 - 巩固生成失败不影响启动
+                pass
         self.current_date = today_str
         self.date_label.setText(today_str)
         self.refresh()
@@ -341,7 +348,7 @@ class MainWindow(QMainWindow):
                 for t in review_tasks:
                     self._add_task_widget(t)
             else:
-                self._add_section_hint("今日暂无到期复习")
+                self._add_section_hint("暂无可复习内容")
 
         # 3) 额外学习
         if self.extra_service is not None or extra_tasks:

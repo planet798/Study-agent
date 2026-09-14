@@ -568,7 +568,7 @@ def main() -> int:
     from app.services.review_service import ReviewService
 
     # 复习调度（依赖 TaskRepository + AssessmentRepository）
-    review_scheduler = ReviewService(repo, assessment_repo)
+    review_scheduler = ReviewService(repo, assessment_repo, plan_repo=plan_repo)
     # 验收（判题成功后自动联动复习调度）
     assessment_service = AssessmentService(
         ai_client,

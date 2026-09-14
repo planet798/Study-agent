@@ -66,6 +66,11 @@ QFrame#TaskCard[postponing="true"] {
     color: #7f8c8d;
     font-size: 12px;
 }
+#ReviewTag {
+    color: #2c6fbb;
+    font-size: 12px;
+    font-weight: bold;
+}
 #TaskReason {
     color: #a04000;
     font-size: 12px;

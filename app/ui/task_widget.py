@@ -91,6 +91,10 @@ class TaskWidget(QFrame):
         self.priority_label = QLabel("")
         self.priority_label.setObjectName("TaskMeta")
         top.addWidget(self.title_label)
+        self.review_tag_label = QLabel("")
+        self.review_tag_label.setObjectName("ReviewTag")
+        self.review_tag_label.setVisible(False)
+        top.addWidget(self.review_tag_label)
         top.addStretch()
         top.addWidget(self.category_label)
         top.addWidget(self.priority_label)
@@ -203,6 +207,17 @@ class TaskWidget(QFrame):
 
         # 标题 + 分类 + 优先级
         self.title_label.setText(task.title)
+        # 复习任务来源标签：到期复习（assessment 驱动）/ 每日巩固
+        if task.task_type == "review":
+            tag = (
+                "每日巩固"
+                if task.source == "daily_retention"
+                else "到期复习"
+            )
+            self.review_tag_label.setText(f"【{tag}】")
+            self.review_tag_label.setVisible(True)
+        else:
+            self.review_tag_label.setVisible(False)
         self.category_label.setText(f"分类：{task.category or '未分类'}")
         prio = _PRIORITY_TEXT.get(task.priority, "?")
         self.priority_label.setText(f"优先级：{prio}")

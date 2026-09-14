@@ -6,7 +6,7 @@
 - 验收入口连接到 Phase 3C/3D（start_assessment -> 弹出验收对话框）
 - 额外任务生成按钮调用 ExtraTaskService
 - 课外探索展示 + 打开链接（URL 只能来自已验证集合）
-- 空状态（今日暂无到期复习 / 暂无匹配资源 / 全局空提示）
+- 空状态（暂无可复习内容 / 暂无匹配资源 / 全局空提示）
 - 托盘行为不回归（X 隐藏、退出清理）
 """
 
@@ -219,7 +219,7 @@ class TestEmptyStates:
             qtbot, repo, task_service, date_service,
             review_scheduler=review_scheduler,
         )
-        assert _find_label(w, "今日暂无到期复习")
+        assert _find_label(w, "暂无可复习内容")
 
     def test_no_tasks_global_empty(self, qtbot, repo, task_service, date_service):
         w = _build_window(qtbot, repo, task_service, date_service)
