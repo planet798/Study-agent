@@ -313,12 +313,20 @@ class TestNoRegression:
             failed = Signal(str)
             finished = Signal()
 
-            def __init__(self, func, args=(), kwargs=None, parent=None):
+            def __init__(self, operation, service_factory, db_path=None,
+                         args=(), kwargs=None, parent=None):
                 super().__init__()
-                self._f, self._a, self._kw = func, args, kwargs or {}
+                self._op = operation
+                self._factory = service_factory
+                self._args = args
+                self._kwargs = kwargs or {}
 
             def start(self):
-                self.succeeded.emit(self._f(*self._a, **self._kw))
+                # 测试单线程：回退工厂忽略连接，返回主线程 service
+                service = self._factory(None)
+                self.succeeded.emit(
+                    self._op(service, *self._args, **self._kwargs)
+                )
                 self.finished.emit()
 
             def isRunning(self):
@@ -333,7 +341,7 @@ class TestNoRegression:
         class DummyDialog(QObject):
             assessment_completed = Signal(int)
 
-            def __init__(self, service, attempt, today, parent=None):
+            def __init__(self, service, attempt, today, parent=None, **kwargs):
                 super().__init__()
                 captured["attempt"] = attempt
 

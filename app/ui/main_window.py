@@ -42,7 +42,7 @@ from ..services.date_service import DateService
 from ..services.task_review_service import TaskReviewService
 from ..services.task_service import TaskService
 from ..utils.date_utils import add_days, today as _default_today
-from .ai_worker import AIReviewWorker, AssessmentWorker
+from .ai_worker import AIReviewWorker, AssessmentWorker, run_start_assessment
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
 from .styles import APP_STYLE, apply_secondary_button_text
@@ -89,6 +89,8 @@ class MainWindow(QMainWindow):
         jd_summary_service=None,
         outcome_service=None,
         notes_service=None,
+        assessment_service_factory=None,
+        db_path=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -105,6 +107,14 @@ class MainWindow(QMainWindow):
         # Phase 3D~6 服务：可选；未传则对应区域隐藏
         self.assessment_service = assessment_service
         self.assessment_repo = assessment_repo
+        # 验收后台 worker 的线程安全依赖：只传 db_path + 工厂，不跨线程传连接。
+        # 未显式提供工厂时回退到主线程 service（仅用于单线程测试）。
+        self.db_path = db_path
+        self.assessment_service_factory = (
+            assessment_service_factory
+            if assessment_service_factory is not None
+            else (lambda conn: self.assessment_service)
+        )
         # 复习调度服务（ReviewService，区别于上面的 review_service=TaskReviewService）
         self.review_scheduler = review_scheduler
         self.extra_service = extra_service
@@ -122,6 +132,8 @@ class MainWindow(QMainWindow):
         self._quit_requested = False
         self._tray: QSystemTrayIcon | None = None
         self._ai_workers: list[AIReviewWorker] = []
+        # 防止连续双击【开始验收】创建多个 worker / 多个 pending attempt
+        self._assessment_inflight: set[int] = set()
         self._exploration_added = False
 
         self.setWindowTitle("Study Agent")
@@ -918,16 +930,23 @@ class MainWindow(QMainWindow):
             self._open_assessment_dialog(existing)
             return
 
+        if task.id in self._assessment_inflight:
+            return  # 已有验收 worker 在跑，忽略重复点击
+        self._assessment_inflight.add(task.id)
         self.statusBar().showMessage("正在生成验收题…", 0)
         worker = AssessmentWorker(
-            svc.start_assessment,
+            run_start_assessment,
+            self.assessment_service_factory,
+            db_path=self.db_path,
             args=(task.knowledge_point_id,),
             kwargs={"task_id": task.id},
             parent=self,
         )
         worker.succeeded.connect(self._on_assessment_ready)
         worker.failed.connect(self._on_assessment_failed)
-        worker.finished.connect(lambda w=worker: self._release_worker(w))
+        worker.finished.connect(
+            lambda w=worker, tid=task.id: self._release_assessment_worker(w, tid)
+        )
         self._ai_workers.append(worker)
         worker.start()
 
@@ -954,7 +973,9 @@ class MainWindow(QMainWindow):
 
     def _open_assessment_dialog(self, attempt) -> None:
         dlg = AssessmentDialog(
-            self.assessment_service, attempt, self.current_date, parent=self
+            self.assessment_service, attempt, self.current_date, parent=self,
+            service_factory=self.assessment_service_factory,
+            db_path=self.db_path,
         )
         dlg.assessment_completed.connect(self._on_assessment_completed)
         dlg.exec()
@@ -1091,6 +1112,11 @@ class MainWindow(QMainWindow):
         )
         self._ai_workers.append(worker)
         worker.start()
+
+    def _release_assessment_worker(self, worker, task_id: int) -> None:
+        """验收 worker 结束后：解除 in-flight 标记并释放引用。"""
+        self._assessment_inflight.discard(task_id)
+        self._release_worker(worker)
 
     def _release_worker(self, worker: AIReviewWorker) -> None:
         """AI 线程结束后从列表中移除引用。"""

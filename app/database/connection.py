@@ -19,13 +19,18 @@ DEFAULT_DB_DIR = PROJECT_ROOT / "data"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "study_agent.db"
 
 
+def resolve_db_path(db_path: str | Path | None = None) -> Path:
+    """解析最终数据库文件路径（与 get_connection 使用同一规则）。"""
+    return Path(db_path) if db_path is not None else DEFAULT_DB_PATH
+
+
 def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     """打开（并初始化）一个 SQLite 连接。
 
     :param db_path: 数据库文件路径，None 时使用默认 data/study_agent.db
     :return: 配置好的 sqlite3.Connection
     """
-    path = Path(db_path) if db_path is not None else DEFAULT_DB_PATH
+    path = resolve_db_path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(str(path))

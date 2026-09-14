@@ -26,7 +26,7 @@ from app.ai.client import DeepSeekClient
 from app.ai.long_term_context import load_long_term_context
 from app.ai.planner import AIPlanner
 from app.ai.summary import AISummaryGenerator
-from app.database.connection import get_connection
+from app.database.connection import get_connection, resolve_db_path
 from app.database.repository import TaskRepository
 from app.database.study_plan_repository import (
     StudyPlanRepository,
@@ -576,6 +576,26 @@ def main() -> int:
         review_service=review_scheduler,
         outcome_service=outcome_service,
     )
+
+    # 验收后台线程专用：为 worker 的“独立连接”构造一套同配置依赖，
+    # 避免把主线程 sqlite 连接传入子线程（SQLite thread affinity）。
+    def build_assessment_service(fresh_conn):
+        fresh_repo = TaskRepository(fresh_conn)
+        fresh_plan_repo = StudyPlanRepository(fresh_conn)
+        fresh_assessment_repo = AssessmentRepository(fresh_conn)
+        fresh_review = ReviewService(
+            fresh_repo, fresh_assessment_repo, plan_repo=fresh_plan_repo
+        )
+        fresh_outcome = LearningOutcomeService(
+            LearningOutcomeRepository(fresh_conn)
+        )
+        fresh_outcome.ai_client = ai_client
+        return AssessmentService(
+            ai_client,
+            assessment_repo=fresh_assessment_repo,
+            review_service=fresh_review,
+            outcome_service=fresh_outcome,
+        )
     extra_service = ExtraTaskService(
         repo,
         study_plan_service=study_plan_service,
@@ -620,6 +640,9 @@ def main() -> int:
         jd_summary_service=jd_summary_service,
         outcome_service=outcome_service,
         notes_service=notes_service,
+        # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
+        assessment_service_factory=build_assessment_service,
+        db_path=str(resolve_db_path()),
     )
     # 新实例启动请求 → 恢复/前置已有唯一实例（从托盘恢复或直接激活）
     if hasattr(window, "_restore_from_tray"):

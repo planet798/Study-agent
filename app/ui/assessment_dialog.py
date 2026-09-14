@@ -25,18 +25,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .ai_worker import AssessmentWorker
+from .ai_worker import AssessmentWorker, run_submit_answers
 
 
 class AssessmentDialog(QDialog):
     # 验收成功判题后发出（task_id），供上层完成复习任务等
     assessment_completed = Signal(int)
 
-    def __init__(self, assessment_service, attempt, today, parent=None):
+    def __init__(self, assessment_service, attempt, today, parent=None,
+                 service_factory=None, db_path=None):
         super().__init__(parent)
         self._service = assessment_service
         self._attempt = attempt
         self._today = today
+        # 后台判题只传 db_path + 工厂（worker 内自建连接），不跨线程复用主线程连接
+        self._service_factory = service_factory or (lambda conn: self._service)
+        self._db_path = db_path
         self._answer_edits: list[QPlainTextEdit] = []
 
         self.setWindowTitle("学习验收")
@@ -165,7 +169,9 @@ class AssessmentDialog(QDialog):
         self.status_label.setText("正在判题…")
         try:
             worker = AssessmentWorker(
-                self._service.submit_answers,
+                run_submit_answers,
+                self._service_factory,
+                db_path=self._db_path,
                 args=(self._attempt["id"], answers),
                 kwargs={"today": self._today},
                 parent=self,
