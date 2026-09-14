@@ -463,6 +463,10 @@ class StudyPlanService:
                 self.skill_service.refresh_market(end_date)
             except Exception:  # noqa: BLE001
                 pass
+        try:
+            self.skill_service.refresh_coverage()
+        except Exception:  # noqa: BLE001
+            pass
         for t in topics:
             names = self.skill_service.skills_for_topic(t.id)
             if not names:

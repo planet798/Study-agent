@@ -709,11 +709,13 @@ class MainWindow(QMainWindow):
         toggle.setContentsMargins(0, 0, 0, 0)
         for days, text in ((14, "近14天"), (30, "近30天")):
             btn = QPushButton(text)
-            if days == self._jd_trend_days:
-                btn.setObjectName("PrimaryButton")
-            else:
-                btn.setObjectName("SecondaryButton")
-                apply_secondary_button_text(btn)
+            # 两个按钮都用可读的 SecondaryButton（蓝字）；仅用属性区分选中态，
+            # 避免 PrimaryButton 在浅色背景下出现白字不可读。
+            btn.setObjectName("SecondaryButton")
+            apply_secondary_button_text(btn)
+            btn.setProperty(
+                "trendActive", "true" if days == self._jd_trend_days else "false"
+            )
             btn.clicked.connect(lambda _=False, d=days: self._set_jd_trend_days(d))
             toggle.addWidget(btn)
         toggle.addStretch()

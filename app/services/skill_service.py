@@ -100,6 +100,42 @@ class SkillService:
         self.current_phase_provider = current_phase_provider
         self._market: dict | None = None
         self._prereq_boost: dict[str, float] = {}
+        # 前置“材料已覆盖”：linked_topics 全部有 done 任务的技能（≠ 掌握）
+        self._coverage: set[str] | None = None
+
+    # ================= 前置“材料覆盖”（防卡死；≠ 掌握） =================
+
+    def refresh_coverage(self) -> set[str]:
+        """重算“材料已覆盖”的技能集合。
+
+        定义：一个技能的 linked_topics 全部存在 done 任务→其材料已被安排并完成。
+        用途：前置门禁的**解锁**条件之一（“学过前置才能学下一课”）；
+        **绝不等于掌握**：不写 mastery、不影响 active_needed / Review / Assessment /
+        已掌握跳过逻辑。前置主题尚未完成时仍为 blocked（硬约束不变）。
+        """
+        done_topics: set[int] = set()
+        if self.plan_repo is not None:
+            try:
+                done_topics = {
+                    int(r[0]) for r in self.plan_repo.conn.execute(
+                        "SELECT DISTINCT topic_id FROM tasks "
+                        "WHERE status = 'done' AND topic_id IS NOT NULL"
+                    ).fetchall()
+                }
+            except Exception:  # noqa: BLE001
+                done_topics = set()
+        coverage: set[str] = set()
+        for s in self.skill_repo.list_all():
+            linked = [int(x) for x in (s.get("linked_topics") or [])]
+            if linked and all(t in done_topics for t in linked):
+                coverage.add(s["name"])
+        self._coverage = coverage
+        return coverage
+
+    def _coverage_set(self) -> set[str]:
+        if self._coverage is None:
+            return self.refresh_coverage()
+        return self._coverage
 
     # ================= Step 6：近期市场需求 =================
 
@@ -123,6 +159,7 @@ class SkillService:
         market = self.market_signal.compute(end_date, target_type)
         self._market = market
         self._prereq_boost = self._compute_prereq_boost(market)
+        self.refresh_coverage()
         return market
 
     def market(self) -> dict | None:
@@ -254,6 +291,7 @@ class SkillService:
         便于展示/测试“为什么是这个分数”。
         """
         self.refresh_market(end_date)
+        self.refresh_coverage()
         skills = self.skill_repo.list_all()
         status_by_name = self._default_status_by_name()
         mastery_by_name = self._default_mastery_by_name()
@@ -361,7 +399,11 @@ class SkillService:
             else self._default_mastery_by_name()
         )
         missing = []
+        coverage = self._coverage_set()
         for name in prereqs:
+            if name in coverage:
+                # 前置材料已完成（≠ 掌握）：允许继续学下一课，不写 mastery
+                continue
             st = status_by_name.get(name)
             if st == "mastered":
                 continue
@@ -412,6 +454,7 @@ class SkillService:
         """
         status_by_name = self._default_status_by_name()
         mastery_by_name = self._default_mastery_by_name()
+        self.refresh_coverage()
         candidates = []
         for skill in self.skill_repo.list_all():
             eff = self.effective_status(skill, status_by_name, mastery_by_name)
