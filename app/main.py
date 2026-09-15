@@ -412,6 +412,40 @@ def _run_export_note_cli(argv) -> int:
         conn.close()
 
 
+def _run_past_task_preflight(repo, task_service, today_str: str) -> bool:
+    """启动前置：历史未确认正式学习任务补确认。
+
+    必须在 DateService.process_date_transition（自动归档 active -> not_done、
+    生成今日计划）之前执行。
+
+    :return: True 继续启动；False 终止本次启动（不进入今日流程、不改数据）。
+    """
+    from PySide6.QtWidgets import QDialog
+
+    from app.services.past_task_service import PastTaskConfirmationService
+
+    service = PastTaskConfirmationService(repo, task_service)
+    try:
+        unresolved = service.find_unresolved(today_str)
+    except Exception:  # noqa: BLE001 - 查询异常不应卡死启动（保持旧行为）
+        return True
+    if not unresolved:
+        return True
+
+    from app.ui.dialogs import show_warning
+    from app.ui.past_task_dialog import PastTaskConfirmationDialog
+
+    dlg = PastTaskConfirmationDialog(unresolved)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return False  # 取消 / X / Esc：不默认判未完成、不进入今天
+    try:
+        service.apply_decisions(dlg.result_decisions())
+    except Exception as e:  # noqa: BLE001 - 更新失败则不继续启动
+        show_warning(None, f"任务状态更新失败：{e}")
+        return False
+    return True
+
+
 def main() -> int:
     # 0) 子命令：不进 GUI
     if "add-jd-summary" in sys.argv[1:]:
@@ -639,6 +673,11 @@ def main() -> int:
         assessment_repo=assessment_repo,
         jd_service=jd_service,
     )
+
+    # 跨日未确认正式任务：在“自动归档 + 生成今日计划”之前必须先补确认。
+    # 若用户未确认（取消 / X / Esc）或写入失败，则本次启动终止，不进入今日学习。
+    if not _run_past_task_preflight(repo, task_service, today()):
+        return 0
 
     window = MainWindow(
         task_service=task_service,
