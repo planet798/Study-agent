@@ -475,11 +475,18 @@ def main() -> int:
     study_plan_service.ensure_default_plan()
 
     # Step 6：近期市场需求（Daily Summary 优先，individual JD fallback）
-    from app.database.jd_summary_repository import JdDailySummaryRepository
+    from app.database.jd_summary_repository import (
+        JdDailySummaryRepository,
+        JdSkillCandidateRepository,
+    )
     from app.services.jd_summary_service import JdSummaryService as _JdSumSvc
     from app.services.market_signal import MarketSignal
 
-    jd_summary_service = _JdSumSvc(JdDailySummaryRepository(conn), skill_repo)
+    jd_summary_service = _JdSumSvc(
+        JdDailySummaryRepository(conn),
+        skill_repo,
+        candidate_repo=JdSkillCandidateRepository(conn),
+    )
     skill_service.market_signal = MarketSignal(jd_summary_service)
     # stage alignment 排序偏好：当前 phase 有对应 topic 的技能优先
     skill_service.current_phase_provider = (
@@ -503,6 +510,16 @@ def main() -> int:
         skill_service.refresh_market()
         skill_service.recompute_all_priority_scores()
     except Exception:  # noqa: BLE001
+        pass
+    # 历史未匹配 JD 技能修复（明确 alias 生效） + 刷新 JD 新技能候选池
+    try:
+        repair = jd_summary_service.repair_unmatched_jd_skills()
+        if repair.get("repaired"):
+            print(
+                f"[startup] 已修复 {repair['repaired']} 条 JD 未匹配技能映射"
+            )
+        jd_summary_service.refresh_candidates(today())
+    except Exception:  # noqa: BLE001 - 修复失败不影响启动
         pass
 
     # 存量“生成型新任务”description 回填（一次性、幂等；失败不阻止启动）

@@ -1,4 +1,4 @@
-"""SummaryService 测试：本地统计 + 缓存 + AI fallback。"""
+"""SummaryService 测试：本地统计 + 缓存 + AI fallback（仅月总结）。"""
 
 from __future__ import annotations
 
@@ -31,13 +31,14 @@ class FakeSummaryClient:
         return self._content
 
 
-WEEKLY_JSON = json.dumps(
+MONTHLY_JSON = json.dumps(
     {
-        "overview": "本周完成良好",
-        "strengths": ["坚持学习"],
-        "problems": ["算法延期"],
-        "recommendations": ["拆解任务"],
-        "next_week_focus": ["加强算法"],
+        "overview": "本月推进不错",
+        "progress": "进入新阶段",
+        "strengths": ["坚持性好"],
+        "weaknesses": ["效率波动"],
+        "recommendations": ["优化安排"],
+        "next_month_focus": ["深入 PyTorch"],
     },
     ensure_ascii=False,
 )
@@ -53,67 +54,43 @@ def stats(repo):
     return StatsService(repo)
 
 
-class TestWeeklySummaryLocal:
-    def test_weekly_local_stats_with_ai(self, repo, cache_repo):
+class TestMonthlySummaryLocal:
+    def test_monthly_local_stats_with_ai(self, repo, cache_repo):
         ts = TaskService(repo)
         t = ts.create_task("任务", scheduled_date="2026-01-05", estimated_minutes=30)
         ts.complete_task(t.id)
 
-        client = FakeSummaryClient(content=WEEKLY_JSON)
+        client = FakeSummaryClient(content=MONTHLY_JSON)
         svc = SummaryService(
             StatsService(repo), cache_repo, AISummaryGenerator(client)
         )
-        result = svc.get_weekly_summary("2026-01-05")
+        result = svc.get_monthly_summary(2026, 1)
         assert result["source"] == "ai"
         assert result["stats"]["total_tasks"] == 1
         assert result["stats"]["completed_tasks"] == 1
         assert result["ai_summary"] is not None
         assert client.calls == 1
 
-    def test_weekly_local_without_ai(self, repo, cache_repo):
+    def test_monthly_local_without_ai(self, repo, cache_repo):
         ts = TaskService(repo)
         ts.create_task("任务", scheduled_date="2026-01-05")
         svc = SummaryService(StatsService(repo), cache_repo, None)
-        result = svc.get_weekly_summary("2026-01-05")
+        result = svc.get_monthly_summary(2026, 1)
         assert result["source"] == "local"
         assert result["ai_summary"] is None
         assert result["stats"]["total_tasks"] == 1
-
-
-class TestMonthlySummary:
-    def test_monthly_local_stats(self, repo, cache_repo):
-        ts = TaskService(repo)
-        t = ts.create_task("任务", scheduled_date="2026-02-10", estimated_minutes=45)
-        ts.complete_task(t.id)
-        monthly_json = json.dumps(
-            {
-                "overview": "本月推进不错",
-                "progress": "进入新阶段",
-                "strengths": ["坚持性好"],
-                "weaknesses": ["效率波动"],
-                "recommendations": ["优化安排"],
-                "next_month_focus": ["深入 PyTorch"],
-            },
-            ensure_ascii=False,
-        )
-        client = FakeSummaryClient(content=monthly_json)
-        svc = SummaryService(StatsService(repo), cache_repo, AISummaryGenerator(client))
-        result = svc.get_monthly_summary(2026, 2)
-        assert result["stats"]["total_tasks"] == 1
-        assert result["stats"]["completed_tasks"] == 1
-        assert result["source"] == "ai"
 
 
 class TestCache:
     def test_cache_hit(self, repo, cache_repo):
         ts = TaskService(repo)
         ts.create_task("任务", scheduled_date="2026-01-05")
-        client = FakeSummaryClient(content=WEEKLY_JSON)
+        client = FakeSummaryClient(content=MONTHLY_JSON)
         svc = SummaryService(StatsService(repo), cache_repo, AISummaryGenerator(client))
 
-        r1 = svc.get_weekly_summary("2026-01-05")
+        r1 = svc.get_monthly_summary(2026, 1)
         assert client.calls == 1
-        r2 = svc.get_weekly_summary("2026-01-05")
+        r2 = svc.get_monthly_summary(2026, 1)
         assert client.calls == 1  # 未再调用 AI
         assert r2["cached"] is True
         assert r2["stats"] == r1["stats"]
@@ -121,26 +98,27 @@ class TestCache:
     def test_cache_invalidated_when_stats_change(self, repo, cache_repo):
         ts = TaskService(repo)
         ts.create_task("旧任务", scheduled_date="2026-01-05")
-        client = FakeSummaryClient(content=WEEKLY_JSON)
+        client = FakeSummaryClient(content=MONTHLY_JSON)
         svc = SummaryService(StatsService(repo), cache_repo, AISummaryGenerator(client))
 
-        svc.get_weekly_summary("2026-01-05")
+        svc.get_monthly_summary(2026, 1)
         assert client.calls == 1
 
         # 数据变化（新增任务）
-        ts.create_task("新任务", scheduled_date="2026-01-05")
-        r2 = svc.get_weekly_summary("2026-01-05")
+        ts.create_task("新任务", scheduled_date="2026-01-06")
+        r2 = svc.get_monthly_summary(2026, 1)
         assert client.calls == 2  # 重新生成
         assert r2["cached"] is False
         assert r2["stats"]["total_tasks"] == 2
 
     def test_cache_upsert_same_period(self, repo, cache_repo):
-        client = FakeSummaryClient(content=WEEKLY_JSON)
+        client = FakeSummaryClient(content=MONTHLY_JSON)
         svc = SummaryService(StatsService(repo), cache_repo, AISummaryGenerator(client))
-        svc.get_weekly_summary("2026-01-05")
-        svc.get_weekly_summary("2026-01-05")
+        svc.get_monthly_summary(2026, 1)
+        svc.get_monthly_summary(2026, 1)
         rows = cache_repo.conn.execute(
-            "SELECT COUNT(*) AS n FROM weekly_summaries WHERE period_start='2026-01-05'"
+            "SELECT COUNT(*) AS n FROM monthly_summaries "
+            "WHERE period_start='2026-01-01'"
         ).fetchone()
         assert rows["n"] == 1
 
@@ -151,7 +129,7 @@ class TestAiFailureFallback:
         ts.create_task("任务", scheduled_date="2026-01-05")
         client = FakeSummaryClient(error=AIServiceError("AI 请求超时"))
         svc = SummaryService(StatsService(repo), cache_repo, AISummaryGenerator(client))
-        result = svc.get_weekly_summary("2026-01-05")
+        result = svc.get_monthly_summary(2026, 1)
         # 统计正常，AI 降级
         assert result["stats"]["total_tasks"] == 1
         assert result["ai_summary"] is None
@@ -162,6 +140,6 @@ class TestAiFailureFallback:
         ts.create_task("任务", scheduled_date="2026-01-05")
         client = FakeSummaryClient(configured=False)
         svc = SummaryService(StatsService(repo), cache_repo, AISummaryGenerator(client))
-        result = svc.get_weekly_summary("2026-01-05")
+        result = svc.get_monthly_summary(2026, 1)
         assert result["ai_summary"] is None
         assert result["source"] == "local"

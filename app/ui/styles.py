@@ -137,18 +137,6 @@ QPushButton#SecondaryButton:disabled {
     color: #b0b7bf;
     border-color: #d5dbe2;
 }
-
-/* 选中态（如 JD 趋势的“近14天/近30天”）：浅蓝底 + 蓝字 + 蓝边 */
-QPushButton#SecondaryButton[trendActive="true"] {
-    background-color: #dce8f7;
-    border: 1px solid #2c6fbb;
-    color: #2c6fbb;
-    font-weight: bold;
-}
-QPushButton#SecondaryButton[trendActive="true"]:hover {
-    background-color: #cfe0f5;
-}
-
 /* ---- 统计栏 ---- */
 QFrame#StatsBar {
     background-color: #ffffff;

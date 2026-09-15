@@ -121,8 +121,8 @@ PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是个人学习规划助手。
     相对优先级，不是路线控制器：不得仅凭 JD 高频或高分跳过当前阶段；不得为
     prerequisite_blocked（前置未满足）的技能越级安排任务；已掌握技能不因 JD 高频
     而重复安排。
-15. market_trends / skill_priorities.market_14d 来自用户人工收集的“目标岗位样本”
-    （每日 JD 技术汇总），只代表用户近期看的目标岗位，**不代表全行业需求**；
+15. market_trends / skill_priorities.market_30d 来自用户人工收集的“目标岗位样本”
+    （每日 JD 技术汇总的近 30 天），只代表用户近期看的目标岗位，**不代表全行业需求**；
     引用时必须写成“近期目标岗位样本需求”。
 16. 高频但被前置阻塞的技能（如 RAG 高需求但缺 LLM 基础 / Embedding）不得直接
     安排；应改为提升其必要前置技能的近期优先级。
@@ -208,19 +208,18 @@ def build_market_trend_section(context: "object") -> str:
     """
     trends = getattr(context, "market_trends", None)
     source = getattr(context, "market_source", "none")
-    n14 = int(getattr(context, "market_sample_count_14d", 0) or 0)
     n30 = int(getattr(context, "market_sample_count_30d", 0) or 0)
     if not trends or source != "daily_summary":
         return ""
     lines = [
-        "【近期目标岗位技术趋势】（来自用户人工汇总的每日 JD 样本；"
+        "【近30天目标岗位技术趋势】（来自用户人工汇总的每日 JD 样本；"
         "仅代表其近期收集的目标岗位，不代表全行业需求）",
-        f"近 14 天样本：{n14} 个目标实习岗位；近 30 天样本：{n30} 个。",
+        f"近 30 天样本：{n30} 个目标实习岗位。",
     ]
     for t in list(trends)[:10]:
         lines.append(
-            f"  - {t.skill}：14天 {t.market_14d * 100:.0f}%"
-            f"（{t.mention_14d} 次）｜30天 {t.market_30d * 100:.0f}%"
+            f"  - {t.skill}：{t.market_30d * 100:.0f}%"
+            f"（{t.mention_30d} 次）"
         )
     lines.append(
         "使用要求：① 作为市场需求证据，与 mastery / weak_points 联合判断；"
@@ -250,8 +249,8 @@ def build_skill_priority_section(context: "object") -> str:
         lines.append("- 近期技能优先级（near = 近期目标岗位样本需求）：")
         for i, s in enumerate(list(sp)[:8], 1):
             mkt = ""
-            if getattr(s, "market_14d", None) is not None:
-                mkt = f"，近14天目标岗位 {s.market_14d * 100:.0f}%"
+            if getattr(s, "market_30d", None) is not None:
+                mkt = f"，近30天目标岗位 {s.market_30d * 100:.0f}%"
             stage = getattr(s, "stage_alignment", "unknown")
             stage_txt = {"current": "，当前阶段相关",
                          "next": "，下一阶段",
@@ -268,8 +267,8 @@ def build_skill_priority_section(context: "object") -> str:
             )
             flag = "（前置阻塞，不得直接安排，先补前置）" if g.blocked else ""
             mkt = ""
-            if getattr(g, "market_14d", None) is not None:
-                mkt = f"近14天 {g.market_14d * 100:.0f}% / "
+            if getattr(g, "market_30d", None) is not None:
+                mkt = f"近30天 {g.market_30d * 100:.0f}% / "
             lines.append(
                 f"  - {g.skill}：{mkt}must×{g.jd_must_count} / plus×{g.jd_plus_count}，"
                 f"mastery={mastery_txt}{flag}"
@@ -467,7 +466,7 @@ def build_assessment_judge_prompt(
 
 
 # ============================================================
-# AI 学习总结（周/月）Prompt
+# AI 学习总结（月）Prompt
 # ============================================================
 
 SUMMARY_SYSTEM_PROMPT = """你是学习数据解读助手。
@@ -475,23 +474,6 @@ SUMMARY_SYSTEM_PROMPT = """你是学习数据解读助手。
 你的职责是解释用户的学习统计，找出问题、总结趋势、给出建议。
 你不需要、也不应该重新计算任何统计数字——所有数值都以输入数据为准。
 不要批评用户，保持客观、建设性、简洁。"""
-
-WEEKLY_SUMMARY_INSTRUCTION = """
-请根据以下本周学习统计（JSON）输出严格 JSON 总结：
-{{
-  "overview": "一句话概述本周学习情况",
-  "strengths": ["做得好的地方1", "做得好的地方2"],
-  "problems": ["本周主要问题1", "本周主要问题2"],
-  "recommendations": ["具体建议1", "具体建议2"],
-  "next_week_focus": ["下周重点关注1", "下周重点关注2"]
-}}
-
-要求：
-- overview 不超过 100 字
-- 每个数组 1~3 项，每项不超过 80 字
-- 所有数字以输入统计为准，不要自己推算
-- 只输出 JSON，不要输出其他文字
-"""
 
 MONTHLY_SUMMARY_INSTRUCTION = """
 请根据以下本月学习统计（JSON）输出严格 JSON 总结：
@@ -510,17 +492,6 @@ MONTHLY_SUMMARY_INSTRUCTION = """
 - 所有数字以输入统计为准，不要自己推算
 - 只输出 JSON，不要输出其他文字
 """
-
-
-def build_weekly_summary_prompt(stats: dict) -> str:
-    import json
-
-    return (
-        "请解读以下本周学习统计：\n\n"
-        + json.dumps(stats, ensure_ascii=False, indent=2)
-        + "\n\n"
-        + WEEKLY_SUMMARY_INSTRUCTION
-    )
 
 
 def build_monthly_summary_prompt(stats: dict) -> str:

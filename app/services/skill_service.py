@@ -74,6 +74,9 @@ PREREQ_PROP_CAP = 0.5        # 单个技能最多获得的传播加成
 # 当前阶段适配度（排序偏好；不属于 score 公式，避免改变既有尺度）
 STAGE_RANK = {"current": 2, "next": 1, "far": 0, "unknown": 0}
 
+# 课程缺口：正式技能近30天频率达到该值且无 linked topic 时标记
+CURRICULUM_GAP_MIN_FREQUENCY = 0.10
+
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, value))
@@ -212,7 +215,7 @@ class SkillService:
     def market_factor(self, skill: dict) -> float:
         """近期市场需求因子（0~1）。
 
-        - 有 Daily Summary：用市场信号 + 有限的“前置需求传播”加成；
+        - 有 Daily Summary：market_signal = 近 30 天频率 + 有限的前置需求传播；
         - 无 Daily Summary：回退到旧 individual JD 的 jd_factor。
         """
         market = self._market
@@ -220,6 +223,46 @@ class SkillService:
             base = self._market_signal_value(market, skill.get("name"))
             return _clamp(base + self._prereq_boost.get(skill.get("name"), 0.0))
         return self.jd_factor(skill.get("jd_frequency"))
+
+    def curriculum_gap_skills(
+        self, min_frequency: float = CURRICULUM_GAP_MIN_FREQUENCY
+    ) -> list[dict]:
+        """正式技能市场上高频、但课程体系还未覆盖（linked_topics 为空）。
+
+        条件：有近 30 天市场信号 + 未掌握 + 无任何 linked topic。
+        只用于 UI 展示“课程缺口”，Planner 不得凭空生成课程/任务。
+        """
+        market = self._market or {}
+        if market.get("source") != "daily_summary":
+            return []
+        status_by_name = self._default_status_by_name()
+        mastery_by_name = self._default_mastery_by_name()
+        gaps: list[dict] = []
+        for skill in self.skill_repo.list_all():
+            name = skill["name"]
+            rec = (market.get("skills") or {}).get(name)
+            if not rec:
+                continue
+            freq = float(rec.get("freq30") or 0.0)
+            if freq < min_frequency:
+                continue
+            if self.effective_status(
+                skill, status_by_name, mastery_by_name
+            ) == "mastered":
+                continue
+            try:
+                linked = self.topics_for_skill(name) or []
+            except Exception:  # noqa: BLE001
+                linked = []
+            if linked:
+                continue
+            gaps.append({
+                "skill": name,
+                "frequency_30d": round(freq, 4),
+                "mention_30d": int(rec.get("mention_30d") or 0),
+            })
+        gaps.sort(key=lambda g: (-g["frequency_30d"], g["skill"]))
+        return gaps
 
     @staticmethod
     def _stage_rank_from_label(label: str) -> int:
@@ -549,10 +592,8 @@ class SkillService:
         mastery = detail.get("mastery_estimate")
         detail.update({
             "market_source": market.get("source", "none"),
-            "market_14d": (rec or {}).get("freq14"),
             "market_30d": (rec or {}).get("freq30"),
             "market_signal": self._market_signal_value(market, name),
-            "sample_count_14d": market.get("sample_count_14d", 0),
             "sample_count_30d": market.get("sample_count_30d", 0),
             "prerequisite_demand_boost": round(
                 self._prereq_boost.get(name, 0.0), 6
@@ -568,9 +609,9 @@ class SkillService:
     def _explain_reasons(detail: dict) -> list[str]:
         reasons = [f"{detail['tier']}级"]
         if detail.get("market_source") == "daily_summary":
-            m14 = detail.get("market_14d")
-            if m14 is not None:
-                reasons.append(f"近14天目标岗位需求 {m14 * 100:.0f}%")
+            m30 = detail.get("market_30d")
+            if m30 is not None:
+                reasons.append(f"近30天目标岗位需求 {m30 * 100:.0f}%")
         elif detail.get("market_factor"):
             reasons.append("使用历史单条 JD 需求")
         if detail.get("prerequisite_demand_boost"):

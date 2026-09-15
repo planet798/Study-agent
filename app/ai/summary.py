@@ -1,4 +1,4 @@
-"""AI 学习总结生成器（周 / 月）。
+"""AI 学习总结生成器（月）。
 
 复用 AIClient.chat，不重复实现 HTTP。
 统计数字由本地 StatsService 计算后传入，AI 只负责解释数据。
@@ -11,13 +11,10 @@ from .interface import AIClient, AIServiceError
 from .prompts import (
     SUMMARY_SYSTEM_PROMPT,
     build_monthly_summary_prompt,
-    build_weekly_summary_prompt,
 )
 from .schemas import (
     MonthlySummary,
-    WeeklySummary,
     parse_monthly_from_json,
-    parse_weekly_from_json,
 )
 
 
@@ -27,19 +24,6 @@ class AISummaryGenerator:
 
     def is_configured(self) -> bool:
         return self.client.is_configured()
-
-    def generate_weekly(self, stats: dict) -> WeeklySummary:
-        if not self.client.is_configured():
-            raise AIServiceError("AI 未配置")
-        try:
-            content = self.client.chat(
-                SUMMARY_SYSTEM_PROMPT, build_weekly_summary_prompt(stats)
-            )
-            return parse_weekly_from_json(content)
-        except AIServiceError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise AIServiceError(f"AI 周总结失败: {e}") from e
 
     def generate_monthly(self, stats: dict) -> MonthlySummary:
         if not self.client.is_configured():

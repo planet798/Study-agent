@@ -9,7 +9,7 @@ from app.database.jd_summary_repository import JdDailySummaryRepository
 from app.database.skill_repository import SkillRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.jd_summary_service import JdSummaryService
-from app.services.market_signal import MarketSignal, confidence, combine_signal
+from app.services.market_signal import MarketSignal
 from app.services.skill_service import SkillService
 
 D = "2026-09-14"
@@ -60,7 +60,7 @@ class TestSourceSelection:
         env["js"].save_summary(D, "Python 8\nPyTorch 7", 10)
         market = env["ss"].refresh_market(D)
         assert market["source"] == "daily_summary"
-        assert market["skills"]["Python"]["freq14"] == pytest.approx(0.8)
+        assert market["skills"]["Python"]["freq30"] == pytest.approx(0.8)
         assert env["ss"].market_factor(
             env["sr"].get_by_name("Python")) == pytest.approx(0.8)
 
@@ -76,35 +76,38 @@ class TestSourceSelection:
         assert ss.market_factor(sr.get_by_name("Python")) == pytest.approx(0.5)
 
 
-# ================= 4~6：14/30 天组合与样本量 =================
+# ================= 4~6：近30天窗口与样本量 =================
 
-class TestWindowCombination:
-    def test_confidence_monotonic(self):
-        assert confidence(0) == 0.0
-        assert confidence(20) == pytest.approx(0.5)
-        assert confidence(80) == pytest.approx(0.8)
-
-    def test_combine_formula(self):
-        # n14=20 → conf 0.5 → 0.5*0.8 + 0.5*0.2 = 0.5
-        assert combine_signal(0.8, 0.2, 20, 30) == pytest.approx(0.5)
-        assert combine_signal(0.8, 0.2, 0, 30) == pytest.approx(0.2)
-        assert combine_signal(0.0, 0.0, 0, 0) == 0.0
-
-    def test_small_14d_smoothed_by_30d(self, conn):
+class TestWindow30Days:
+    def test_signal_is_frequency_30d(self, conn):
         env = _env(conn)
-        # 30 天窗口里 10 个岗位，Python 2 次（20%）；最后一天 1 个岗位 Python 1 次
         env["js"].save_summary("2026-08-25", "Python 2", 10)
         env["js"].save_summary(D, "Python 1", 1)
         market = env["ss"].refresh_market(D)
         rec = market["skills"]["Python"]
-        assert market["sample_count_14d"] == 1
-        assert rec["freq14"] == pytest.approx(1.0)
-        # 平滑后应明显低于 1.0（被 30 天压低）
-        assert rec["signal"] < 0.5
-        assert rec["signal"] == pytest.approx(
-            combine_signal(rec["freq14"], rec["freq30"],
-                           market["sample_count_14d"],
-                           market["sample_count_30d"]), abs=1e-4)
+        assert market["sample_count_30d"] == 11
+        assert rec["freq30"] == pytest.approx(3 / 11, abs=1e-4)
+        assert rec["signal"] == pytest.approx(rec["freq30"])
+
+    def test_no_14d_fields(self, conn):
+        env = _env(conn)
+        env["js"].save_summary(D, "Python 8", 10)
+        market = env["ss"].refresh_market(D)
+        assert "sample_count_14d" not in market
+        assert "freq14" not in market["skills"]["Python"]
+        assert "mention_14d" not in market["skills"]["Python"]
+
+    def test_no_summary_source_none(self, conn):
+        env = _env(conn)
+        market = env["ss"].refresh_market(D)
+        assert market["source"] == "none"
+        assert market["sample_count_30d"] == 0
+
+    def test_outside_30d_window_excluded(self, conn):
+        env = _env(conn)
+        env["js"].save_summary("2026-07-01", "Python 9", 10)  # 30 天外
+        market = env["ss"].refresh_market(D)
+        assert market["source"] == "none"
 
 
 # ================= 7~10：priority 行为 =================
@@ -156,12 +159,13 @@ class TestPriorityEffects:
         env["js"].save_summary(D, "Embedding 9\nRanking 6", 10)
         env["ss"].refresh_market(D)
         e = env["ss"].explain_skill(env["sr"].get_by_name("Embedding"))
-        for key in ("market_source", "market_14d", "market_30d", "market_signal",
-                    "sample_count_14d", "prerequisite_demand_boost",
+        for key in ("market_source", "market_30d", "market_signal",
+                    "sample_count_30d", "prerequisite_demand_boost",
                     "stage_alignment", "weak", "blocked", "reasons"):
             assert key in e, key
+        assert "market_14d" not in e
         assert e["market_source"] == "daily_summary"
-        assert e["market_14d"] == pytest.approx(0.9)
+        assert e["market_30d"] == pytest.approx(0.9)
 
 
 # ================= 11~14：前置传播 / 阶段适配 =================

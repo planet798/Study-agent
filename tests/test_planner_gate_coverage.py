@@ -230,30 +230,20 @@ def _btn_text_rgb(btn):
     return (c.red(), c.green(), c.blue())
 
 
-class TestTrendButtons:
-    def test_both_buttons_secondary_and_blue(self, qtbot, conn):
+class TestTrendPanel30Days:
+    def test_no_14day_or_toggle_buttons(self, qtbot, conn):
         env = _env(conn)
         w = _window(qtbot, env)
-        for text in ("近14天", "近30天"):
-            btn = _btn(w, text)
-            assert btn is not None
-            assert btn.objectName() == "SecondaryButton", text
-            assert _btn_text_rgb(btn) == QColor("#2c6fbb").getRgb()[:3], text
+        assert _btn(w, "近14天") is None
+        assert _btn(w, "近30天") is None
 
-    def test_checked_button_not_white(self, qtbot, conn):
+    def test_shows_30day_sample_label(self, qtbot, conn):
         env = _env(conn)
+        env["js"].save_summary(TODAY, "Pre 6", 10)
         w = _window(qtbot, env)
-        active = _btn(w, "近14天")
-        assert active.property("trendActive") == "true"
-        assert _btn_text_rgb(active) != (255, 255, 255)
-        assert _btn_text_rgb(active) == QColor("#2c6fbb").getRgb()[:3]
-
-    def test_toggle_switches_selection(self, qtbot, conn):
-        env = _env(conn)
-        w = _window(qtbot, env)
-        _btn(w, "近30天").click()
-        assert w._jd_trend_days == 30
-        b14, b30 = _btn(w, "近14天"), _btn(w, "近30天")
-        assert b30.property("trendActive") == "true"
-        assert b14.property("trendActive") == "false"
-        assert _btn_text_rgb(b30) == QColor("#2c6fbb").getRgb()[:3]
+        labels = [
+            lbl.text() for lbl in w.list_container.findChildren(QLabel)
+            if lbl.text()
+        ]
+        assert any("近30天样本" in t for t in labels)
+        assert not any("近14天" in t for t in labels)

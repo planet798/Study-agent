@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -476,6 +476,44 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[9] = _migrate_v9
+
+
+# ============================================================
+# v10：JD 新技能候选（候选池，不等于正式 skill）
+# ============================================================
+# 近期 30 天 JD 中“无法通过明确 alias 映射到现有技能”的高频技术，先进入候选池，
+# 由用户确认后才正式建 Skill。绝不让 raw string 直接进 skill_pool。
+#   canonical_name   建议的规范名（UNIQUE）
+#   raw_names        JSON 数组：出现过的原始写法
+#   status           candidate / accepted / ignored
+
+_V10_SQL = """
+CREATE TABLE IF NOT EXISTS jd_skill_candidates (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_name    TEXT    NOT NULL UNIQUE,
+    raw_names         TEXT    NOT NULL DEFAULT '[]',
+    mention_count_30d INTEGER NOT NULL DEFAULT 0,
+    sample_count_30d  INTEGER NOT NULL DEFAULT 0,
+    frequency_30d     REAL    NOT NULL DEFAULT 0,
+    first_seen        TEXT,
+    last_seen         TEXT,
+    status            TEXT    NOT NULL DEFAULT 'candidate',
+    accepted_skill_name TEXT  NOT NULL DEFAULT '',
+    created_at        TEXT    NOT NULL,
+    updated_at        TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jd_skill_candidates_status
+    ON jd_skill_candidates(status);
+"""
+
+
+def _migrate_v10(conn: sqlite3.Connection) -> None:
+    """v10：创建 JD 新技能候选表（幂等）。"""
+    conn.executescript(_V10_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[10] = _migrate_v10
 
 
 def get_schema_version(conn) -> int:

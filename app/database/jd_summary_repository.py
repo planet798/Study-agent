@@ -69,6 +69,23 @@ class JdDailySummaryRepository:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_unmatched_stats(self) -> list[dict]:
+        """所有 skill_id 为空的历史未匹配技能行（用于 alias 修复重试）。"""
+        rows = self.conn.execute(
+            "SELECT * FROM jd_daily_skill_stats WHERE skill_id IS NULL "
+            "ORDER BY id ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_stat_skill_id(self, stat_id: int, skill_id: int | None) -> bool:
+        """只更新某行的 skill_id；不碰 raw_skill_name / mention_count / summary_id。"""
+        cur = self.conn.execute(
+            "UPDATE jd_daily_skill_stats SET skill_id = ? WHERE id = ?",
+            (skill_id, stat_id),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount)
+
     def list_summaries(
         self,
         start_date: str | None = None,
@@ -204,3 +221,129 @@ class JdDailySummaryRepository:
             )
         self.conn.commit()
         return bool(cur.rowcount)
+
+
+class JdSkillCandidateRepository:
+    """jd_skill_candidates 的读写（JD 新技能候选池）。
+
+    - 候选不是正式 skill：只有用户确认（accept）后才创建 skills 记录。
+    - raw_names 用 JSON 数组保存，保留用户原始写法。
+    - status ∈ {candidate, accepted, ignored}；upsert 不会覆盖已处理的状态。
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    @staticmethod
+    def _decode(row: sqlite3.Row | None) -> dict | None:
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            import json
+
+            names = json.loads(d.get("raw_names") or "[]")
+        except (TypeError, ValueError):
+            names = []
+        d["raw_names"] = names if isinstance(names, list) else []
+        return d
+
+    def get(self, candidate_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM jd_skill_candidates WHERE id = ?", (candidate_id,)
+        ).fetchone()
+        return self._decode(row)
+
+    def get_by_canonical(self, canonical_name: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM jd_skill_candidates WHERE canonical_name = ?",
+            (canonical_name,),
+        ).fetchone()
+        return self._decode(row)
+
+    def list_all(self, status: str | None = None) -> list[dict]:
+        if status:
+            rows = self.conn.execute(
+                "SELECT * FROM jd_skill_candidates WHERE status = ? "
+                "ORDER BY frequency_30d DESC, mention_count_30d DESC, id ASC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM jd_skill_candidates "
+                "ORDER BY frequency_30d DESC, mention_count_30d DESC, id ASC"
+            ).fetchall()
+        return [self._decode(r) for r in rows]
+
+    def upsert_candidate(
+        self,
+        canonical_name: str,
+        raw_names: list[str],
+        mention_count_30d: int,
+        sample_count_30d: int,
+        frequency_30d: float,
+        first_seen: str | None = None,
+        last_seen: str | None = None,
+    ) -> dict:
+        """幂等写入候选；已存在时只更新统计，绝不覆盖 status。"""
+        import json
+
+        from ..utils.date_utils import now_iso
+
+        name = (canonical_name or "").strip()
+        if not name:
+            raise ValueError("候选规范名不能为空")
+        raw_json = json.dumps(sorted({r for r in raw_names if r}), ensure_ascii=False)
+        existing = self.get_by_canonical(name)
+        ts = now_iso()
+        if existing is not None:
+            first = min(
+                [x for x in (existing.get("first_seen"), first_seen) if x]
+                or [ts]
+            )
+            last = max(
+                [x for x in (existing.get("last_seen"), last_seen) if x]
+                or [ts]
+            )
+            self.conn.execute(
+                "UPDATE jd_skill_candidates SET raw_names = ?, "
+                "mention_count_30d = ?, sample_count_30d = ?, frequency_30d = ?, "
+                "first_seen = ?, last_seen = ?, updated_at = ? WHERE id = ?",
+                (raw_json, int(mention_count_30d), int(sample_count_30d),
+                 float(frequency_30d), first, last, ts, existing["id"]),
+            )
+            self.conn.commit()
+            return self.get(existing["id"])
+        cur = self.conn.execute(
+            "INSERT INTO jd_skill_candidates "
+            "(canonical_name, raw_names, mention_count_30d, sample_count_30d, "
+            " frequency_30d, first_seen, last_seen, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'candidate', ?, ?)",
+            (name, raw_json, int(mention_count_30d), int(sample_count_30d),
+             float(frequency_30d), first_seen or ts, last_seen or ts, ts, ts),
+        )
+        self.conn.commit()
+        return self.get(cur.lastrowid)
+
+    def set_status(
+        self, candidate_id: int, status: str,
+        accepted_skill_name: str | None = None,
+    ) -> dict | None:
+        if status not in ("candidate", "accepted", "ignored"):
+            raise ValueError(f"未知候选状态: {status}")
+        from ..utils.date_utils import now_iso
+
+        if accepted_skill_name is not None:
+            self.conn.execute(
+                "UPDATE jd_skill_candidates SET status = ?, "
+                "accepted_skill_name = ?, updated_at = ? WHERE id = ?",
+                (status, accepted_skill_name, now_iso(), candidate_id),
+            )
+        else:
+            self.conn.execute(
+                "UPDATE jd_skill_candidates SET status = ?, updated_at = ? "
+                "WHERE id = ?",
+                (status, now_iso(), candidate_id),
+            )
+        self.conn.commit()
+        return self.get(candidate_id)

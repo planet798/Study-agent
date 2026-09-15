@@ -100,10 +100,10 @@ class TestPlanningContextMarket:
         env["js"].save_summary(NEXT, "Embedding 9\nRanking 6", 10)
         ctx = _dps(env).build_context(TODAY)
         assert ctx.market_source == "daily_summary"
-        assert ctx.market_sample_count_14d == 10
+        assert ctx.market_sample_count_30d == 10
         names = {m.skill: m for m in ctx.market_trends}
         assert "Embedding" in names
-        assert names["Embedding"].market_14d == 0.9
+        assert names["Embedding"].market_30d == 0.9
 
     def test_no_summary_market_source_none(self, conn):
         env = _env(conn)
@@ -118,7 +118,7 @@ class TestPlanningContextMarket:
         emb = next((p for p in ctx.skill_priorities if p.skill == "Embedding"),
                    None)
         assert emb is not None
-        assert emb.market_14d == 0.9
+        assert emb.market_30d == 0.9
         assert emb.market_source == "daily_summary"
         assert emb.stage_alignment == "current"
 
@@ -131,9 +131,9 @@ class TestPrompt:
         env["js"].save_summary(NEXT, "Embedding 9\nRecall 8", 10)
         ctx = _dps(env).build_context(TODAY)
         text = build_planner_user_prompt(ctx)
-        assert "近期目标岗位技术趋势" in text
+        assert "近30天目标岗位技术趋势" in text
         assert "Embedding" in text
-        assert "近 14 天样本：10" in text
+        assert "近 30 天样本：10" in text
 
     def test_prompt_marks_sample_not_whole_market(self, conn):
         env = _env(conn)
@@ -145,7 +145,7 @@ class TestPrompt:
     def test_prompt_no_market_when_no_summary(self, conn):
         env = _env(conn)
         ctx = _dps(env).build_context(TODAY)
-        assert "近期目标岗位技术趋势" not in build_planner_user_prompt(ctx)
+        assert "目标岗位技术趋势" not in build_planner_user_prompt(ctx)
 
 
 # ================= 10~13：fallback 使用市场 / gate =================

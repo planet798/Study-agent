@@ -1,8 +1,8 @@
 """Step 5：JD Daily Summary UI + 近期趋势 UI 测试。
 
 覆盖：空态/按钮、对话框默认值/输入、preview 复用 Service、matched/unmatched、
-非法数量错误、保存/刷新、同日预加载与更新、14/30 天切换、样本数与百分比、
-Top 8、缺口/暂不提前、历史 individual JD、保存不触发 Planner，
+非法数量错误、保存/刷新、同日预加载与更新、统一近30天、样本数与百分比、
+Top 8、缺口/暂不提前、JD 新技能候选、历史 individual JD、保存不触发 Planner，
 以及 UI 不自己计算 frequency。
 """
 
@@ -11,7 +11,10 @@ from __future__ import annotations
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QPushButton
 
 from app.database.assessment_repository import AssessmentRepository
-from app.database.jd_summary_repository import JdDailySummaryRepository
+from app.database.jd_summary_repository import (
+    JdDailySummaryRepository,
+    JdSkillCandidateRepository,
+)
 from app.database.repository import TaskRepository
 from app.database.skill_repository import JdRepository, SkillRepository
 from app.database.study_plan_repository import StudyPlanRepository
@@ -48,7 +51,10 @@ def _env(conn):
         sr.upsert_by_name(name)
     ss = SkillService(sr, plan_repo=prepo, assessment_repo=arepo)
     jd = JdService(JdRepository(conn), sr, ss)
-    js = JdSummaryService(JdDailySummaryRepository(conn), sr)
+    js = JdSummaryService(
+        JdDailySummaryRepository(conn), sr,
+        candidate_repo=JdSkillCandidateRepository(conn),
+    )
     return {"repo": repo, "arepo": arepo, "sps": sps, "sr": sr, "ss": ss,
             "jd": jd, "js": js}
 
@@ -92,36 +98,36 @@ class TestTrendPanel:
         assert "添加今日 JD 技术汇总" in _btns(w)
         assert "查看历史 JD" in _btns(w)
 
-    def test_14day_trend_display(self, qtbot, conn):
+    def test_30day_trend_display(self, qtbot, conn):
         env = _env(conn)
         env["js"].save_summary(D1, T1, 10, TARGET)
         env["js"].save_summary(D2, T2, 15, TARGET)
         env["js"].save_summary(D3, T3, 12, TARGET)
         w = _window(qtbot, env)
         txt = "\n".join(_panel_labels(w))
-        assert "近14天样本：37 个实习岗位" in txt
+        assert "近30天样本：37 个实习岗位" in txt
         assert "Python    83.8%" in txt
         assert "PyTorch    73.0%" in txt
         assert "RAG    10.8%" in txt
         # 频率说明
         assert "频率 = " in txt
+        assert "近14天" not in txt
 
-    def test_30day_toggle_calls_service(self, qtbot, conn, monkeypatch):
+    def test_always_30day_no_toggle(self, qtbot, conn, monkeypatch):
         env = _env(conn)
         calls = []
         real = env["js"].compute_skill_trends
 
-        def spy(end_date, window_days=14, target_type=TARGET):
+        def spy(end_date, window_days=30, target_type=TARGET):
             calls.append((end_date, window_days, target_type))
             return real(end_date, window_days, target_type)
 
         monkeypatch.setattr(env["js"], "compute_skill_trends", spy)
         env["js"].save_summary(D3, T3, 12, TARGET)
         w = _window(qtbot, env)
-        assert calls[-1][1] == 14
-        _btns(w)["近30天"].click()
         assert calls[-1][1] == 30
         assert "近30天样本" in "\n".join(_panel_labels(w))
+        assert "近14天" not in _btns(w) and "近30天" not in _btns(w)
 
     def test_top8_limit(self, qtbot, conn, monkeypatch):
         env = _env(conn)
@@ -155,15 +161,24 @@ class TestTrendPanel:
         # 直接使用 Service 返回的 12.3%，而不是 7/50=14.0%
         assert any("Python    12.3%" in x for x in _panel_labels(w))
 
-    def test_unmatched_displayed(self, qtbot, conn):
+    def test_candidates_displayed(self, qtbot, conn):
         env = _env(conn)
         env["js"].save_summary(D3, "Two-Tower 6\nDIN 4\nPython 5", 15, TARGET)
         w = _window(qtbot, env)
         txt = "\n".join(_panel_labels(w))
-        assert "未匹配技能" in txt
+        assert "JD 新技能候选" in txt
         assert "Two-Tower    6 次" in txt
         assert "DIN    4 次" in txt
-        assert "暂未映射到 Study Agent 技能体系" in txt
+        btns = _btns(w)
+        assert "加入技能体系" in btns and "忽略" in btns
+
+    def test_low_frequency_not_candidate(self, qtbot, conn):
+        env = _env(conn)
+        # 1 次且频率 <10% → 不进入候选
+        env["js"].save_summary(D3, "Obscure 1\nPython 11", 30, TARGET)
+        w = _window(qtbot, env)
+        txt = "\n".join(_panel_labels(w))
+        assert "JD 新技能候选" not in txt
 
     def test_skill_gap_and_blocked_sections(self, qtbot, conn):
         env = _env(conn)

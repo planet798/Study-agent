@@ -6,7 +6,7 @@
 - preview_summary    : 写库前校验 + 技能标准化 + 生成预览（不写库）
 - save_summary       : 原子写入（同日同目标 → update + replace stats）
 - get_summary / list_recent_summaries
-- compute_skill_trends : 14/30 天近期市场频率
+- compute_skill_trends : 近 30 天近期市场频率
 - get_unmatched_skills
 
 边界：
@@ -29,37 +29,85 @@ from ..utils.date_utils import add_days
 TARGET_TYPES = ("internship", "campus", "fulltime")
 DEFAULT_TARGET_TYPE = "internship"
 
+# 新技能候选阈值（集中定义，可测试）：满足任一即进入候选池。
+CANDIDATE_MIN_MENTIONS = 3
+CANDIDATE_MIN_FREQUENCY = 0.10
+
+# 候选 -> 建议正式名（确定性，不调 AI）；未命中则沿用原始写法。
+_CANONICAL_SUGGESTIONS: dict[str, str] = {
+    "数据构建/清洗": "数据工程 / 数据清洗",
+    "数据构建": "数据工程 / 数据清洗",
+    "dpo/rlhf/grpo/ppo": "后训练 / 对齐",
+    "rlhf": "后训练 / 对齐",
+    "dpo": "后训练 / 对齐",
+    "grpo": "后训练 / 对齐",
+    "ppo": "后训练 / 对齐",
+    "大模型微调": "后训练 / 对齐",
+}
+
 # 明确别名（小写键 -> 标准技能名）。只放“无歧义”的缩写 / 中英别名。
 _EXPLICIT_ALIASES: dict[str, str] = {
     "hf": "Hugging Face",
     "huggingface": "Hugging Face",
     "hugging face": "Hugging Face",
+    "transformers": "Transformer",
+    "transformer": "Transformer",
     "recsys": "推荐系统基础",
     "rec system": "推荐系统基础",
+    "recommendation": "推荐系统基础",
+    "recommender": "推荐系统基础",
+    "推荐": "推荐系统基础",
     "推荐系统": "推荐系统基础",
     "推荐系统基础": "推荐系统基础",
+    "推荐算法": "推荐系统基础",
     "召回": "Recall",
     "recall": "Recall",
+    "candidate generation": "Recall",
+    "候选生成": "Recall",
+    "多路召回": "Recall",
     "排序": "Ranking",
     "rank": "Ranking",
     "ranking": "Ranking",
+    "learning to rank": "Ranking",
+    "ltr": "Ranking",
     "llm": "LLM 基础",
+    "llm 基础": "LLM 基础",
+    "llm基础": "LLM 基础",
+    "llm/大模型": "LLM 基础",
+    "llm/大模型基础": "LLM 基础",
     "大模型": "LLM 基础",
+    "大模型基础": "LLM 基础",
     "大语言模型": "LLM 基础",
+    "large language model": "LLM 基础",
+    "large language models": "LLM 基础",
+    "模型评估": "模型评估",
+    "模型评测": "模型评估",
+    "模型评测/eval/benchmark": "模型评估",
+    "eval": "模型评估",
+    "benchmark": "模型评估",
+    "评测": "模型评估",
+    "vlm": "VLM",
+    "mllm": "VLM",
+    "多模态": "VLM",
+    "多模态/vlm/mllm": "VLM",
+    "多模态大模型": "VLM",
     "rerank": "Rerank",
     "重排": "Rerank",
     "精排": "Rerank",
+    "rerank/排序": "Rerank",
     "ctr": "CTR",
     "点击率": "CTR",
     "moe": "MoE",
     "sft": "SFT",
     "lora": "LoRA / QLoRA",
     "qlora": "LoRA / QLoRA",
+    "lora/qlora": "LoRA / QLoRA",
     "peft": "PEFT",
     "rag": "RAG",
     "检索增强": "RAG",
     "embedding": "Embedding",
     "向量检索": "Embedding",
+    "embedding/向量检索": "Embedding",
     "agent": "Agent",
     "智能体": "Agent",
     "c++": "C++",
@@ -70,7 +118,6 @@ _EXPLICIT_ALIASES: dict[str, str] = {
     "docker": "Docker",
     "python": "Python",
     "pytorch": "PyTorch",
-    "transformer": "Transformer",
 }
 
 _MUST_RE = re.compile(r"(?i)\bmust\s*=\s*(\d+)\b")
@@ -89,9 +136,11 @@ class JdSummaryService:
         self,
         summary_repo: JdDailySummaryRepository,
         skill_repo: SkillRepository,
+        candidate_repo=None,
     ):
         self.summary_repo = summary_repo
         self.skill_repo = skill_repo
+        self.candidate_repo = candidate_repo
 
     # ================= 技能标准化 =================
 
@@ -105,8 +154,8 @@ class JdSummaryService:
     def normalize_skill(self, raw_name: str, existing: dict | None = None):
         """把用户写的技能名映射到已有 skill；无法可靠映射返回 None。
 
-        仅使用：① 与已有技能名的精确匹配（忽略大小写/空格）；② 明确别名词典。
-        禁止模糊子串猜测。
+        仅使用：① 与已有技能名的精确匹配（忽略大小写/空格）；② 明确别名词典；
+        ③ 用户已确认（accepted）的候选 -> 其正式技能名。禁止模糊子串猜测。
         """
         raw = (raw_name or "").strip()
         if not raw:
@@ -117,8 +166,28 @@ class JdSummaryService:
             return existing[key]
         target = _EXPLICIT_ALIASES.get(key)
         if target is None:
+            target = self._accepted_alias_map().get(key)
+        if target is None:
             return None
         return existing.get(_norm_key(target))
+
+    def _accepted_alias_map(self) -> dict[str, str]:
+        """已确认候选 -> 正式技能名（含原始写法的精确别名）。"""
+        out: dict[str, str] = {}
+        if self.candidate_repo is None:
+            return out
+        try:
+            accepted = self.candidate_repo.list_all("accepted")
+        except Exception:  # noqa: BLE001
+            return out
+        for c in accepted:
+            skill_name = c.get("accepted_skill_name") or c.get("canonical_name")
+            if not skill_name:
+                continue
+            out.setdefault(_norm_key(c.get("canonical_name") or ""), skill_name)
+            for raw in c.get("raw_names") or []:
+                out.setdefault(_norm_key(raw), skill_name)
+        return out
 
     # ================= 解析 =================
 
@@ -312,7 +381,7 @@ class JdSummaryService:
     def compute_skill_trends(
         self,
         end_date: str,
-        window_days: int = 14,
+        window_days: int = 30,
         target_type: str = DEFAULT_TARGET_TYPE,
     ) -> dict:
         """窗口 [end_date-(N-1), end_date] 内的近期市场频率。
@@ -377,12 +446,162 @@ class JdSummaryService:
     def get_unmatched_skills(
         self,
         end_date: str,
-        window_days: int = 14,
+        window_days: int = 30,
         target_type: str = DEFAULT_TARGET_TYPE,
     ) -> list[dict]:
         return self.compute_skill_trends(
             end_date, window_days, target_type
         )["unmatched"]
+
+    # ================= 历史未匹配修复（alias 生效） =================
+
+    def repair_unmatched_jd_skills(self) -> dict:
+        """用当前明确 alias / 精确映射，重试修复历史 skill_id IS NULL 的行。
+
+        只补 skill_id（能确定才补）；不改 raw_skill_name / mention_count /
+        summary_id。幂等：已修复或仍无法映射的行不受影响。
+        """
+        rows = self.summary_repo.list_unmatched_stats()
+        if not rows:
+            return {"repaired": 0, "remaining": 0, "repaired_names": []}
+        existing = self._existing_by_norm()
+        repaired = 0
+        repaired_names: list[str] = []
+        for r in rows:
+            skill = self.normalize_skill(r.get("raw_skill_name") or "", existing)
+            if skill is None:
+                continue
+            if self.summary_repo.set_stat_skill_id(r["id"], skill["id"]):
+                repaired += 1
+                repaired_names.append(skill["name"])
+        remaining = len(self.summary_repo.list_unmatched_stats())
+        return {
+            "repaired": repaired,
+            "remaining": remaining,
+            "repaired_names": sorted(set(repaired_names)),
+        }
+
+    # ================= JD 新技能候选 =================
+
+    @staticmethod
+    def suggest_canonical_name(raw_name: str) -> str:
+        """给候选一个确定性的建议正式名（不调 AI，无则沿用原始写法）。"""
+        raw = (raw_name or "").strip()
+        return _CANONICAL_SUGGESTIONS.get(_norm_key(raw), raw)
+
+    @staticmethod
+    def _qualifies_as_candidate(mention_count: int, frequency: float) -> bool:
+        return (
+            int(mention_count) >= CANDIDATE_MIN_MENTIONS
+            or float(frequency) >= CANDIDATE_MIN_FREQUENCY
+        )
+
+    def compute_candidates(
+        self,
+        end_date: str,
+        window_days: int = 30,
+        target_type: str = DEFAULT_TARGET_TYPE,
+    ) -> list[dict]:
+        """根据近 N 天趋势的 unmatched，返回达到阈值的候选（不写库）。"""
+        trend = self.compute_skill_trends(end_date, window_days, target_type)
+        sample = int(trend.get("sample_count") or 0)
+        out: list[dict] = []
+        for r in trend.get("unmatched") or []:
+            mention = int(r.get("mention_count") or 0)
+            freq = float(r.get("frequency") or 0.0)
+            if not self._qualifies_as_candidate(mention, freq):
+                continue
+            raw = r.get("name") or ""
+            out.append({
+                "canonical_name": self.suggest_canonical_name(raw),
+                "raw_name": raw,
+                "mention_count_30d": mention,
+                "sample_count_30d": sample,
+                "frequency_30d": round(freq, 4),
+            })
+        out.sort(key=lambda c: (-c["frequency_30d"], -c["mention_count_30d"],
+                                c["canonical_name"]))
+        return out
+
+    def refresh_candidates(
+        self,
+        end_date: str,
+        window_days: int = 30,
+        target_type: str = DEFAULT_TARGET_TYPE,
+    ) -> list[dict]:
+        """先把历史 alias 修复，再把达标候选幂等写入候选池（不覆盖已处理状态）。"""
+        if self.candidate_repo is None:
+            return []
+        self.repair_unmatched_jd_skills()
+        candidates = self.compute_candidates(end_date, window_days, target_type)
+        for c in candidates:
+            self.candidate_repo.upsert_candidate(
+                canonical_name=c["canonical_name"],
+                raw_names=[c["raw_name"]],
+                mention_count_30d=c["mention_count_30d"],
+                sample_count_30d=c["sample_count_30d"],
+                frequency_30d=c["frequency_30d"],
+            )
+        return self.list_candidates(status="candidate")
+
+    def list_candidates(self, status: str | None = "candidate") -> list[dict]:
+        if self.candidate_repo is None:
+            return []
+        rows = self.candidate_repo.list_all(status)
+        out = []
+        for r in rows:
+            out.append({
+                **r,
+                "suggested_name": r["canonical_name"],
+            })
+        return out
+
+    def accept_candidate(
+        self,
+        candidate_id: int,
+        name: str | None = None,
+        tier: str = "A",
+        description: str = "",
+        linked_skill: str | None = None,
+    ) -> dict:
+        """用户确认后：把候选转为正式 skill（初始 not_started），并标记 accepted。
+
+        - 不自动 mastered / learning / 创建 task / 创建 assessment。
+        - linked_skill 非空时只关联到已存在技能，不新建。
+        - 新 skill 没有 linked_topics → 由 SkillService 标记为课程缺口。
+        """
+        if self.candidate_repo is None:
+            raise RuntimeError("未注入 candidate_repo")
+        cand = self.candidate_repo.get(candidate_id)
+        if cand is None:
+            raise ValueError(f"候选不存在: id={candidate_id}")
+        skill = None
+        if linked_skill:
+            skill = self.skill_repo.get_by_name(linked_skill)
+            if skill is None:
+                raise ValueError(f"关联技能不存在: {linked_skill}")
+        else:
+            final_name = (name or cand["canonical_name"] or "").strip()
+            if not final_name:
+                raise ValueError("技能名不能为空")
+            skill = self.skill_repo.get_by_name(final_name)
+            if skill is None:
+                skill = self.skill_repo.create(
+                    name=final_name,
+                    tier=tier,
+                    status="not_started",
+                )
+        self.candidate_repo.set_status(
+            candidate_id, "accepted", accepted_skill_name=skill["name"]
+        )
+        # 立即让历史未匹配行按新映射生效（幂等）
+        self.repair_unmatched_jd_skills()
+        return {"skill": skill, "candidate": self.candidate_repo.get(candidate_id)}
+
+    def ignore_candidate(self, candidate_id: int) -> dict | None:
+        if self.candidate_repo is None:
+            return None
+        return self.candidate_repo.set_status(candidate_id, "ignored")
 
     # ================= 内部 =================
 

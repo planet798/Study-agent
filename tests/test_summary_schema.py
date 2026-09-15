@@ -1,4 +1,4 @@
-"""周/月总结 AI schema 测试 + AISummaryGenerator 测试。"""
+"""月总结 AI schema 测试 + AISummaryGenerator 测试。"""
 
 from __future__ import annotations
 
@@ -10,20 +10,9 @@ from app.ai.interface import AIServiceError
 from app.ai.summary import AISummaryGenerator
 from app.ai.schemas import (
     MonthlySummary,
-    WeeklySummary,
     parse_monthly_from_json,
     parse_monthly_summary,
-    parse_weekly_from_json,
-    parse_weekly_summary,
 )
-
-VALID_WEEKLY = {
-    "overview": "本周整体完成良好",
-    "strengths": ["Python 完成率高", "坚持每天学习"],
-    "problems": ["算法延期较多"],
-    "recommendations": ["拆解大任务"],
-    "next_week_focus": ["加强算法"],
-}
 
 
 class _FakeClient:
@@ -39,40 +28,6 @@ class _FakeClient:
         if self._error is not None:
             raise self._error
         return self._content
-
-
-class TestWeeklySchema:
-    def test_valid_weekly(self):
-        w = parse_weekly_summary(VALID_WEEKLY)
-        assert isinstance(w, WeeklySummary)
-        assert w.overview == "本周整体完成良好"
-        assert w.strengths == ("Python 完成率高", "坚持每天学习")
-
-    def test_valid_weekly_from_json(self):
-        w = parse_weekly_from_json(json.dumps(VALID_WEEKLY, ensure_ascii=False))
-        assert w.problems == ("算法延期较多",)
-
-    def test_invalid_json(self):
-        with pytest.raises(AIServiceError):
-            parse_weekly_from_json("not json")
-
-    def test_missing_field(self):
-        d = dict(VALID_WEEKLY)
-        del d["recommendations"]
-        with pytest.raises(AIServiceError):
-            parse_weekly_summary(d)
-
-    def test_strengths_not_list(self):
-        d = dict(VALID_WEEKLY)
-        d["strengths"] = "not a list"
-        with pytest.raises(AIServiceError):
-            parse_weekly_summary(d)
-
-    def test_empty_list_item_rejected(self):
-        d = dict(VALID_WEEKLY)
-        d["next_week_focus"] = [""]
-        with pytest.raises(AIServiceError):
-            parse_weekly_summary(d)
 
 
 VALID_MONTHLY = {
@@ -108,13 +63,6 @@ class TestMonthlySchema:
 
 
 class TestSummaryGenerator:
-    def test_weekly_generation(self):
-        client = _FakeClient(content=json.dumps(VALID_WEEKLY, ensure_ascii=False))
-        gen = AISummaryGenerator(client)
-        out = gen.generate_weekly({"total_tasks": 10})
-        assert isinstance(out, WeeklySummary)
-        assert out.overview == "本周整体完成良好"
-
     def test_monthly_generation(self):
         client = _FakeClient(content=json.dumps(VALID_MONTHLY, ensure_ascii=False))
         gen = AISummaryGenerator(client)
@@ -125,12 +73,12 @@ class TestSummaryGenerator:
         client = _FakeClient(error=AIServiceError("AI 请求超时"))
         gen = AISummaryGenerator(client)
         with pytest.raises(AIServiceError):
-            gen.generate_weekly({"total_tasks": 1})
+            gen.generate_monthly({"total_tasks": 1})
 
     def test_not_configured_raises(self):
         gen = AISummaryGenerator(_FakeClient(configured=False))
         with pytest.raises(AIServiceError):
-            gen.generate_weekly({"total_tasks": 1})
+            gen.generate_monthly({"total_tasks": 1})
 
     def test_invalid_content_raises(self):
         client = _FakeClient(content="garbage")

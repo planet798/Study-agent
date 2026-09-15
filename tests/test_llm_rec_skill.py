@@ -177,7 +177,7 @@ class TestMarketAndPlanner:
         env["js"].save_summary("2027-05-01", f"{SKILL} 6\nPython 4", 20,
                                "internship")
         market = MarketSignal(env["js"]).compute("2027-05-01")
-        assert market["skills"][SKILL]["freq14"] == 0.3
+        assert market["skills"][SKILL]["freq30"] == 0.3
 
     def test_market_high_does_not_bypass_gate(self, conn):
         env = _env(conn)
@@ -197,7 +197,7 @@ class TestMarketAndPlanner:
         gaps = {g.skill: g for g in ctx.jd_gap_skills}
         assert SKILL in gaps
         assert gaps[SKILL].blocked is True
-        assert gaps[SKILL].market_14d == 1.0
+        assert gaps[SKILL].market_30d == 1.0
 
     def test_current_phase_does_not_generate_it(self, conn):
         env = _env(conn)

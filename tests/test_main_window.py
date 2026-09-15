@@ -887,25 +887,19 @@ class TestSummaryPagesGUI:
         )
         return w
 
-    def test_weekly_page_navigation_and_stats(self, qtbot, repo, task_service,
-                                              date_service, fixed_today):
-        # 周一到今日(2026-01-05 是周一)造任务
-        t = task_service.create_task("任务", scheduled_date=fixed_today)
-        task_service.complete_task(t.id)
+    def test_no_weekly_button_only_today_and_monthly(
+        self, qtbot, repo, task_service, date_service, fixed_today
+    ):
+        """周总结已移除：顶部只有 [今日] [月总结]。"""
         w = self._make_summary_window(qtbot, repo, task_service, date_service,
                                       fixed_today)
         qtbot.addWidget(w)
-
-        # 默认在今日页
+        assert not hasattr(w, "nav_weekly_btn")
+        assert not hasattr(w, "weekly_page")
+        assert w.nav_today_btn.text() == "今日"
+        assert w.nav_monthly_btn.text() == "月总结"
+        # 今日页正常
         assert w.stack.currentIndex() == 0
-        qtbot.mouseClick(w.nav_weekly_btn, Qt.MouseButton.LeftButton)
-        assert w.stack.currentIndex() == 1
-        # 页面存在且显示总任务
-        page = w.weekly_page
-        assert page is not None
-        # AI 未配置：显示本地统计 + 不可用提示
-        qtbot.waitUntil(lambda: page.category_label is not None, timeout=2000)
-        assert "总任务" in page.summary_grid.layout().itemAt(0).widget().text()
 
     def test_monthly_page_navigation(self, qtbot, repo, task_service,
                                      date_service, fixed_today):
@@ -916,7 +910,7 @@ class TestSummaryPagesGUI:
                                       fixed_today)
         qtbot.addWidget(w)
         qtbot.mouseClick(w.nav_monthly_btn, Qt.MouseButton.LeftButton)
-        assert w.stack.currentIndex() == 2
+        assert w.stack.currentIndex() == 1
         page = w.monthly_page
         assert page is not None
         assert page.year == 2026 and page.month == 1
@@ -933,7 +927,7 @@ class TestSummaryPagesGUI:
     ):
         w = make_window()  # 无 summary_service
         qtbot.addWidget(w)
-        assert w.nav_weekly_btn.isEnabled() is False
+        assert not hasattr(w, "nav_weekly_btn")
         assert w.nav_monthly_btn.isEnabled() is False
 
     def test_ai_unavailable_shows_local_stats(
@@ -953,15 +947,18 @@ class TestSummaryPagesGUI:
         w = self._make_summary_window(qtbot, repo, task_service, date_service,
                                       fixed_today, client=UnconfiguredClient())
         qtbot.addWidget(w)
-        qtbot.mouseClick(w.nav_weekly_btn, Qt.MouseButton.LeftButton)
-        page = w.weekly_page
+        qtbot.mouseClick(w.nav_monthly_btn, Qt.MouseButton.LeftButton)
+        page = w.monthly_page
         qtbot.waitUntil(
             lambda: page.period_label.text() != "", timeout=3000
         )
         # 本地统计仍显示，AI 提示不可用
-        assert page.category_label is not None
-        first = page.summary_grid.layout().itemAt(0).widget().text()
-        assert "总任务" in first
+        texts = []
+        for i in range(page.summary_layout.count()):
+            item = page.summary_layout.itemAt(i)
+            if item.widget() is not None:
+                texts.append(item.widget().text())
+        assert any("总任务" in t0 for t0 in texts)
 
 
 class TestDateInjectionInGUI:

@@ -124,7 +124,7 @@ class DailyPlannerService:
     def _fill_skill_context(self, ctx: PlanningContext, plan_date: str) -> None:
         """用 SkillService/JdService 的结果填充技能上下文；不重复计算优先级。
 
-        Step 6：使用近期市场信号（Daily Summary 14/30 天趋势优先，
+        Step 6：使用近期市场信号（Daily Summary 近30天趋势优先，
         individual JD fallback），并区分 active_gap / blocked_gap。
         """
         skill_service = self.skill_service
@@ -139,18 +139,15 @@ class DailyPlannerService:
             market = None
         if market:
             ctx.market_source = market.get("source", "none")
-            ctx.market_sample_count_14d = int(market.get("sample_count_14d") or 0)
             ctx.market_sample_count_30d = int(market.get("sample_count_30d") or 0)
             trends = []
             for name, rec in (market.get("skills") or {}).items():
                 trends.append(MarketTrend(
                     skill=name,
-                    market_14d=float(rec.get("freq14") or 0.0),
                     market_30d=float(rec.get("freq30") or 0.0),
-                    mention_14d=int(rec.get("mention_14d") or 0),
                     mention_30d=int(rec.get("mention_30d") or 0),
                 ))
-            trends.sort(key=lambda t: (-t.market_14d, -t.market_30d, t.skill))
+            trends.sort(key=lambda t: (-t.market_30d, t.skill))
             ctx.market_trends = trends[:10]
 
         # 当前 phase（用于 stage alignment 排序偏好）
@@ -178,9 +175,8 @@ class DailyPlannerService:
                 tier=explain.get("tier", d.get("tier", "")),
                 score=float(explain.get("score", d.get("score", 0.0))),
                 reason=" · ".join(explain.get("reasons") or []) or _skill_reason(d),
-                market_14d=explain.get("market_14d"),
                 market_30d=explain.get("market_30d"),
-                sample_count=int(explain.get("sample_count_14d") or 0),
+                sample_count=int(explain.get("sample_count_30d") or 0),
                 market_source=explain.get("market_source", "none"),
                 stage_alignment=explain.get("stage_alignment", "unknown"),
                 blocked=bool(explain.get("blocked")),
@@ -195,12 +191,11 @@ class DailyPlannerService:
         for s in all_skills:
             name = s["name"]
             rec = (market or {}).get("skills", {}).get(name) if market else None
-            m14 = float(rec.get("freq14") or 0.0) if rec else 0.0
             m30 = float(rec.get("freq30") or 0.0) if rec else 0.0
             sig = skill_service._market_signal_value(market, name)
             freq = s.get("jd_frequency") or {}
             has_jd = bool(freq.get("must") or freq.get("plus"))
-            has_market = sig > 0 or m14 > 0 or m30 > 0
+            has_market = sig > 0 or m30 > 0
             blocked = skill_service.is_blocked(s)
             mastery = skill_service._mastery_for_skill(s)
             if s["status"] in ("not_started", "learning") and (
@@ -212,9 +207,8 @@ class DailyPlannerService:
                     jd_plus_count=int(freq.get("plus") or 0),
                     mastery=mastery,
                     blocked=blocked,
-                    market_14d=m14 if has_market else None,
                     market_30d=m30 if has_market else None,
-                    sample_count=int((market or {}).get("sample_count_14d") or 0),
+                    sample_count=int((market or {}).get("sample_count_30d") or 0),
                 )
                 active_gap.append(gap)
             if blocked and has_market:
@@ -224,7 +218,7 @@ class DailyPlannerService:
                 ))
         # 高频优先
         active_gap.sort(key=lambda g: (
-            g.blocked, -(g.market_14d or 0.0), -(g.market_30d or 0.0), g.skill
+            g.blocked, -(g.market_30d or 0.0), g.skill
         ))
         ctx.jd_gap_skills = active_gap[:12]
         ctx.prerequisite_blocked = blocked_entries[:10]

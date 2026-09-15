@@ -327,16 +327,113 @@ def format_summary_preview(preview: dict) -> str:
     unmatched = preview.get("unmatched") or []
     if unmatched:
         lines.append("")
-        lines.append("未匹配技能（已保存原始写法）：")
+        lines.append("未匹配技能（已保存原始写法，将作为 JD 新技能候选）：")
         for r in unmatched:
             lines.append(
                 f"  {r['raw_skill_name']}    {r['mention_count']} / {sample}"
             )
         lines.append(
-            "这些技术已保存，但暂未映射到 Study Agent 技能体系，"
-            "因此当前不会参与技能趋势/规划。"
+            "这些技术暂未映射到现有技能；达到阈值后会在首页进入"
+            "“JD 新技能候选”，确认后才加入技能体系。"
         )
     return "\n".join(lines)
+
+
+class JdCandidateAcceptDialog(QDialog):
+    """确认把 JD 新技能候选加入正式技能体系（用户确认，不自动创建）。"""
+
+    def __init__(self, candidate: dict, existing_names=None, parent=None):
+        super().__init__(parent)
+        self.candidate = candidate
+        self.existing_names = list(existing_names or [])
+        self.result_name = ""
+        self.result_tier = "A"
+        self.result_linked_skill = None
+        self.setWindowTitle("加入技能体系")
+        self.setModal(True)
+        self.resize(520, 300)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        title = QLabel("把 JD 新技能候选加入正式技能体系")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        source = QLabel(
+            f"JD 原始名称：{candidate.get('canonical_name') or '—'}"
+            f"（近30天 {int(candidate.get('mention_count_30d') or 0)} 次 · "
+            f"{float(candidate.get('frequency_30d') or 0) * 100:.0f}%）"
+        )
+        source.setObjectName("TaskMeta")
+        source.setWordWrap(True)
+        layout.addWidget(source)
+
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel("建议正式名称："))
+        self.name_edit = QLineEdit(
+            candidate.get("suggested_name")
+            or candidate.get("canonical_name")
+            or ""
+        )
+        name_row.addWidget(self.name_edit, 1)
+        layout.addLayout(name_row)
+
+        tier_row = QHBoxLayout()
+        tier_row.addWidget(QLabel("Tier："))
+        self.tier_combo = QComboBox()
+        for t in ("S", "A", "B", "C"):
+            self.tier_combo.addItem(t, t)
+        self.tier_combo.setCurrentIndex(1)  # 默认 A
+        tier_row.addWidget(self.tier_combo)
+        tier_row.addWidget(QLabel("关联已有技能（可选）："))
+        self.link_combo = QComboBox()
+        self.link_combo.addItem("（新建技能）", None)
+        for n in self.existing_names:
+            self.link_combo.addItem(n, n)
+        tier_row.addWidget(self.link_combo, 1)
+        layout.addLayout(tier_row)
+
+        hint = QLabel(
+            "加入后：初始状态为 not_started；不自动创建任务 / 验收 / 掌握度。"
+            "若该技能尚无可对应课程，会被标记为“课程缺口”。"
+        )
+        hint.setObjectName("TaskMeta")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #e74c3c;")
+        self.error_label.setVisible(False)
+        layout.addWidget(self.error_label)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("确认加入")
+        ok.setObjectName("SecondaryButton")
+        apply_secondary_button_text(ok)
+        ok.clicked.connect(self._confirm)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
+        layout.addLayout(btns)
+
+    def _confirm(self) -> None:
+        linked = self.link_combo.currentData()
+        if linked:
+            self.result_linked_skill = linked
+            self.result_name = linked
+            self.accept()
+            return
+        name = self.name_edit.text().strip()
+        if not name:
+            self.error_label.setText("正式名称不能为空")
+            self.error_label.setVisible(True)
+            return
+        self.result_linked_skill = None
+        self.result_name = name
+        self.result_tier = self.tier_combo.currentData() or "A"
+        self.accept()
 
 
 class JdSummaryInputDialog(QDialog):

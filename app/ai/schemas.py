@@ -267,17 +267,8 @@ def parse_daily_plan_from_json(text: str) -> DailyPlan:
 
 
 # ============================================================
-# AI 学习总结（周 / 月）输出结构
+# AI 学习总结（月）输出结构
 # ============================================================
-
-
-@dataclass(frozen=True)
-class WeeklySummary:
-    overview: str
-    strengths: tuple[str, ...]
-    problems: tuple[str, ...]
-    recommendations: tuple[str, ...]
-    next_week_focus: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -301,22 +292,6 @@ def _require_str_list(value: object, field: str, max_items: int = 20) -> tuple[s
     return tuple(out)
 
 
-def parse_weekly_summary(raw: object) -> WeeklySummary:
-    if not isinstance(raw, dict):
-        raise AIServiceError("周总结输出必须是 JSON 对象")
-    for field_name in ("overview", "strengths", "problems", "recommendations",
-                       "next_week_focus"):
-        if field_name not in raw:
-            raise AIServiceError(f"周总结缺少字段：{field_name}")
-    return WeeklySummary(
-        overview=_require_str(raw["overview"], "overview", max_len=1500),
-        strengths=_require_str_list(raw["strengths"], "strengths"),
-        problems=_require_str_list(raw["problems"], "problems"),
-        recommendations=_require_str_list(raw["recommendations"], "recommendations"),
-        next_week_focus=_require_str_list(raw["next_week_focus"], "next_week_focus"),
-    )
-
-
 def parse_monthly_summary(raw: object) -> MonthlySummary:
     if not isinstance(raw, dict):
         raise AIServiceError("月总结输出必须是 JSON 对象")
@@ -332,14 +307,6 @@ def parse_monthly_summary(raw: object) -> MonthlySummary:
         recommendations=_require_str_list(raw["recommendations"], "recommendations"),
         next_month_focus=_require_str_list(raw["next_month_focus"], "next_month_focus"),
     )
-
-
-def parse_weekly_from_json(text: str) -> WeeklySummary:
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise AIServiceError(f"AI 周总结不是合法 JSON：{e}") from e
-    return parse_weekly_summary(data)
 
 
 def parse_monthly_from_json(text: str) -> MonthlySummary:
