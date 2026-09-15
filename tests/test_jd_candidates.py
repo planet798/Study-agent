@@ -24,7 +24,7 @@ DAY = "2026-09-14"
 TARGET = "internship"
 SKILLS = ("LLM 基础", "模型评估", "VLM", "Python", "PyTorch", "Embedding",
           "Recall", "Ranking", "推荐系统基础", "RAG", "SFT", "Transformer",
-          "Hugging Face", "Rerank", "CTR")
+          "Hugging Face", "Rerank", "CTR", "分布式训练底层")
 
 
 def _env(conn):
@@ -83,6 +83,74 @@ class TestAliases:
         # 含子串但不等于别名 → 不应误匹配
         assert env["js"].normalize_skill("Python 数据分析") is None
         assert env["js"].normalize_skill("推荐系统基础与工程") is None
+        assert env["js"].normalize_skill("排序算法题") is None
+
+
+# ================= alias 语义审计 =================
+
+class TestAliasAudit:
+    def _name(self, env, raw):
+        s = env["js"].normalize_skill(raw)
+        return s["name"] if s else None
+
+    def test_ranking_variants_go_to_ranking(self, conn):
+        env = _env(conn)
+        for raw in ("排序", "排序模型", "Ranking", "rank", "Ranker",
+                    "Learning to Rank", "LTR"):
+            assert self._name(env, raw) == "Ranking", raw
+
+    def test_rerank_variants_go_to_rerank(self, conn):
+        env = _env(conn)
+        for raw in ("重排", "重排模型", "重排序", "Rerank", "Re-ranking",
+                    "re-ranking"):
+            assert self._name(env, raw) == "Rerank", raw
+
+    def test_paixu_never_maps_to_rerank(self, conn):
+        env = _env(conn)
+        assert self._name(env, "排序") != "Rerank"
+        assert self._name(env, "排序模型") != "Rerank"
+        # 歧义的组合写法不自动映射（需人工决定）
+        assert self._name(env, "Rerank/排序") is None
+
+    def test_distributed_training_variants(self, conn):
+        env = _env(conn)
+        for raw in ("DeepSpeed", "FSDP", "DeepSpeed/FSDP", "DDP", "ZeRO",
+                    "分布式训练"):
+            assert self._name(env, raw) == "分布式训练底层", raw
+
+    def test_tool_calling_not_forced_to_agent(self, conn):
+        env = _env(conn)
+        assert self._name(env, "Tool Calling/Function Calling") is None
+        assert self._name(env, "Function Calling") is None
+        assert self._name(env, "工具调用") is None
+
+    def test_post_training_still_new_candidate(self, conn):
+        env = _env(conn)
+        assert self._name(env, "DPO/RLHF/GRPO/PPO") is None
+        assert self._name(env, "数据构建/清洗") is None
+
+    def test_repair_merges_distributed_training_history(self, conn):
+        env = _env(conn)
+        env["js"].summary_repo.upsert_summary(
+            summary_date=DAY, target_type=TARGET, sample_count=10,
+            raw_text="DeepSpeed/FSDP 4",
+            stats=[{"skill_id": None, "raw_skill_name": "DeepSpeed/FSDP",
+                    "mention_count": 4, "must_count": 0, "plus_count": 0}],
+        )
+        res = env["js"].repair_unmatched_jd_skills()
+        assert res["repaired"] == 1
+        row = env["conn"].execute(
+            "SELECT * FROM jd_daily_skill_stats WHERE raw_skill_name=?",
+            ("DeepSpeed/FSDP",),
+        ).fetchone()
+        dist = env["sr"].get_by_name("分布式训练底层")
+        assert row["skill_id"] == dist["id"]
+        assert row["raw_skill_name"] == "DeepSpeed/FSDP"  # 原文保留
+        assert row["mention_count"] == 4  # 计数不变
+        # 趋势按正式技能聚合
+        t = env["js"].compute_skill_trends(DAY, 30, TARGET)
+        names = {r["name"]: r for r in t["skills"]}
+        assert names["分布式训练底层"]["mention_count"] == 4
 
 
 # ================= 历史 repair =================
