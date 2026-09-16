@@ -429,3 +429,78 @@ def test_v6_tables_survive_repeat_migrate(tmp_path):
             assert n == 1
     finally:
         conn.close()
+
+
+# ============================================================
+# Phase 11（v11）：tasks 项目化学习字段迁移
+# ============================================================
+
+PROJECT_COLUMNS = (
+    "project_name",
+    "project_repo",
+    "deliverable",
+    "acceptance_criteria",
+    "expected_artifact",
+)
+
+
+def _make_v10_db(path):
+    """构造一个停在 v10、tasks 尚无项目字段的数据库。"""
+    raw = sqlite3.connect(str(path))
+    try:
+        create_schema(raw)
+        raw.execute("PRAGMA user_version = 10")
+        raw.commit()
+    finally:
+        raw.close()
+
+
+def test_v10_to_v11_adds_project_columns(tmp_path):
+    path = tmp_path / "v10.db"
+    _make_v10_db(path)
+    conn = get_connection(path)
+    try:
+        assert SCHEMA_VERSION == 11
+        assert get_schema_version(conn) == 11
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+        for c in PROJECT_COLUMNS:
+            assert c in cols, c
+    finally:
+        conn.close()
+
+
+def test_v11_columns_default_empty_on_old_rows(tmp_path):
+    path = tmp_path / "v10b.db"
+    _make_v10_db(path)
+    conn = get_connection(path)
+    try:
+        conn.execute(
+            "INSERT INTO tasks (title, description, category, "
+            "estimated_minutes, priority, status, scheduled_date, "
+            "postpone_count, created_at, updated_at, source) "
+            "VALUES ('旧任务','','学习',1,1,'active','2026-09-06',0,"
+            " '2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE title='旧任务'"
+        ).fetchone()
+        for c in PROJECT_COLUMNS:
+            assert row[c] == "", c
+    finally:
+        conn.close()
+
+
+def test_v11_migration_idempotent(tmp_path):
+    path = tmp_path / "v11idem.db"
+    _make_v10_db(path)
+    conn = get_connection(path)
+    try:
+        assert migrate(conn) == 11
+        assert migrate(conn) == 11
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)")]
+        # 列不重复
+        for c in PROJECT_COLUMNS:
+            assert cols.count(c) == 1
+    finally:
+        conn.close()

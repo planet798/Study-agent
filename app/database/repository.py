@@ -28,6 +28,12 @@ _UPDATABLE_FIELDS = (
     "completed_at",
     "not_done_at",
     "updated_at",
+    # Phase 11：项目化学习字段
+    "project_name",
+    "project_repo",
+    "deliverable",
+    "acceptance_criteria",
+    "expected_artifact",
 )
 
 
@@ -56,6 +62,12 @@ class Task:
     knowledge_point_id: int | None = None
     # v5 起：额外任务难度（basic / practice / challenge）
     difficulty: str = "practice"
+    # v11 起（Phase 11）：项目化学习字段；task_type 可为 project / experiment
+    project_name: str = ""
+    project_repo: str = ""
+    deliverable: str = ""
+    acceptance_criteria: str = ""
+    expected_artifact: str = ""
 
     @property
     def is_done(self) -> bool:
@@ -187,15 +199,23 @@ class TaskRepository:
         task_type: str = "new",
         knowledge_point_id: int | None = None,
         difficulty: str = "practice",
+        project_name: str = "",
+        project_repo: str = "",
+        deliverable: str = "",
+        acceptance_criteria: str = "",
+        expected_artifact: str = "",
     ) -> Task:
         """新增一条任务，返回带 id 的 Task。
 
         :param source: 任务来源（manual=手动 / generated=学习计划自动生成 /
             review=复习任务 / extra=额外学习）
         :param topic_id: 关联的 study_topics 主题 id（自动生成任务使用）
-        :param task_type: 任务性质（new / review / extra）
+        :param task_type: 任务性质（new / review / extra；Phase 11 起也允许
+            project / experiment，无数据库 CHECK 约束）
         :param knowledge_point_id: 关联的知识点 id（复习任务使用）
         :param difficulty: 难度（basic / practice / challenge，额外任务用）
+        :param project_name/project_repo/deliverable/acceptance_criteria/
+            expected_artifact: Phase 11 项目化学习字段（默认空串）
         """
         if not title.strip():
             raise ValueError("任务标题不能为空")
@@ -205,11 +225,15 @@ class TaskRepository:
             "INSERT INTO tasks "
             "(title, description, category, estimated_minutes, priority, "
             " status, scheduled_date, postpone_count, created_at, updated_at, "
-            " source, topic_id, task_type, knowledge_point_id, difficulty) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+            " source, topic_id, task_type, knowledge_point_id, difficulty, "
+            " project_name, project_repo, deliverable, acceptance_criteria, "
+            " expected_artifact) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (title.strip(), description, category, estimated_minutes,
              priority, STATUS_ACTIVE, date_str, ts, ts, source, topic_id,
-             task_type, knowledge_point_id, difficulty),
+             task_type, knowledge_point_id, difficulty,
+             project_name or "", project_repo or "", deliverable or "",
+             acceptance_criteria or "", expected_artifact or ""),
         )
         self.conn.commit()
         return self.get(cur.lastrowid)

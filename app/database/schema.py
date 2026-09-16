@@ -154,7 +154,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -514,6 +514,32 @@ def _migrate_v10(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[10] = _migrate_v10
+
+
+# ============================================================
+# v11：Project-driven Learning 数据层支持（Phase 11 Step 1）
+# ============================================================
+# 为 tasks 增加项目化学习字段（均幂等加列，不破坏旧库/旧数据）：
+#   project_name / project_repo / deliverable /
+#   acceptance_criteria / expected_artifact
+# task_type 不增加 CHECK 约束，保留 new/review/extra，后续可用 project/experiment。
+
+
+def _migrate_v11(conn: sqlite3.Connection) -> None:
+    """v11：tasks 增加项目化学习字段（幂等）。"""
+    for column in (
+        "project_name",
+        "project_repo",
+        "deliverable",
+        "acceptance_criteria",
+        "expected_artifact",
+    ):
+        add_column_if_not_exists(
+            conn, "tasks", column, "TEXT NOT NULL DEFAULT ''"
+        )
+
+
+_MIGRATIONS[11] = _migrate_v11
 
 
 def get_schema_version(conn) -> int:
