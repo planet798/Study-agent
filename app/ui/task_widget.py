@@ -67,11 +67,13 @@ class TaskWidget(QFrame):
         task: Task,
         parent: QWidget | None = None,
         assessment_label: str = "开始验收",
+        route_name: str | None = None,
     ):
         super().__init__(parent)
         self.setObjectName("TaskCard")
         self._task = task
         self._assessment_label = assessment_label
+        self._route_name = route_name
 
         # 便于测试定位
         self._build_ui()
@@ -102,6 +104,10 @@ class TaskWidget(QFrame):
         self.source_tag_label.setObjectName("ReviewTag")
         self.source_tag_label.setVisible(False)
         top.addWidget(self.source_tag_label)
+        # 路线标签（Phase C）：【路线名】或【未分类】
+        self.route_tag_label = QLabel("")
+        self.route_tag_label.setObjectName("ReviewTag")
+        top.addWidget(self.route_tag_label)
         top.addStretch()
         top.addWidget(self.category_label)
         top.addWidget(self.priority_label)
@@ -260,6 +266,13 @@ class TaskWidget(QFrame):
             self.source_tag_label.setVisible(True)
         else:
             self.source_tag_label.setVisible(False)
+        # 路线标签：非 NULL 显示路线名，NULL 显示未分类
+        if task.route_id is None:
+            route_text = "未分类"
+        else:
+            route_text = self._route_name or f"路线{task.route_id}"
+        self.route_tag_label.setText(f"【{route_text}】")
+        self.route_tag_label.setVisible(True)
         self.category_label.setText(f"分类：{task.category or '未分类'}")
         prio = _PRIORITY_TEXT.get(task.priority, "?")
         self.priority_label.setText(f"优先级：{prio}")

@@ -24,6 +24,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -94,6 +95,8 @@ class MainWindow(QMainWindow):
         notes_service=None,
         assessment_service_factory=None,
         manual_task_service=None,
+        route_service=None,
+        route_plan_service=None,
         db_path=None,
     ):
         super().__init__()
@@ -130,6 +133,9 @@ class MainWindow(QMainWindow):
         self.jd_summary_service = jd_summary_service
         self.outcome_service = outcome_service
         self.notes_service = notes_service
+        # Phase C：学习路线服务（可选；不传则隐藏“学习路线”页）
+        self.route_service = route_service
+        self.route_plan_service = route_plan_service
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -163,13 +169,15 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(12, 8, 12, 8)
         root.setSpacing(8)
 
-        # 顶部导航 [今日] [月总结]
+        # 顶部导航 [今日] [学习路线] [月总结]
         nav = QHBoxLayout()
         self.nav_today_btn = QPushButton("今日")
+        self.nav_routes_btn = QPushButton("学习路线")
         self.nav_monthly_btn = QPushButton("月总结")
         self.nav_today_btn.clicked.connect(lambda: self._switch_page(0))
+        self.nav_routes_btn.clicked.connect(self._switch_to_routes)
         self.nav_monthly_btn.clicked.connect(lambda: self._switch_page(1))
-        for b in (self.nav_today_btn, self.nav_monthly_btn):
+        for b in (self.nav_today_btn, self.nav_routes_btn, self.nav_monthly_btn):
             b.setObjectName("PrimaryButton")
             nav.addWidget(b)
         nav.addStretch()
@@ -198,8 +206,14 @@ class MainWindow(QMainWindow):
         section.setObjectName("SectionTitle")
         root_today.addWidget(section)
 
-        # 手动添加今日学习任务（不依赖 Agent 规划）
+        # 手动添加今日学习任务（不依赖 Agent 规划）+ 路线筛选
         add_row = QHBoxLayout()
+        add_row.addWidget(QLabel("路线筛选"))
+        self.route_filter_combo = QComboBox()
+        self.route_filter_combo.currentIndexChanged.connect(
+            self._on_route_filter_changed
+        )
+        add_row.addWidget(self.route_filter_combo)
         add_row.addStretch()
         self.add_task_btn = QPushButton("＋ 添加学习任务")
         self.add_task_btn.setObjectName("SecondaryButton")
@@ -207,6 +221,10 @@ class MainWindow(QMainWindow):
         self.add_task_btn.clicked.connect(self._on_add_learning_task)
         add_row.addWidget(self.add_task_btn)
         root_today.addLayout(add_row)
+
+        self.route_stats_label = QLabel("")
+        self.route_stats_label.setObjectName("TaskMeta")
+        root_today.addWidget(self.route_stats_label)
 
         # 当前学习阶段（StudyPlanService 可选注入；不注入则隐藏）
         self.phase_container = QWidget()
@@ -263,8 +281,10 @@ class MainWindow(QMainWindow):
         root_today.addWidget(self.empty_hint)
 
         self.stack.addWidget(today_page)
+        self.monthly_page_index = None
+        self.routes_page_index = None
 
-        # ----- 月总结页（可选） -----
+        # ----- 月总结页（可选，索引 1） -----
         if self.summary_service is not None:
             from .summary_pages import MonthlySummaryPage
 
@@ -272,19 +292,47 @@ class MainWindow(QMainWindow):
                 self.summary_service, today_provider=self.today_provider
             )
             self.stack.addWidget(self.monthly_page)
+            self.monthly_page_index = self.stack.count() - 1
             self.nav_monthly_btn.setEnabled(True)
         else:
             self.nav_monthly_btn.setEnabled(False)
+
+        # ----- 学习路线页（可选） -----
+        if self.route_service is not None:
+            from .routes_page import LearningRoutesPage
+
+            self.routes_page = LearningRoutesPage(
+                self.route_service, route_plan_service=self.route_plan_service
+            )
+            self.stack.addWidget(self.routes_page)
+            self.routes_page_index = self.stack.count() - 1
+            self.nav_routes_btn.setEnabled(True)
+        else:
+            self.nav_routes_btn.setEnabled(False)
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("")
 
     def _switch_page(self, index: int) -> None:
-        """切换今日 / 月总结页面。"""
-        if self.summary_service is None and index != 0:
+        """切换今日 / 月总结页面（保留旧索引语义）。"""
+        if index == 0:
+            self.stack.setCurrentIndex(0)
+            return
+        if index == 1 and self.monthly_page_index is not None:
+            self.stack.setCurrentIndex(1)
+            return
+        if index == 1:
             self.statusBar().showMessage("月总结不可用", 3000)
             return
         self.stack.setCurrentIndex(index)
+
+    def _switch_to_routes(self) -> None:
+        if self.routes_page_index is None:
+            self.statusBar().showMessage("学习路线不可用", 3000)
+            return
+        if self.routes_page is not None:
+            self.routes_page.refresh()
+        self.stack.setCurrentIndex(self.routes_page_index)
 
     def _build_tray(self) -> None:
         """托盘可用则创建，不可用（如部分 Linux）则跳过，不影响运行。"""
@@ -349,6 +397,11 @@ class MainWindow(QMainWindow):
         self._update_phase_info(today_str)
         self._update_planner_info()
 
+        # 路线筛选选项 + 当前选择
+        self._reload_route_filter()
+        selected_route = self._selected_route_filter()
+        self._route_names = self._route_name_map()
+
         # 清空滚动区动态内容
         self._clear_dynamic_list()
         self._task_widgets.clear()
@@ -359,17 +412,25 @@ class MainWindow(QMainWindow):
             t for t in tasks
             if t.task_type not in ("review", "extra")
             and t.status != STATUS_CANCELLED
+            and self._matches_route(t, selected_route)
         ]
         review_tasks = [
             t for t in tasks
             if t.task_type == "review" and t.status != STATUS_CANCELLED
+            and self._matches_route(t, selected_route)
         ]
         extra_tasks = [
             t for t in tasks
             if t.task_type == "extra" and t.status != STATUS_CANCELLED
+            and self._matches_route(t, selected_route)
         ]
         # 用户主动移除的任务：不进入“今日待执行任务”，仅折叠提示
-        cancelled_tasks = [t for t in tasks if t.status == STATUS_CANCELLED]
+        cancelled_tasks = [
+            t for t in tasks
+            if t.status == STATUS_CANCELLED
+            and self._matches_route(t, selected_route)
+        ]
+        self._update_route_stats(tasks, selected_route)
 
         # 1) 今日新知识
         self._add_section_header("今日新知识")
@@ -420,6 +481,83 @@ class MainWindow(QMainWindow):
         self.empty_hint.setVisible(not has_content)
         self.scroll.setVisible(scroll_visible)
 
+    # ---------- Phase C：路线筛选 / 统计 ----------
+
+    def _route_name_map(self) -> dict:
+        if self.route_service is None:
+            return {}
+        try:
+            return {
+                r.id: r.name
+                for r in self.route_service.route_repo.list_all()
+            }
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _active_learning_routes(self) -> list:
+        if self.route_service is None:
+            return []
+        try:
+            return [
+                r for r in self.route_service.route_repo.list_learning_routes()
+                if not r.is_archived
+            ]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _reload_route_filter(self) -> None:
+        """重建“全部路线 / 各 learning route / 未分类”筛选项（保留当前选择）。"""
+        self._route_filter_loading = True
+        combo = self.route_filter_combo
+        previous = combo.currentData() if combo.count() else "all"
+        combo.clear()
+        combo.addItem("全部路线", "all")
+        for r in self._active_learning_routes():
+            combo.addItem(r.name, r.id)
+        combo.addItem("未分类", "none")
+        idx = combo.findData(previous)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._route_filter_loading = False
+
+    def _selected_route_filter(self):
+        if not hasattr(self, "route_filter_combo") or \
+                self.route_filter_combo.count() == 0:
+            return "all"
+        return self.route_filter_combo.currentData()
+
+    @staticmethod
+    def _matches_route(task, selected) -> bool:
+        if selected in (None, "all"):
+            return True
+        if selected == "none":
+            return task.route_id is None
+        return task.route_id == selected
+
+    def _on_route_filter_changed(self) -> None:
+        if getattr(self, "_route_filter_loading", False):
+            return
+        self.refresh()
+
+    def _update_route_stats(self, tasks, selected) -> None:
+        if not hasattr(self, "route_stats_label"):
+            return
+        # 完成率分母 = 过滤后 status != cancelled 的任务；cancelled 永不进分母
+        effective = [
+            t for t in tasks
+            if t.status != STATUS_CANCELLED
+            and self._matches_route(t, selected)
+        ]
+        done = sum(1 for t in effective if t.status == "done")
+        if selected in (None, "all"):
+            label = "全部路线"
+        elif selected == "none":
+            label = "未分类"
+        else:
+            label = (self._route_names or {}).get(selected, f"路线{selected}")
+        self.route_stats_label.setText(
+            f"{label}：完成 {done} / {len(effective)}"
+        )
+
     # ---------- 今日页区域构建 ----------
 
     def _clear_dynamic_list(self) -> None:
@@ -451,7 +589,11 @@ class MainWindow(QMainWindow):
                     label = "继续验收"
             except Exception:  # noqa: BLE001 - 仅影响按钮文案
                 pass
-        widget = TaskWidget(task, assessment_label=label)
+        widget = TaskWidget(
+            task,
+            assessment_label=label,
+            route_name=(self._route_names or {}).get(task.route_id),
+        )
         widget.complete_requested.connect(self._on_complete)
         widget.not_done_requested.connect(self._on_not_done)
         widget.postpone_requested.connect(self._on_postpone)
@@ -517,14 +659,32 @@ class MainWindow(QMainWindow):
                 out.append({"id": topic.id, "name": topic.name})
         return out
 
+    def _topics_by_route(self) -> dict:
+        """{route_id: [topic,...]}，供 AddLearningTaskDialog 按路线过滤 topic。"""
+        if self.study_plan_service is None:
+            return {}
+        out: dict = {}
+        for r in self._active_learning_routes():
+            try:
+                topics = self.study_plan_service.plan_repo.list_topics_by_route(r.id)
+            except Exception:  # noqa: BLE001
+                topics = []
+            out[r.id] = [{"id": t.id, "name": t.name} for t in topics]
+        return out
+
     def _on_add_learning_task(self) -> None:
         """打开添加学习任务对话框（普通 To-do / 正式知识学习任务）。"""
         from .dialogs import show_warning
 
+        routes = [
+            {"id": r.id, "name": r.name} for r in self._active_learning_routes()
+        ]
         dlg = AddLearningTaskDialog(
             topics=self._available_topics(),
             default_date=self.current_date,
             parent=self,
+            routes=routes,
+            topics_by_route=self._topics_by_route(),
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -536,6 +696,7 @@ class MainWindow(QMainWindow):
                     description=payload["description"],
                     estimated_minutes=payload["estimated_minutes"],
                     scheduled_date=payload["scheduled_date"],
+                    route_id=payload.get("route_id"),
                 )
                 msg = "已添加普通学习任务"
             else:
@@ -545,6 +706,7 @@ class MainWindow(QMainWindow):
                     estimated_minutes=payload["estimated_minutes"],
                     scheduled_date=payload["scheduled_date"],
                     topic_id=payload.get("topic_id"),
+                    route_id=payload.get("route_id"),
                 )
                 msg = "已添加正式知识学习任务"
         except Exception as e:  # noqa: BLE001 - 添加失败不崩溃
@@ -1243,10 +1405,36 @@ class MainWindow(QMainWindow):
         goal = (phase.goals or "").strip()
         self.phase_goal_label.setText(f"今日学习目标：{goal}" if goal else "")
 
+    def _planning_paused(self) -> bool:
+        if self.study_plan_service is None:
+            return False
+        try:
+            return not self.study_plan_service.is_planning_enabled()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _planning_route_name(self) -> str:
+        if self.route_service is None:
+            return "当前学习路线"
+        try:
+            default = self.route_service.route_repo.get_default_learning_route()
+            if default is not None:
+                return default.name
+        except Exception:  # noqa: BLE001
+            pass
+        return "当前学习路线"
+
     def _update_planner_info(self) -> None:
         """刷新 AI 今日规划区域的可用状态。"""
         if self.daily_planner_service is None:
             self.planner_container.setVisible(False)
+            return
+        if self._planning_paused():
+            self.planner_status_label.setText(
+                f"AI 状态：{self._planning_route_name()} 自动规划已暂停"
+            )
+            self.planner_replan_btn.setEnabled(False)
+            self.planner_container.setVisible(True)
             return
         planner = self.daily_planner_service.planner
         if planner is not None and planner.is_configured():
@@ -1277,6 +1465,13 @@ class MainWindow(QMainWindow):
         planner = self.daily_planner_service.planner
         if planner is None or not planner.is_configured():
             show_warning(self, "AI 未配置，无法重新规划。")
+            return
+        if self._planning_paused():
+            show_warning(
+                self,
+                f"{self._planning_route_name()} 自动规划已暂停；"
+                "请先在“学习路线”中恢复自动规划。",
+            )
             return
 
         confirm = QMessageBox.question(

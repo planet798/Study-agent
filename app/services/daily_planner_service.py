@@ -349,6 +349,16 @@ class DailyPlannerService:
         """
         plan_date = add_days(date_str, 1)
 
+        # Phase C：暂停/归档路线不再自动生成新计划
+        if not self.study_plan_service.is_planning_enabled():
+            return {
+                "date": plan_date,
+                "existing": False,
+                "fallback": False,
+                "planning_paused": True,
+                "created": [],
+            }
+
         # 幂等：同一天已有计划且当天确实已有任务时，直接返回（不重复生成）。
         # 只存在决策但当天没有任何任务（例如上次因阶段全部完成而生成为空），
         # 则允许重新生成，避免“当天永远空任务”的卡死。

@@ -258,7 +258,7 @@ def _fake_dialog(monkeypatch, accepted, decisions=None):
     from app.ui import past_task_dialog as mod
 
     class FakeDlg:
-        def __init__(self, tasks, parent=None):
+        def __init__(self, tasks, parent=None, route_names=None):
             self.tasks = tasks
 
         def exec(self):

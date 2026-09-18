@@ -16,6 +16,7 @@ from ..database.learning_route_repository import (
     PRIORITY_MIN,
     ROUTE_SOURCE_MANUAL,
     ROUTE_STATUS_ACTIVE,
+    ROUTE_STATUS_ARCHIVED,
     ROUTE_TYPE_GROUP,
     ROUTE_TYPE_LEARNING,
     LearningRoute,
@@ -190,9 +191,52 @@ class LearningRouteService:
 
     # ================= 归档 / 恢复 =================
 
+    def update_route_info(
+        self,
+        route_id: int,
+        name: str | None = None,
+        goal: str | None = None,
+        description: str | None = None,
+        priority: int | None = None,
+    ) -> LearningRoute:
+        """更新路线基础信息（名称 / 目标 / 描述 / 优先级）。"""
+        route = self._require(route_id)
+        fields: dict = {}
+        if name is not None:
+            clean = name.strip()
+            if not clean:
+                raise RouteValidationError("路线名称不能为空")
+            if clean != route.name and self.route_repo.get_by_name_under_parent(
+                clean, route.parent_id
+            ) is not None:
+                raise RouteValidationError(f"同一父路线下已存在同名路线: {clean!r}")
+            fields["name"] = clean
+        if goal is not None:
+            fields["goal"] = goal
+        if description is not None:
+            fields["description"] = description
+        if priority is not None:
+            fields["priority"] = self._validate_priority(priority)
+        if not fields:
+            return route
+        return self.route_repo.update(route_id, **fields)
+
     def archive_route(self, route_id: int) -> LearningRoute:
-        """归档：status=archived + planning_enabled=0 + archived_at；不删任何数据。"""
-        self._require(route_id)
+        """归档：status=archived + planning_enabled=0 + archived_at；不删任何数据。
+
+        group route：如果还有未归档子路线，拒绝归档（避免结构矛盾）。
+        """
+        route = self._require(route_id)
+        if route.route_type == ROUTE_TYPE_GROUP:
+            active_children = [
+                c for c in self.route_repo.list_children(route_id)
+                if c.status != ROUTE_STATUS_ARCHIVED
+            ]
+            if active_children:
+                names = "、".join(c.name for c in active_children)
+                raise RouteValidationError(
+                    f"该分组下仍有未归档子路线（{names}），请先处理子路线"
+                )
         return self.route_repo.archive(route_id)
 
     def restore_route(self, route_id: int) -> LearningRoute:

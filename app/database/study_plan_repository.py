@@ -26,6 +26,8 @@ class StudyPhase:
     end_date: str = ""
     priority: int = 1
     goals: str = ""
+    # v13（Phase C）：手动路线的阶段顺序（旧数据全为 0）
+    order_index: int = 0
     topics: list["StudyTopic"] = field(default_factory=list)
 
 
@@ -184,23 +186,27 @@ class StudyPlanRepository:
         description: str = "",
         priority: int = 1,
         goals: str = "",
+        order_index: int = 0,
     ) -> StudyPhase:
         cur = self.conn.execute(
             "INSERT INTO study_phases "
-            "(plan_id, name, description, start_date, end_date, priority, goals) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (plan_id, name, description, start_date, end_date, priority, goals),
+            "(plan_id, name, description, start_date, end_date, priority, goals,"
+            " order_index) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (plan_id, name, description, start_date, end_date, priority, goals,
+             int(order_index)),
         )
         self.conn.commit()
         return StudyPhase(
             id=cur.lastrowid, plan_id=plan_id, name=name, description=description,
             start_date=start_date, end_date=end_date, priority=priority, goals=goals,
+            order_index=int(order_index),
         )
 
     def list_phases(self, plan_id: int) -> list[StudyPhase]:
         rows = self.conn.execute(
             "SELECT * FROM study_phases WHERE plan_id = ? "
-            "ORDER BY start_date ASC, priority DESC, id ASC",
+            "ORDER BY start_date ASC, order_index ASC, priority DESC, id ASC",
             (plan_id,),
         ).fetchall()
         return [self._phase_from_row(r) for r in rows]
@@ -252,7 +258,7 @@ class StudyPlanRepository:
     # ---------- 就地更新（迁移 / 同步长期学习路线用） ----------
 
     _PHASE_UPDATABLE = ("name", "description", "start_date", "end_date",
-                        "priority", "goals")
+                        "priority", "goals", "order_index")
     _TOPIC_UPDATABLE = ("name", "description", "estimated_minutes",
                         "priority", "order_index")
 

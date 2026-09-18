@@ -46,8 +46,12 @@ class ManualTaskService:
         scheduled_date: str | None = None,
         category: str = "学习",
         priority: int = 1,
+        route_id: int | None = None,
     ) -> Task:
-        """创建普通学习任务：不创建 knowledge_point，不进入验收链路。"""
+        """创建普通学习任务：不创建 knowledge_point，不进入验收链路。
+
+        route_id 仅用于组织 / 筛选 / 统计（可为 NULL = 未分类 / 指定任意 active route）。
+        """
         return self.repo.create(
             title=title,
             scheduled_date=scheduled_date,
@@ -57,6 +61,7 @@ class ManualTaskService:
             priority=priority,
             source="manual",
             task_type=MANUAL_TODO,
+            route_id=route_id,
         )
 
     # ================= 正式知识学习任务 =================
@@ -70,16 +75,21 @@ class ManualTaskService:
         topic_id: int | None = None,
         category: str = "学习",
         priority: int = 1,
+        route_id: int | None = None,
     ) -> Task:
         """创建正式知识学习任务（manual knowledge）。
 
-        - 传入 topic_id：关联已有 study_topic，复用 link_task_knowledge_point
-          建立 topic -> knowledge_point 关联；
-        - 不传 topic_id：创建/复用一个独立临时知识点（topic_id=NULL），
-          直接写在 task.knowledge_point_id 上；
+        - 传入 topic_id：关联已有 study_topic，task.route_id 强制等于该 topic 的
+          route（不接受调用方覆盖）；复用 link_task_knowledge_point。
+        - 不传 topic_id：创建/复用一个 (name, route_id) 维度的临时知识点，
+          task.route_id = kp.route_id；route_id=None 保持未分类。
         - 两种情况均可进入 Assessment（done ≠ mastered）。
         """
         if topic_id is not None:
+            topic_route_id = None
+            if self.study_plan_service is not None:
+                topic_route_id = self.study_plan_service.plan_repo \
+                    .get_route_id_for_topic(topic_id)
             task = self.repo.create(
                 title=title,
                 scheduled_date=scheduled_date,
@@ -90,6 +100,7 @@ class ManualTaskService:
                 source="manual",
                 task_type=MANUAL_KNOWLEDGE,
                 topic_id=topic_id,
+                route_id=topic_route_id,
             )
             if self.study_plan_service is not None:
                 linked = self.study_plan_service.link_task_knowledge_point(task)
@@ -98,11 +109,13 @@ class ManualTaskService:
             return task
 
         kp_id = None
+        kp_route_id = route_id
         if self.assessment_repo is not None:
             kp = self.assessment_repo.get_or_create_manual_knowledge_point(
-                title, description
+                title, description, route_id=route_id
             )
             kp_id = kp["id"] if kp is not None else None
+            kp_route_id = kp.get("route_id") if kp is not None else route_id
         return self.repo.create(
             title=title,
             scheduled_date=scheduled_date,
@@ -113,16 +126,17 @@ class ManualTaskService:
             source="manual",
             task_type=MANUAL_KNOWLEDGE,
             knowledge_point_id=kp_id,
+            route_id=kp_route_id,
         )
 
     # ================= 幂等临时知识点 =================
 
     def get_or_create_manual_knowledge_point(
-        self, name: str, description: str = ""
+        self, name: str, description: str = "", route_id: int | None = None
     ) -> dict | None:
-        """按规范化名称幂等取得/创建临时知识点（无 assessment_repo 时返回 None）。"""
+        """按 (规范化名称, route_id) 幂等取得/创建临时知识点。"""
         if self.assessment_repo is None:
             return None
         return self.assessment_repo.get_or_create_manual_knowledge_point(
-            name, description
+            name, description, route_id=route_id
         )

@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -790,6 +790,92 @@ def _migrate_v12(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[12] = _migrate_v12
+
+
+# ============================================================
+# v13：路线结构编辑支持（Phase C）
+# ============================================================
+#
+# 1) study_phases.order_index：手动路线按“阶段顺序”推进，而不是依赖绝对日期
+#    （旧路线全部为 0，排序仍以 start_date 为主，行为不变）。
+# 2) knowledge_points 唯一性从 name 改为 (name, route_id)：
+#    不同路线允许同名知识点（C++ 的“基础” vs RL 的“基础”），
+#    同一路线同名仍幂等。route_id IS NULL 由 service 层做幂等检查。
+#    SQLite 无法删列级 UNIQUE，因此安全重建表（保留 id 与全部历史行）。
+
+_KNOWLEDGE_POINTS_V13_SQL = """
+CREATE TABLE knowledge_points (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id          INTEGER,
+    route_id          INTEGER,
+    name              TEXT    NOT NULL,
+    description       TEXT    NOT NULL DEFAULT '',
+    first_learned_at  TEXT,
+    last_assessed_at  TEXT,
+    mastery_estimate  REAL    NOT NULL DEFAULT 0.0,
+    review_count      INTEGER NOT NULL DEFAULT 0,
+    next_review_date  TEXT,
+    interval_days     INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT    NOT NULL,
+    updated_at        TEXT    NOT NULL,
+    UNIQUE(name, route_id)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_points_topic
+    ON knowledge_points(topic_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_points_review
+    ON knowledge_points(next_review_date);
+CREATE INDEX IF NOT EXISTS idx_knowledge_points_route
+    ON knowledge_points(route_id);
+"""
+
+_KNOWLEDGE_POINT_COLUMNS = (
+    "id", "topic_id", "route_id", "name", "description", "first_learned_at",
+    "last_assessed_at", "mastery_estimate", "review_count", "next_review_date",
+    "interval_days", "created_at", "updated_at",
+)
+
+
+def _knowledge_points_has_route_unique(conn: sqlite3.Connection) -> bool:
+    """新表定义是否已是 UNIQUE(name, route_id)。"""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='knowledge_points'"
+    ).fetchone()
+    if row is None or not row[0]:
+        return False
+    normalized = " ".join(row[0].split()).lower().replace(" ", "")
+    return "unique(name,route_id)" in normalized
+
+
+def _migrate_v13(conn: sqlite3.Connection) -> None:
+    """v13：phase order_index + knowledge_points 按 (name, route_id) 唯一（幂等）。"""
+    if _table_exists(conn, "study_phases"):
+        add_column_if_not_exists(
+            conn, "study_phases", "order_index", "INTEGER NOT NULL DEFAULT 0"
+        )
+
+    if _table_exists(conn, "knowledge_points") and not \
+            _knowledge_points_has_route_unique(conn):
+        # 重建知识表（保留 id 与全部历史行/验收证据）
+        conn.execute(
+            "ALTER TABLE knowledge_points RENAME TO knowledge_points_old"
+        )
+        for idx in (
+            "idx_knowledge_points_topic",
+            "idx_knowledge_points_review",
+            "idx_knowledge_points_route",
+        ):
+            conn.execute(f"DROP INDEX IF EXISTS {idx}")
+        conn.executescript(_KNOWLEDGE_POINTS_V13_SQL)
+        cols = ", ".join(_KNOWLEDGE_POINT_COLUMNS)
+        conn.execute(
+            f"INSERT INTO knowledge_points ({cols}) SELECT {cols} "
+            "FROM knowledge_points_old"
+        )
+        conn.execute("DROP TABLE knowledge_points_old")
+        conn.commit()
+
+
+_MIGRATIONS[13] = _migrate_v13
 
 
 def get_schema_version(conn) -> int:

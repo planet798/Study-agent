@@ -132,11 +132,17 @@ class DateService:
         日期状态处理 -> 延期/归档任务处理 -> 此处生成新任务。
 
         策略（优先级从高到低）：
+        0. 若当前学习路线的自动规划已暂停/归档（planning_enabled=0 或 archived），
+           则不生成任何新 Agent task（manual / Review / Assessment 不受影响）；
         1. 若注入了 daily_planner_service（AI），先试 AI 动态规划，
            失败时内部自动 fallback 到规则型生成；
         2. 否则若注入了 study_plan_service，使用规则型 generate_daily_tasks；
         3. 两者都未注入则不做任何事，纯本地功能不受影响。
         """
+        if self.study_plan_service is not None and \
+                not self.study_plan_service.is_planning_enabled():
+            # Phase C：暂停/归档路线不自动生成新任务
+            return []
         if self.daily_planner_service is not None:
             # AI 规划器输入"昨天"，规划出"今天"（本身就是为下一天规划）
             yesterday = add_days(current_date, -1)

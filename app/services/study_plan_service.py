@@ -198,6 +198,33 @@ class StudyPlanService:
                 self._resolved_route_id_cache = None
         return self._resolved_route_id_cache
 
+    def is_planning_enabled(self) -> bool:
+        """当前路线的自动规划是否启用。
+
+        - 未绑定路线（旧行为）→ True，保持兼容；
+        - 路线 archived 或 planning_enabled=0 → False（暂停/归档不生成新的 Agent task）。
+        """
+        route_id = self._resolved_route_id()
+        if route_id is None:
+            return True
+        repo = self.learning_route_repo
+        if repo is None:
+            try:
+                from ..database.learning_route_repository import (
+                    LearningRouteRepository,
+                )
+
+                repo = LearningRouteRepository(self.repo.conn)
+            except Exception:  # noqa: BLE001
+                return True
+        try:
+            route = repo.get(route_id)
+        except Exception:  # noqa: BLE001
+            return True
+        if route is None:
+            return True
+        return bool(route.planning_enabled) and route.status == "active"
+
     # ================= 默认研一计划 =================
 
     def ensure_default_plan(self) -> StudyPlan:
@@ -420,6 +447,9 @@ class StudyPlanService:
             "skipped_gate": [],
             "skipped_cancelled": [],
         }
+        # Phase C：暂停/归档路线的自动规划入口不生成新 task
+        if not self.is_planning_enabled():
+            return result
         phase = self.get_current_phase(date_str)
         if phase is None:
             return result

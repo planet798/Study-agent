@@ -435,7 +435,19 @@ def _run_past_task_preflight(repo, task_service, today_str: str) -> bool:
     from app.ui.dialogs import show_warning
     from app.ui.past_task_dialog import PastTaskConfirmationDialog
 
-    dlg = PastTaskConfirmationDialog(unresolved)
+    route_names = {}
+    try:
+        from app.database.learning_route_repository import (
+            LearningRouteRepository,
+        )
+
+        route_names = {
+            r.id: r.name for r in LearningRouteRepository(repo.conn).list_all()
+        }
+    except Exception:  # noqa: BLE001 - 路线表缺失时不显示路线标签
+        route_names = {}
+
+    dlg = PastTaskConfirmationDialog(unresolved, route_names=route_names)
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return False  # 取消 / X / Esc：不默认判未完成、不进入今天
     try:
@@ -504,9 +516,11 @@ def main() -> int:
     # Phase B：学习路线数据层（当前仅提供数据能力，不接 Planner / UI）
     from app.database.learning_route_repository import LearningRouteRepository
     from app.services.learning_route_service import LearningRouteService
+    from app.services.route_plan_service import RoutePlanService
 
     route_repo = LearningRouteRepository(conn)
     route_service = LearningRouteService(route_repo, skill_repo=skill_repo)
+    route_plan_service = RoutePlanService(plan_repo, repo, assessment_repo)
     study_plan_service = StudyPlanService(
         repo, plan_repo,
         assessment_repo=assessment_repo,
@@ -712,6 +726,8 @@ def main() -> int:
         outcome_service=outcome_service,
         notes_service=notes_service,
         manual_task_service=manual_task_service,
+        route_service=route_service,
+        route_plan_service=route_plan_service,
         # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
         assessment_service_factory=build_assessment_service,
         db_path=str(resolve_db_path()),

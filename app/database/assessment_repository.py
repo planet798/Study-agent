@@ -93,8 +93,27 @@ class AssessmentRepository:
 
     def get_knowledge_point_by_name(self, name: str) -> dict | None:
         row = self.conn.execute(
-            "SELECT * FROM knowledge_points WHERE name = ?", (name,)
+            "SELECT * FROM knowledge_points WHERE name = ? ORDER BY id ASC LIMIT 1",
+            (name,),
         ).fetchone()
+        return _row(row)
+
+    def get_knowledge_point_by_name_and_route(
+        self, name: str, route_id: int | None
+    ) -> dict | None:
+        """按 (规范化 name, route_id) 精确查找（Phase C 多路线唯一性）。"""
+        if route_id is None:
+            row = self.conn.execute(
+                "SELECT * FROM knowledge_points WHERE name = ? "
+                "AND route_id IS NULL ORDER BY id ASC LIMIT 1",
+                (name,),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT * FROM knowledge_points WHERE name = ? AND route_id = ? "
+                "ORDER BY id ASC LIMIT 1",
+                (name, int(route_id)),
+            ).fetchone()
         return _row(row)
 
     def get_knowledge_point_by_topic(self, topic_id: int) -> dict | None:
@@ -117,14 +136,14 @@ class AssessmentRepository:
     ) -> dict:
         """幂等地取得/创建某个 study_topic 对应的唯一知识点。
 
-        一个 topic 只允许对应一个 knowledge_point。幂等保证（无需改 schema）：
-        1. 先按 topic_id 命中直接复用，**不修改任何 mastery / 复习字段**；
-        2. 未命中再按 name 查找（knowledge_points.name 有 UNIQUE 约束）：旧数据
-           可能已有同名但 topic_id 为空的 kp，此时复用并补上 topic_id（只改关系）；
-        3. 仍未命中才 INSERT；INSERT 由 name 的 UNIQUE 约束兜底，若并发/重复触发
-           IntegrityError 则回查返回既有记录，绝不产生第二个 kp。
+        一个 topic 只允许对应一个 knowledge_point。幂等保证：
+        1. 先按 topic_id 命中直接复用，不修改任何 mastery / 复习字段；
+        2. 未命中再按 (name, route_id) 查找（旧数据可能已有同路线同名但 topic_id
+           为空的 kp，此时复用并补上 topic_id，只改关系）；不同路线的同名 kp
+           不会被误用；
+        3. 仍未命中才 INSERT；由 UNIQUE(name, route_id) 兜底，重复触发时回查返回。
 
-        所有分支都只写 topic_id（以及 updated_at），绝不伪造验收证据。
+        所有分支都只写 topic_id / route_id（以及 updated_at），绝不伪造验收证据。
         """
         if topic_id is None:
             raise ValueError("topic_id 不能为空")
@@ -139,7 +158,7 @@ class AssessmentRepository:
         clean = (name or "").strip()
         if not clean:
             raise ValueError("知识点名不能为空")
-        by_name = self.get_knowledge_point_by_name(clean)
+        by_name = self.get_knowledge_point_by_name_and_route(clean, route_id)
         if by_name is not None:
             if by_name.get("topic_id") is None:
                 return self.update_knowledge_point(
@@ -152,7 +171,7 @@ class AssessmentRepository:
             )
         except sqlite3.IntegrityError:
             again = self.get_knowledge_point_by_topic(topic_id) or \
-                self.get_knowledge_point_by_name(clean)
+                self.get_knowledge_point_by_name_and_route(clean, route_id)
             if again is not None:
                 return again
             raise
@@ -164,27 +183,23 @@ class AssessmentRepository:
 
         用于“今天主动学一个正式知识点，但当前没有对应 study_topic”的场景：
         - 不创建/不污染 study_phases / study_topics；
-        - 按**规范化名称**幂等（去除首尾空白、把连续空白折叠为一个空格）；
-          “强化学习基础”重复输入只复用同一个 kp，“PPO”是另一个 kp；
-          不做 contains 模糊匹配；
-        - 若同名 kp 已存在（即使之前绑定过 topic），直接复用，不覆盖任何验收证据。
+        - 唯一语义 = 规范化名称 + route_id（Phase C）：
+          同一路线同名复用；不同路线同名允许不同 kp；
+        - 不做 contains 模糊匹配；不覆盖任何验收证据；
+        - route_id=None 保持未分类兼容。
         """
         clean = _normalize_kp_name(name)
         if not clean:
             raise ValueError("知识点名不能为空")
-        existing = self.get_knowledge_point_by_name(clean)
+        existing = self.get_knowledge_point_by_name_and_route(clean, route_id)
         if existing is not None:
-            if route_id is not None and existing.get("route_id") is None:
-                return self.update_knowledge_point(
-                    existing["id"], route_id=route_id
-                )
             return existing
         try:
             return self.create_knowledge_point(
                 clean, description, None, route_id=route_id
             )
         except sqlite3.IntegrityError:
-            again = self.get_knowledge_point_by_name(clean)
+            again = self.get_knowledge_point_by_name_and_route(clean, route_id)
             if again is not None:
                 return again
             raise

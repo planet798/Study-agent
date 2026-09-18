@@ -115,7 +115,7 @@ class TestMigrationV12:
         _make_v11_db(path)
         conn = get_connection(path)
         try:
-            assert SCHEMA_VERSION == 12
+            assert SCHEMA_VERSION >= 12
             repo = LearningRouteRepository(conn)
             routes = repo.list_all()
             assert len(routes) == 2

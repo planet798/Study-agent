@@ -29,9 +29,10 @@ from .styles import apply_secondary_button_text
 
 
 class PastTaskConfirmationDialog(QDialog):
-    def __init__(self, tasks, parent=None):
+    def __init__(self, tasks, parent=None, route_names=None):
         super().__init__(parent)
         self._tasks = list(tasks)
+        self._route_names = dict(route_names or {})
         # task_id -> (radio_done, radio_not_done)
         self._radios: dict[int, tuple[QRadioButton, QRadioButton]] = {}
 
@@ -83,6 +84,16 @@ class PastTaskConfirmationDialog(QDialog):
             name = QLabel(t.title)
             name.setWordWrap(True)
             card_layout.addWidget(name)
+
+            if t.route_id is None:
+                route_text = "未分类"
+            else:
+                route_text = self._route_names.get(
+                    t.route_id, f"路线{t.route_id}"
+                )
+            route_lbl = QLabel(f"【{route_text}】")
+            route_lbl.setObjectName("ReviewTag")
+            card_layout.addWidget(route_lbl)
 
             minutes = int(getattr(t, "estimated_minutes", 0) or 0)
             meta = QLabel(f"预计 {minutes} 分钟" if minutes else "预计时间：—")

@@ -106,12 +106,31 @@ class ReviewService:
             return False
         return next_review <= date
 
+    def _route_archived(self, knowledge_point: dict) -> bool:
+        """Phase C 最小 archive 边界：archived 路线不再生成新的 Review task。
+
+        - route_id IS NULL（未分类）不受影响；
+        - paused route 仍会复习（pause 只影响自动规划）；
+        - 只影响“生成新的复习任务”，不删已有任务。
+        """
+        route_id = knowledge_point.get("route_id")
+        if route_id is None:
+            return False
+        try:
+            row = self.repo.conn.execute(
+                "SELECT status FROM learning_routes WHERE id = ?",
+                (int(route_id),),
+            ).fetchone()
+        except Exception:  # noqa: BLE001 - 无路线表时不影响 Review
+            return False
+        return bool(row and row[0] == "archived")
+
     def due_knowledge_points(self, today: str | None = None) -> list[dict]:
         """返回今天到期的知识点（按到期日升序、掌握度从低到高排序）。"""
         date = today or _today()
         due = [
             kp for kp in self.assessment_repo.list_knowledge_points()
-            if self.is_due(kp, date)
+            if self.is_due(kp, date) and not self._route_archived(kp)
         ]
         due.sort(key=lambda kp: (kp["next_review_date"], kp["mastery_estimate"]))
         return due
@@ -353,6 +372,8 @@ class ReviewService:
             kp = self.assessment_repo.get_knowledge_point(kp_id)
             if kp is None:
                 continue
+            if self._route_archived(kp):
+                continue  # archived 路线不再产生新的巩固任务
             attempt = evidence.get(kp_id)
             weak = self._is_weak(kp, attempt)
             cooldown = (
