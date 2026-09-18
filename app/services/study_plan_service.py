@@ -151,6 +151,8 @@ class StudyPlanService:
         max_daily_minutes: int = MAX_DAILY_STUDY_MINUTES,
         assessment_repo=None,
         skill_service=None,
+        route_id: int | None = None,
+        learning_route_repo=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -161,7 +163,40 @@ class StudyPlanService:
         # 可选：SkillService，用于“JD/技能优先级 + 前置门禁”（Phase C）；
         # 不注入时行为与旧版完全一致（无 jd_boost / 无 gate）
         self.skill_service = skill_service
+        # Phase B：本 Service 服务的学习路线。route_id=None 时解析系统默认
+        # learning route（搜广推 + LLM）；路由数据缺失时回退旧行为。
+        self.route_id = route_id
+        self.learning_route_repo = learning_route_repo
+        self._resolved_route_id_cache: int | None = None
+        self._route_resolved = False
         self._default_plan_created = False
+
+    def _resolved_route_id(self) -> int | None:
+        """解析本 Service 服务的 route_id（显式优先，其次系统默认 learning route）。"""
+        if self.route_id is not None:
+            return self.route_id
+        if self._route_resolved:
+            return self._resolved_route_id_cache
+        self._route_resolved = True
+        repo = self.learning_route_repo
+        if repo is None:
+            try:
+                from ..database.learning_route_repository import (
+                    LearningRouteRepository,
+                )
+
+                repo = LearningRouteRepository(self.repo.conn)
+            except Exception:  # noqa: BLE001 - 无路线表时不阻塞旧行为
+                repo = None
+        if repo is not None:
+            try:
+                default = repo.get_default_learning_route()
+                self._resolved_route_id_cache = (
+                    default.id if default is not None else None
+                )
+            except Exception:  # noqa: BLE001
+                self._resolved_route_id_cache = None
+        return self._resolved_route_id_cache
 
     # ================= 默认研一计划 =================
 
@@ -172,13 +207,18 @@ class StudyPlanService:
         之后每次运行：对已有计划就地同步（更新/补齐阶段与主题，并移除
         没有任务引用的过期阶段），绝不触碰历史任务。
         """
-        existing = self.plan_repo.get_active_plan()
+        existing = self.plan_repo.get_active_plan(
+            route_id=self._resolved_route_id()
+        )
         if existing is None:
             self._default_plan_created = True
             return self._create_default_plan()
         self._default_plan_created = False
         self._reconcile_plan(existing)
-        return self.plan_repo.get_active_plan() or existing
+        return (
+            self.plan_repo.get_active_plan(route_id=self._resolved_route_id())
+            or existing
+        )
 
     def _create_default_plan(self) -> StudyPlan:
         plan = self.plan_repo.create_plan(
@@ -190,6 +230,7 @@ class StudyPlanService:
             ),
             start_date="2026-09-01",
             end_date="2027-08-31",
+            route_id=self._resolved_route_id(),
         )
         self._seed_phases_and_topics(plan.id)
         return plan
@@ -300,8 +341,12 @@ class StudyPlanService:
     # ================= 当前阶段 =================
 
     def get_active_plan_full(self) -> StudyPlan | None:
-        """获取 active 计划并加载全部阶段及主题。"""
-        plan = self.plan_repo.get_active_plan()
+        """获取本 Service 所服务路线的 active 计划（含阶段与主题）。
+
+        route 隔离：只加载本路线（或兼容旧数据的未绑定计划）的 active plan，
+        绝不会把其它路线的 phases/topics 混进来。
+        """
+        plan = self.plan_repo.get_active_plan(route_id=self._resolved_route_id())
         if plan is None:
             return None
         return self.plan_repo.get_plan_with_phases(plan.id)
@@ -479,6 +524,8 @@ class StudyPlanService:
             priority=topic.priority,
             source="generated",
             topic_id=topic.id,
+            route_id=self.plan_repo.get_route_id_for_topic(topic.id)
+            or self._resolved_route_id(),
         )
         # 新建正式任务即建立 topic -> knowledge_point -> task 关联（幂等）
         return self.link_task_knowledge_point(task, topic)
@@ -629,6 +676,18 @@ class StudyPlanService:
         """
         if task is None:
             return task
+        # Phase B：正式任务若缺 route，从 topic 推导回填（幂等）
+        if task.route_id is None and task.topic_id is not None:
+            route_id = self.plan_repo.get_route_id_for_topic(task.topic_id)
+            if route_id is not None:
+                from ..utils.date_utils import now_iso
+
+                self.repo.conn.execute(
+                    "UPDATE tasks SET route_id = ?, updated_at = ? WHERE id = ?",
+                    (route_id, now_iso(), task.id),
+                )
+                self.repo.conn.commit()
+                task = self.repo.get(task.id)
         if task.knowledge_point_id is not None:
             return task
         # 正式新知识任务与额外任务都可关联知识点（manual/review 不在此列）
@@ -645,15 +704,18 @@ class StudyPlanService:
 
         description = (getattr(topic, "description", "") or "") or \
             build_topic_task_content(topic.name, "")
+        topic_route_id = self.plan_repo.get_route_id_for_topic(topic.id)
         kp = self.assessment_repo.get_or_create_knowledge_point_for_topic(
-            topic.id, topic.name, description
+            topic.id, topic.name, description, route_id=topic_route_id
         )
         if kp is None:
             return task
+        # 同步 route（task 与 kp 一致）
+        new_route_id = task.route_id or topic_route_id
         self.repo.conn.execute(
-            "UPDATE tasks SET knowledge_point_id = ?, updated_at = ? "
+            "UPDATE tasks SET knowledge_point_id = ?, route_id = ?, updated_at = ? "
             "WHERE id = ?",
-            (kp["id"], now_iso(), task.id),
+            (kp["id"], new_route_id, now_iso(), task.id),
         )
         self.repo.conn.commit()
         return self.repo.get(task.id)

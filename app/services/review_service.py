@@ -189,6 +189,7 @@ class ReviewService:
             task_type="review",
             knowledge_point_id=kp["id"],
             scheduled_date=date_str,
+            route_id=kp.get("route_id"),
         )
         schedule = self.assessment_repo.create_review_schedule(
             knowledge_point_id=kp["id"],
@@ -412,6 +413,7 @@ class ReviewService:
             task_type="review",
             knowledge_point_id=kp["id"],
             scheduled_date=date_str,
+            route_id=kp.get("route_id"),
         )
         return {
             "task_id": task.id,

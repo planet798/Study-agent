@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Callable
 
@@ -158,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -544,6 +545,251 @@ def _migrate_v11(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[11] = _migrate_v11
+
+
+# ============================================================
+# v12：多学习路线数据基础（Phase B）
+# ============================================================
+#
+# 目标：在不改变当前单路线行为的前提下，建立多路线数据层。
+#
+# 层级选择：仓库已存在真正的 study_plans 层，因此 route 挂在 plan 上层：
+#   learning_routes -> study_plans -> study_phases -> study_topics
+# 只给 study_plans 加 route_id，不给 phase/topic 重复存。
+#
+# 同时：
+# - tasks.route_id            ：Task 自己知道所属路线（manual task 可能无 topic）
+# - knowledge_points.route_id  ：manual knowledge 可能无 topic
+# - planner_decisions.route_id ：未来多路线 Planner 必须区分同一天的不同 route
+# - route_skills               ：LearningRoute N↔N Skill（skill 不复制）
+#
+# 迁移只自动创建：求职准备(group) → 搜广推 + LLM(learning)。
+# 不自动创建 RL / C++ / 数据结构，也不替用户猜优先级。
+
+_V12_SQL = """
+CREATE TABLE IF NOT EXISTS learning_routes (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id        INTEGER REFERENCES learning_routes(id) ON DELETE SET NULL,
+    name             TEXT    NOT NULL,
+    description      TEXT    NOT NULL DEFAULT '',
+    goal             TEXT    NOT NULL DEFAULT '',
+    route_type       TEXT    NOT NULL DEFAULT 'learning',
+    status           TEXT    NOT NULL DEFAULT 'active',
+    priority         INTEGER NOT NULL DEFAULT 3,
+    planning_enabled INTEGER NOT NULL DEFAULT 1,
+    source           TEXT    NOT NULL DEFAULT 'manual',
+    created_at       TEXT    NOT NULL DEFAULT '',
+    updated_at       TEXT    NOT NULL DEFAULT '',
+    archived_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_learning_routes_parent
+    ON learning_routes(parent_id);
+CREATE INDEX IF NOT EXISTS idx_learning_routes_status
+    ON learning_routes(status);
+
+CREATE TABLE IF NOT EXISTS route_skills (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    route_id   INTEGER NOT NULL REFERENCES learning_routes(id) ON DELETE CASCADE,
+    skill_id   INTEGER NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT '',
+    UNIQUE(route_id, skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_route_skills_route ON route_skills(route_id);
+CREATE INDEX IF NOT EXISTS idx_route_skills_skill ON route_skills(skill_id);
+"""
+
+# 系统默认路线（迁移只自动创建这两条）
+DEFAULT_ROUTE_PARENT_NAME = "求职准备"
+DEFAULT_ROUTE_LEARNING_NAME = "搜广推 + LLM"
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """判断表是否存在（迁移在部分建表的合成旧库上也要安全）。"""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _seed_default_routes(conn: sqlite3.Connection) -> int:
+    """幂等创建 求职准备 → 搜广推 + LLM，返回默认 learning route id。"""
+    row = conn.execute(
+        "SELECT id FROM learning_routes WHERE name = ? AND parent_id IS NULL",
+        (DEFAULT_ROUTE_PARENT_NAME,),
+    ).fetchone()
+    if row is None:
+        cur = conn.execute(
+            "INSERT INTO learning_routes "
+            "(parent_id, name, description, goal, route_type, status, priority,"
+            " planning_enabled, source, created_at, updated_at, archived_at) "
+            "VALUES (NULL, ?, '', '', 'group', 'active', 3, 0, 'system',"
+            "        datetime('now','localtime'), datetime('now','localtime'), NULL)",
+            (DEFAULT_ROUTE_PARENT_NAME,),
+        )
+        parent_id = cur.lastrowid
+    else:
+        parent_id = row[0]
+
+    row = conn.execute(
+        "SELECT id FROM learning_routes WHERE name = ? AND parent_id = ?",
+        (DEFAULT_ROUTE_LEARNING_NAME, parent_id),
+    ).fetchone()
+    if row is None:
+        cur = conn.execute(
+            "INSERT INTO learning_routes "
+            "(parent_id, name, description, goal, route_type, status, priority,"
+            " planning_enabled, source, created_at, updated_at, archived_at) "
+            "VALUES (?, ?, '', '', 'learning', 'active', 3, 1, 'system',"
+            "        datetime('now','localtime'), datetime('now','localtime'), NULL)",
+            (parent_id, DEFAULT_ROUTE_LEARNING_NAME),
+        )
+        return cur.lastrowid
+    return row[0]
+
+
+def _backfill_v12_routes(conn: sqlite3.Connection, default_route_id: int) -> None:
+    """回填历史数据的 route 归属（幂等，只填 NULL）。"""
+    # 1) 现有 active study_plan 绑定默认 learning route
+    conn.execute(
+        "UPDATE study_plans SET route_id = ? "
+        "WHERE route_id IS NULL AND status = 'active'",
+        (default_route_id,),
+    )
+
+    has_kp = _table_exists(conn, "knowledge_points")
+
+    # 2) topic-linked knowledge_points → 通过 topic/phase/plan 推导 route
+    if has_kp:
+        conn.execute(
+            "UPDATE knowledge_points SET route_id = ("
+            "  SELECT p.route_id FROM study_topics t "
+            "  JOIN study_phases ph ON ph.id = t.phase_id "
+            "  JOIN study_plans  p  ON p.id  = ph.plan_id "
+            "  WHERE t.id = knowledge_points.topic_id AND p.route_id IS NOT NULL"
+            ") WHERE route_id IS NULL AND topic_id IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM study_topics t "
+            "  JOIN study_phases ph ON ph.id = t.phase_id "
+            "  JOIN study_plans  p  ON p.id  = ph.plan_id "
+            "  WHERE t.id = knowledge_points.topic_id AND p.route_id IS NOT NULL"
+            ")"
+        )
+
+    # 3) tasks：先按 topic_id 推导
+    conn.execute(
+        "UPDATE tasks SET route_id = ("
+        "  SELECT p.route_id FROM study_topics t "
+        "  JOIN study_phases ph ON ph.id = t.phase_id "
+        "  JOIN study_plans  p  ON p.id  = ph.plan_id "
+        "  WHERE t.id = tasks.topic_id AND p.route_id IS NOT NULL"
+        ") WHERE route_id IS NULL AND topic_id IS NOT NULL AND EXISTS ("
+        "  SELECT 1 FROM study_topics t "
+        "  JOIN study_phases ph ON ph.id = t.phase_id "
+        "  JOIN study_plans  p  ON p.id  = ph.plan_id "
+        "  WHERE t.id = tasks.topic_id AND p.route_id IS NOT NULL"
+        ")"
+    )
+    # 4) tasks：按 knowledge_point.route_id 推导（review / manual knowledge）
+    if has_kp:
+        conn.execute(
+            "UPDATE tasks SET route_id = ("
+            "  SELECT kp.route_id FROM knowledge_points kp "
+            "  WHERE kp.id = tasks.knowledge_point_id AND kp.route_id IS NOT NULL"
+            ") WHERE route_id IS NULL AND knowledge_point_id IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM knowledge_points kp "
+            "  WHERE kp.id = tasks.knowledge_point_id AND kp.route_id IS NOT NULL"
+            ")"
+        )
+        # 5) tasks：kp 无 route 但 kp.topic_id 可推导
+        conn.execute(
+            "UPDATE tasks SET route_id = ("
+            "  SELECT p.route_id FROM knowledge_points kp "
+            "  JOIN study_topics t ON t.id = kp.topic_id "
+            "  JOIN study_phases ph ON ph.id = t.phase_id "
+            "  JOIN study_plans  p  ON p.id  = ph.plan_id "
+            "  WHERE kp.id = tasks.knowledge_point_id AND p.route_id IS NOT NULL"
+            ") WHERE route_id IS NULL AND knowledge_point_id IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM knowledge_points kp "
+            "  JOIN study_topics t ON t.id = kp.topic_id "
+            "  JOIN study_phases ph ON ph.id = t.phase_id "
+            "  JOIN study_plans  p  ON p.id  = ph.plan_id "
+            "  WHERE kp.id = tasks.knowledge_point_id AND p.route_id IS NOT NULL"
+            ")"
+        )
+
+    # 6) 历史 planner_decisions 全部属于唯一正式路线
+    conn.execute(
+        "UPDATE planner_decisions SET route_id = ? WHERE route_id IS NULL",
+        (default_route_id,),
+    )
+
+    # 7) route_skills：由 skills.linked_topics ∩ 该 route 的 topics 推导
+    if _table_exists(conn, "skills"):
+        route_topic_ids = {
+            int(r[0])
+            for r in conn.execute(
+                "SELECT t.id FROM study_topics t "
+                "JOIN study_phases ph ON ph.id = t.phase_id "
+                "JOIN study_plans  p  ON p.id  = ph.plan_id "
+                "WHERE p.route_id = ?",
+                (default_route_id,),
+            ).fetchall()
+        }
+        if route_topic_ids:
+            for skill in conn.execute(
+                "SELECT id, linked_topics FROM skills"
+            ).fetchall():
+                try:
+                    linked = json.loads(skill[1] or "[]")
+                except (TypeError, ValueError):
+                    linked = []
+                if not any(int(t) in route_topic_ids for t in linked):
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO route_skills "
+                    "(route_id, skill_id, created_at) "
+                    "VALUES (?, ?, datetime('now','localtime'))",
+                    (default_route_id, int(skill[0])),
+                )
+
+
+def _migrate_v12(conn: sqlite3.Connection) -> None:
+    """v12：多学习路线数据层 + 现有单路线数据迁移（幂等、无损）。"""
+    conn.executescript(_V12_SQL)
+    if _table_exists(conn, "study_plans"):
+        add_column_if_not_exists(conn, "study_plans", "route_id", "INTEGER")
+    add_column_if_not_exists(conn, "tasks", "route_id", "INTEGER")
+    if _table_exists(conn, "knowledge_points"):
+        add_column_if_not_exists(conn, "knowledge_points", "route_id", "INTEGER")
+    if _table_exists(conn, "planner_decisions"):
+        add_column_if_not_exists(conn, "planner_decisions", "route_id", "INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_route ON tasks(route_id)"
+    )
+    if _table_exists(conn, "study_plans"):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_study_plans_route "
+            "ON study_plans(route_id)"
+        )
+    if _table_exists(conn, "knowledge_points"):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_points_route "
+            "ON knowledge_points(route_id)"
+        )
+    if _table_exists(conn, "planner_decisions"):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_planner_decisions_route "
+            "ON planner_decisions(route_id)"
+        )
+    conn.commit()
+
+    default_route_id = _seed_default_routes(conn)
+    conn.commit()
+    _backfill_v12_routes(conn, default_route_id)
+    conn.commit()
+
+
+_MIGRATIONS[12] = _migrate_v12
 
 
 def get_schema_version(conn) -> int:

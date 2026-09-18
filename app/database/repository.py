@@ -39,6 +39,8 @@ _UPDATABLE_FIELDS = (
     "deliverable",
     "acceptance_criteria",
     "expected_artifact",
+    # Phase B：路线归属
+    "route_id",
 )
 
 
@@ -73,6 +75,8 @@ class Task:
     deliverable: str = ""
     acceptance_criteria: str = ""
     expected_artifact: str = ""
+    # v12 起（Phase B）：所属学习路线（可为 NULL = 未分类）
+    route_id: int | None = None
 
     @property
     def is_done(self) -> bool:
@@ -214,6 +218,7 @@ class TaskRepository:
         deliverable: str = "",
         acceptance_criteria: str = "",
         expected_artifact: str = "",
+        route_id: int | None = None,
     ) -> Task:
         """新增一条任务，返回带 id 的 Task。
 
@@ -237,13 +242,13 @@ class TaskRepository:
             " status, scheduled_date, postpone_count, created_at, updated_at, "
             " source, topic_id, task_type, knowledge_point_id, difficulty, "
             " project_name, project_repo, deliverable, acceptance_criteria, "
-            " expected_artifact) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " expected_artifact, route_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (title.strip(), description, category, estimated_minutes,
              priority, STATUS_ACTIVE, date_str, ts, ts, source, topic_id,
              task_type, knowledge_point_id, difficulty,
              project_name or "", project_repo or "", deliverable or "",
-             acceptance_criteria or "", expected_artifact or ""),
+             acceptance_criteria or "", expected_artifact or "", route_id),
         )
         self.conn.commit()
         return self.get(cur.lastrowid)

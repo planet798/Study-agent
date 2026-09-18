@@ -501,10 +501,17 @@ def main() -> int:
     skill_service = SkillService(
         skill_repo, plan_repo=plan_repo, assessment_repo=assessment_repo
     )
+    # Phase B：学习路线数据层（当前仅提供数据能力，不接 Planner / UI）
+    from app.database.learning_route_repository import LearningRouteRepository
+    from app.services.learning_route_service import LearningRouteService
+
+    route_repo = LearningRouteRepository(conn)
+    route_service = LearningRouteService(route_repo, skill_repo=skill_repo)
     study_plan_service = StudyPlanService(
         repo, plan_repo,
         assessment_repo=assessment_repo,
         skill_service=skill_service,
+        learning_route_repo=route_repo,
     )
     study_plan_service.ensure_default_plan()
 

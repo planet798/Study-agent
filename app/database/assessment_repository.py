@@ -29,6 +29,7 @@ _ATTEMPT_UPDATABLE = (
 # 允许通过 update_knowledge_point 修改的字段白名单
 _KNOWLEDGE_POINT_UPDATABLE = (
     "topic_id",
+    "route_id",
     "name",
     "description",
     "first_learned_at",
@@ -67,6 +68,7 @@ class AssessmentRepository:
         name: str,
         description: str = "",
         topic_id: int | None = None,
+        route_id: int | None = None,
     ) -> dict:
         name = (name or "").strip()
         if not name:
@@ -74,11 +76,11 @@ class AssessmentRepository:
         ts = now_iso()
         cur = self.conn.execute(
             "INSERT INTO knowledge_points "
-            "(topic_id, name, description, first_learned_at, last_assessed_at,"
-            " mastery_estimate, review_count, next_review_date, interval_days,"
-            " created_at, updated_at) "
-            "VALUES (?, ?, ?, NULL, NULL, 0.0, 0, NULL, 0, ?, ?)",
-            (topic_id, name, description or "", ts, ts),
+            "(topic_id, route_id, name, description, first_learned_at,"
+            " last_assessed_at, mastery_estimate, review_count, next_review_date,"
+            " interval_days, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, NULL, NULL, 0.0, 0, NULL, 0, ?, ?)",
+            (topic_id, route_id, name, description or "", ts, ts),
         )
         self.conn.commit()
         return self.get_knowledge_point(cur.lastrowid)
@@ -107,7 +109,11 @@ class AssessmentRepository:
         return _row(row)
 
     def get_or_create_knowledge_point_for_topic(
-        self, topic_id: int, name: str, description: str = ""
+        self,
+        topic_id: int,
+        name: str,
+        description: str = "",
+        route_id: int | None = None,
     ) -> dict:
         """幂等地取得/创建某个 study_topic 对应的唯一知识点。
 
@@ -124,6 +130,11 @@ class AssessmentRepository:
             raise ValueError("topic_id 不能为空")
         existing = self.get_knowledge_point_by_topic(topic_id)
         if existing is not None:
+            # 只补 route 关系（不覆盖任何验收证据）
+            if route_id is not None and existing.get("route_id") is None:
+                return self.update_knowledge_point(
+                    existing["id"], route_id=route_id
+                )
             return existing
         clean = (name or "").strip()
         if not clean:
@@ -132,11 +143,13 @@ class AssessmentRepository:
         if by_name is not None:
             if by_name.get("topic_id") is None:
                 return self.update_knowledge_point(
-                    by_name["id"], topic_id=topic_id
+                    by_name["id"], topic_id=topic_id, route_id=route_id
                 )
             return by_name
         try:
-            return self.create_knowledge_point(clean, description, topic_id)
+            return self.create_knowledge_point(
+                clean, description, topic_id, route_id=route_id
+            )
         except sqlite3.IntegrityError:
             again = self.get_knowledge_point_by_topic(topic_id) or \
                 self.get_knowledge_point_by_name(clean)
@@ -145,7 +158,7 @@ class AssessmentRepository:
             raise
 
     def get_or_create_manual_knowledge_point(
-        self, name: str, description: str = ""
+        self, name: str, description: str = "", route_id: int | None = None
     ) -> dict:
         """幂等地取得/创建用户手写的临时知识点（topic_id 保持 NULL）。
 
@@ -161,9 +174,15 @@ class AssessmentRepository:
             raise ValueError("知识点名不能为空")
         existing = self.get_knowledge_point_by_name(clean)
         if existing is not None:
+            if route_id is not None and existing.get("route_id") is None:
+                return self.update_knowledge_point(
+                    existing["id"], route_id=route_id
+                )
             return existing
         try:
-            return self.create_knowledge_point(clean, description, None)
+            return self.create_knowledge_point(
+                clean, description, None, route_id=route_id
+            )
         except sqlite3.IntegrityError:
             again = self.get_knowledge_point_by_name(clean)
             if again is not None:

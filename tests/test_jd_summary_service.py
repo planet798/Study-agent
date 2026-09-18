@@ -54,7 +54,7 @@ class TestMigration:
                   parsed={"must": ["Python"], "plus": []},
                   content_hash="h1")
         before = len(jd.list_all())
-        assert get_schema_version(conn) == SCHEMA_VERSION == 11
+        assert get_schema_version(conn) == SCHEMA_VERSION
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         assert "jd_daily_summaries" in tables

@@ -88,8 +88,10 @@ class TestDefaults:
             "SELECT * FROM tasks WHERE title='raw'").fetchone()))
         assert _blank(row)
 
-    def test_schema_version_is_11(self, conn):
-        assert get_schema_version(conn) == 11
+    def test_schema_version_is_current(self, conn):
+        from app.database.schema import SCHEMA_VERSION
+
+        assert get_schema_version(conn) == SCHEMA_VERSION
 
 
 class TestLegacyTypesUnchanged:

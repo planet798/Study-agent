@@ -608,6 +608,11 @@ class DailyPlannerService:
             plan_json = json.dumps(plan, ensure_ascii=False, default=_plan_to_dict)
         else:
             plan_json = "{}"
+        route_id = None
+        try:
+            route_id = self.study_plan_service._resolved_route_id()
+        except Exception:  # noqa: BLE001 - 解析失败保持 NULL，不阻塞规划
+            route_id = None
         self.decision_repo.create(
             date=date,
             current_phase_id=phase_id,
@@ -615,6 +620,7 @@ class DailyPlannerService:
             ai_response=plan_json,
             accepted_tasks=json.dumps(accepted, ensure_ascii=False),
             source=source,
+            route_id=route_id,
         )
 
 

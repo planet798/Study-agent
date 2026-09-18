@@ -60,12 +60,14 @@ class ExtraTaskService:
         candidates: list[dict] = []
         seen: set[tuple] = set()
 
-        def _add(kind: str, ref_id: int, title: str) -> None:
+        def _add(kind: str, ref_id: int, title: str,
+                 route_id: int | None = None) -> None:
             key = (kind, ref_id)
             if key not in seen:
                 seen.add(key)
                 candidates.append(
-                    {"kind": kind, "ref_id": ref_id, "title": title}
+                    {"kind": kind, "ref_id": ref_id, "title": title,
+                     "route_id": route_id}
                 )
 
         # 1) 薄弱知识点（已有验收证据且掌握度较低）
@@ -77,21 +79,34 @@ class ExtraTaskService:
             ]
             weak.sort(key=lambda kp: (kp.get("mastery_estimate") or 0.0))
             for kp in weak[:3]:
-                _add("knowledge_point", kp["id"], kp["name"])
+                _add("knowledge_point", kp["id"], kp["name"],
+                     route_id=kp.get("route_id"))
 
         # 2) 当前阶段核心技能主题（按阶段主题顺序）
         if self.study_plan_service is not None:
             phase = self.study_plan_service.get_current_phase(today)
             if phase is not None:
                 for topic in phase.topics:
-                    _add("topic", topic.id, topic.name)
+                    route_id = None
+                    try:
+                        route_id = self.study_plan_service.plan_repo \
+                            .get_route_id_for_topic(topic.id)
+                    except Exception:  # noqa: BLE001 - 推导失败保持 NULL
+                        route_id = None
+                    if route_id is None:
+                        try:
+                            route_id = self.study_plan_service._resolved_route_id()
+                        except Exception:  # noqa: BLE001
+                            route_id = None
+                    _add("topic", topic.id, topic.name, route_id=route_id)
 
         # 3) 最近在学的知识点（无薄弱时兜底）
         if self.assessment_repo is not None:
             all_kp = self.assessment_repo.list_knowledge_points()
             if all_kp:
                 latest = all_kp[-1]
-                _add("knowledge_point", latest["id"], latest["name"])
+                _add("knowledge_point", latest["id"], latest["name"],
+                     route_id=latest.get("route_id"))
 
         return candidates
 
@@ -198,6 +213,7 @@ class ExtraTaskService:
             ),
             scheduled_date=date_str,
             difficulty=difficulty,
+            route_id=cand.get("route_id"),
         )
         # 复用 StudyPlanService 的统一 topic -> knowledge_point 关联实现，
         # 让“只有 topic_id”的额外任务创建后就直接获得 kp（幂等）。

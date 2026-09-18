@@ -48,6 +48,8 @@ class StudyPlan:
     start_date: str = ""
     end_date: str = ""
     status: str = "active"
+    # v12（Phase B）：所属 learning_route；NULL = 未绑定（旧库兼容 / 未分类）
+    route_id: int | None = None
     phases: list[StudyPhase] = field(default_factory=list)
 
 
@@ -66,16 +68,19 @@ class StudyPlanRepository:
         end_date: str,
         description: str = "",
         status: str = "active",
+        route_id: int | None = None,
     ) -> StudyPlan:
         cur = self.conn.execute(
-            "INSERT INTO study_plans (name, description, start_date, end_date, status) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (name, description, start_date, end_date, status),
+            "INSERT INTO study_plans "
+            "(name, description, start_date, end_date, status, route_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (name, description, start_date, end_date, status, route_id),
         )
         self.conn.commit()
         return StudyPlan(
             id=cur.lastrowid, name=name, description=description,
             start_date=start_date, end_date=end_date, status=status,
+            route_id=route_id,
         )
 
     def get_plan(self, plan_id: int) -> StudyPlan | None:
@@ -95,10 +100,78 @@ class StudyPlanRepository:
             ).fetchall()
         return [self._plan_from_row(r) for r in rows]
 
-    def get_active_plan(self) -> StudyPlan | None:
-        """返回当前唯一的 active 计划（如有多个取第一个）。"""
-        plans = self.list_plans(status="active")
-        return plans[0] if plans else None
+    def get_active_plan(self, route_id: int | None = None) -> StudyPlan | None:
+        """返回 active 计划。
+
+        :param route_id: 传入时只返回该路线下的 active 计划；若该路线暂无计划，
+            回退到“未绑定路线（route_id IS NULL）”的 active 计划，以兼容 Phase B
+            之前创建的旧数据 / 测试库。传入 None 时保持旧行为（第一个 active）。
+        """
+        if route_id is None:
+            plans = self.list_plans(status="active")
+            return plans[0] if plans else None
+        row = self.conn.execute(
+            "SELECT * FROM study_plans WHERE status = 'active' AND route_id = ? "
+            "ORDER BY id ASC LIMIT 1",
+            (route_id,),
+        ).fetchone()
+        if row is not None:
+            return self._plan_from_row(row)
+        # 兼容旧库：已有 active 计划但尚未绑定路线
+        row = self.conn.execute(
+            "SELECT * FROM study_plans WHERE status = 'active' "
+            "AND route_id IS NULL ORDER BY id ASC LIMIT 1"
+        ).fetchone()
+        return self._plan_from_row(row) if row else None
+
+    def get_plan_by_route(self, route_id: int) -> StudyPlan | None:
+        """严格按 route 返回 active 计划（不回退 NULL），用于路线隔离查询。"""
+        row = self.conn.execute(
+            "SELECT * FROM study_plans WHERE route_id = ? AND status = 'active' "
+            "ORDER BY id ASC LIMIT 1",
+            (route_id,),
+        ).fetchone()
+        return self._plan_from_row(row) if row else None
+
+    def get_route_id_for_plan(self, plan_id: int) -> int | None:
+        row = self.conn.execute(
+            "SELECT route_id FROM study_plans WHERE id = ?", (plan_id,)
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def get_route_id_for_topic(self, topic_id: int) -> int | None:
+        """通过 topic -> phase -> plan 推导所属路线（无则 None）。"""
+        row = self.conn.execute(
+            "SELECT p.route_id FROM study_topics t "
+            "JOIN study_phases ph ON ph.id = t.phase_id "
+            "JOIN study_plans  p  ON p.id  = ph.plan_id "
+            "WHERE t.id = ?",
+            (topic_id,),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def list_phases_by_route(self, route_id: int) -> list[StudyPhase]:
+        """某路线下所有阶段（严格 route 匹配，不会混入其它路线）。"""
+        rows = self.conn.execute(
+            "SELECT ph.* FROM study_phases ph "
+            "JOIN study_plans p ON p.id = ph.plan_id "
+            "WHERE p.route_id = ? "
+            "ORDER BY ph.start_date ASC, ph.priority DESC, ph.id ASC",
+            (route_id,),
+        ).fetchall()
+        return [self._phase_from_row(r) for r in rows]
+
+    def list_topics_by_route(self, route_id: int) -> list[StudyTopic]:
+        """某路线下所有主题（严格 route 匹配）。"""
+        rows = self.conn.execute(
+            "SELECT t.* FROM study_topics t "
+            "JOIN study_phases ph ON ph.id = t.phase_id "
+            "JOIN study_plans  p  ON p.id  = ph.plan_id "
+            "WHERE p.route_id = ? "
+            "ORDER BY ph.id ASC, t.priority DESC, t.order_index ASC, t.id ASC",
+            (route_id,),
+        ).fetchall()
+        return [self._topic_from_row(r) for r in rows]
 
     # ---------- 阶段 ----------
 
@@ -276,6 +349,7 @@ class PlannerDecisionRepository:
         accepted_tasks: str,
         current_phase_id: int | None = None,
         source: str = "ai",
+        route_id: int | None = None,
     ) -> int:
         import datetime
 
@@ -283,9 +357,9 @@ class PlannerDecisionRepository:
         cur = self.conn.execute(
             "INSERT INTO planner_decisions "
             "(date, current_phase_id, input_context, ai_response, accepted_tasks,"
-            " source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " source, created_at, route_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (date, current_phase_id, input_context, ai_response, accepted_tasks,
-             source, created_at),
+             source, created_at, route_id),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -303,6 +377,24 @@ class PlannerDecisionRepository:
             "SELECT * FROM planner_decisions WHERE date = ? ORDER BY id ASC",
             (date,),
         ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_for_date_and_route(
+        self, date: str, route_id: int | None
+    ) -> list[dict]:
+        """按日期 + 路线取决策（route_id=None 时取未分类）。"""
+        if route_id is None:
+            rows = self.conn.execute(
+                "SELECT * FROM planner_decisions WHERE date = ? "
+                "AND route_id IS NULL ORDER BY id ASC",
+                (date,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM planner_decisions WHERE date = ? AND route_id = ? "
+                "ORDER BY id ASC",
+                (date, route_id),
+            ).fetchall()
         return [dict(r) for r in rows]
 
 

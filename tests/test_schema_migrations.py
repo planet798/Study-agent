@@ -460,8 +460,8 @@ def test_v10_to_v11_adds_project_columns(tmp_path):
     _make_v10_db(path)
     conn = get_connection(path)
     try:
-        assert SCHEMA_VERSION == 11
-        assert get_schema_version(conn) == 11
+        assert SCHEMA_VERSION >= 11
+        assert get_schema_version(conn) == SCHEMA_VERSION
         cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
         for c in PROJECT_COLUMNS:
             assert c in cols, c
@@ -496,8 +496,8 @@ def test_v11_migration_idempotent(tmp_path):
     _make_v10_db(path)
     conn = get_connection(path)
     try:
-        assert migrate(conn) == 11
-        assert migrate(conn) == 11
+        assert migrate(conn) == SCHEMA_VERSION
+        assert migrate(conn) == SCHEMA_VERSION
         cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)")]
         # 列不重复
         for c in PROJECT_COLUMNS:
