@@ -427,7 +427,10 @@ class StudyPlanService:
 
     # ================= 每日任务生成 =================
 
-    def generate_daily_tasks(self, date_str: str, max_tasks: int | None = None) -> dict:
+    def generate_daily_tasks(
+        self, date_str: str, max_tasks: int | None = None,
+        max_minutes: int | None = None,
+    ) -> dict:
         """为 date_str 生成每日学习任务（不使用 LLM，规则简单可预测）。
 
         规则（Phase 8 起）：
@@ -441,6 +444,8 @@ class StudyPlanService:
 
         :param max_tasks: Phase D：本次最多创建多少个任务（Scheduler 每个 slot
             调用一次，传 1）；None 表示不限制（保持旧行为）。
+        :param max_minutes: Phase D.1：Scheduler 传入的本 route 可用全局剩余分钟；
+            超过该分钟数的 topic 不生成（记入 skipped_minute_budget）。
         :return: {"generated": [Task], "phase": name|None, "selected": [topic_id], ...}
         """
         result = {
@@ -452,6 +457,7 @@ class StudyPlanService:
             "skipped_budget": [],
             "skipped_gate": [],
             "skipped_cancelled": [],
+            "skipped_minute_budget": [],
         }
         # Phase C：暂停/归档路线的自动规划入口不生成新 task
         if not self.is_planning_enabled():
@@ -492,6 +498,15 @@ class StudyPlanService:
             for t in today_tasks
             if t.status == STATUS_ACTIVE
         )
+        if max_minutes is not None:
+            # Phase D.1：Scheduler 路径下，只有 Agent generated/new 消耗分钟预算；
+            # manual / review / extra 不计入（与全局分钟预算一致）。
+            committed = sum(
+                t.estimated_minutes
+                for t in today_tasks
+                if t.source == "generated" and t.task_type == "new"
+                and t.status != STATUS_CANCELLED
+            )
         remaining = self.max_daily_minutes - committed
 
         # 已完成的主题列表（任意日期完成过即视为已掌握）
@@ -541,6 +556,11 @@ class StudyPlanService:
             if topic.id in cancelled_topic_ids:
                 # 当天被用户移除过的 topic：今天 replan / 回退生成都不要再安排
                 result["skipped_cancelled"].append(topic.id)
+                continue
+            if max_minutes is not None and \
+                    topic.estimated_minutes > max_minutes:
+                # Phase D.1：全局剩余分钟不够 → 不生成，绝不突破 180 分钟
+                result["skipped_minute_budget"].append(topic.id)
                 continue
             # 至少安排一个核心任务：当天完全为空时，第一个可用的主题直接采纳
             if not today_tasks and not result["selected"]:

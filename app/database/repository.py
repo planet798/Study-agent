@@ -219,6 +219,24 @@ class TaskRepository:
             args.append(int(route_id))
         return int(self.conn.execute(sql, tuple(args)).fetchone()["n"] or 0)
 
+    def sum_generated_new_minutes_by_date(
+        self, date_str: str, route_id: int | None = None
+    ) -> int:
+        """某天 Agent new task 的预计分钟总和（cancelled 不计）。
+
+        done / active / not_done 均视为已消耗全局分钟预算。
+        """
+        sql = (
+            "SELECT COALESCE(SUM(estimated_minutes), 0) AS m FROM tasks "
+            "WHERE scheduled_date = ? AND source = 'generated' "
+            "AND task_type = 'new' AND status != ?"
+        )
+        args: list = [date_str, STATUS_CANCELLED]
+        if route_id is not None:
+            sql += " AND route_id = ?"
+            args.append(int(route_id))
+        return int(self.conn.execute(sql, tuple(args)).fetchone()["m"] or 0)
+
     def count_recent_generated_by_route(
         self, route_id: int, start_date: str, end_date: str
     ) -> int:

@@ -180,14 +180,21 @@ class GlobalDailyScheduler:
 
         eligible = [r for r in all_routes if skip_map.get(r.id) is None]
         existing_count = self.repo.count_generated_new_by_date(plan_date)
+        existing_minutes = self.repo.sum_generated_new_minutes_by_date(plan_date)
         remaining = max(0, self.budget - existing_count)
+        remaining_minutes = max(0, self.max_daily_minutes - existing_minutes)
+        if remaining_minutes <= 0:
+            # 分钟预算已满：任何候选都放不下（不能为了塞满 task 数突破分钟）
+            for route in eligible:
+                allocations[route.id].skip_reason = "minute_budget_exhausted"
 
         recent = {r.id: self._recent_count(r.id, plan_date) for r in eligible}
         allocated = {r.id: 0 for r in eligible}
         exhausted: set[int] = set()
         created_ids: list[int] = []
+        allocated_minutes = 0
 
-        while remaining > 0:
+        while remaining > 0 and remaining_minutes > 0:
             cands = [r for r in eligible if r.id not in exhausted]
             if not cands:
                 break
@@ -210,7 +217,8 @@ class GlobalDailyScheduler:
             planner = self._make_route_planner(route.id)
             try:
                 res = planner.generate_for_route(
-                    plan_date, max_tasks=1, force=True
+                    plan_date, max_tasks=1, force=True,
+                    max_minutes=remaining_minutes,
                 )
             except Exception as e:  # noqa: BLE001 - 单路线失败不拖垮整体
                 logger.warning(
@@ -222,17 +230,24 @@ class GlobalDailyScheduler:
 
             ids = list(res.get("created_ids", []))
             if ids:
+                spent = sum(
+                    (self.repo.get(i).estimated_minutes or 0) for i in ids
+                )
                 allocated[route.id] += len(ids)
                 remaining -= len(ids)
+                remaining_minutes -= spent
+                allocated_minutes += spent
                 created_ids.extend(ids)
                 allocations[route.id].created_task_ids.extend(ids)
             else:
-                # 该路线已无候选：本轮不再尝试
+                # 该路线已无候选（或候选都超出剩余分钟）：本轮不再尝试
                 exhausted.add(route.id)
                 if allocations[route.id].skip_reason is None:
+                    res_reason = res.get("skip_reason")
+                    if res.get("planning_paused"):
+                        res_reason = "planning_paused"
                     allocations[route.id].skip_reason = (
-                        "planning_paused" if res.get("planning_paused")
-                        else "no_available_topic"
+                        res_reason or "no_available_topic"
                     )
 
         for route in eligible:
@@ -249,6 +264,10 @@ class GlobalDailyScheduler:
             "budget": self.budget,
             "existing": existing_count,
             "remaining": remaining,
+            "max_minutes": self.max_daily_minutes,
+            "existing_minutes": existing_minutes,
+            "remaining_minutes": remaining_minutes,
+            "allocated_minutes": allocated_minutes,
             "created_ids": created_ids,
             "created": [self.repo.get(i) for i in created_ids],
             "allocations": list(allocations.values()),
@@ -262,7 +281,9 @@ class GlobalDailyScheduler:
         lines = [
             f"Daily scheduler {result['date']}",
             f"budget={result['budget']} existing={result['existing']} "
-            f"remaining={result['remaining']}",
+            f"remaining={result['remaining']} | minutes="
+            f"{result.get('existing_minutes')}/{result.get('max_minutes')} "
+            f"remaining_minutes={result.get('remaining_minutes')}",
         ]
         for alloc in result["allocations"]:
             lines.append(

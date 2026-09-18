@@ -520,11 +520,13 @@ class DailyPlannerService:
         plan_date: str,
         max_tasks: int | None = 1,
         force: bool = False,
+        max_minutes: int | None = None,
     ) -> dict:
         """只在本路线内选择 Topic 并生成任务（Scheduler 每个 slot 调用）。
 
         - 严格 route-scoped：valid_topic_ids 只来自本路线当前 phase；
         - max_tasks：本调用最多创建多少个任务；
+        - max_minutes：全局剩余分钟；超过的候选不生成（minute_budget_exhausted）；
         - force：True 时不做“当天已有决策”幂等（Scheduler 依赖 budget +
           topic 去重避免重复，不会重复生成同 topic）；
         - 任何 AI/校验失败只 fallback 本路线，绝不抛给 Scheduler。
@@ -552,21 +554,23 @@ class DailyPlannerService:
         context = self.build_context(add_days(plan_date, -1))
         if self.planner is None or not self.planner.is_configured():
             return self._fallback_plan_route(
-                plan_date, "ai_not_configured", max_tasks, result, context
+                plan_date, "ai_not_configured", max_tasks, result, context,
+                max_minutes,
             )
         try:
             plan = self.planner.plan_next_day(context)
         except AIServiceError:
             return self._fallback_plan_route(
-                plan_date, "ai_error", max_tasks, result, context
+                plan_date, "ai_error", max_tasks, result, context, max_minutes,
             )
 
         valid, accepted, problems = self._validate_and_create(
-            plan, plan_date, max_tasks=max_tasks
+            plan, plan_date, max_tasks=max_tasks, max_minutes=max_minutes
         )
         if not valid:
             return self._fallback_plan_route(
-                plan_date, "validation_failed", max_tasks, result, context
+                plan_date, "validation_failed", max_tasks, result, context,
+                max_minutes,
             )
         self._save_decision(
             date=plan_date,
@@ -582,6 +586,10 @@ class DailyPlannerService:
             reasoning=plan.reasoning,
             adjustment=plan.adjustment,
         )
+        if not accepted:
+            result["skip_reason"] = self._no_candidate_reason(
+                plan_date, max_minutes
+            )
         return result
 
     # ---------- fallback ----------
@@ -613,10 +621,11 @@ class DailyPlannerService:
         max_tasks: int | None,
         result: dict,
         context,
+        max_minutes: int | None = None,
     ) -> dict:
         """route-specific fallback：严格使用本路线（不触碰其它路线）。"""
         gen = self.study_plan_service.generate_daily_tasks(
-            plan_date, max_tasks=max_tasks
+            plan_date, max_tasks=max_tasks, max_minutes=max_minutes
         )
         accepted_ids = [t.id for t in gen.get("generated", [])]
         self._save_decision(
@@ -633,11 +642,40 @@ class DailyPlannerService:
             created_ids=accepted_ids,
             created=[self.repo.get(i) for i in accepted_ids],
         )
+        if not accepted_ids:
+            if gen.get("skipped_minute_budget"):
+                result["skip_reason"] = "minute_budget_exhausted"
+            else:
+                result["skip_reason"] = self._no_candidate_reason(
+                    plan_date, max_minutes
+                )
         return result
+
+    def _no_candidate_reason(
+        self, plan_date: str, max_minutes: int | None
+    ) -> str:
+        """无任务生成时区分 minute_budget_exhausted / no_available_topic。"""
+        if max_minutes is None:
+            return "no_available_topic"
+        current_phase = self.study_plan_service.get_current_phase(plan_date)
+        if current_phase is None:
+            return "no_available_topic"
+        occupied = self._occupied_topic_ids(plan_date)
+        candidates = [
+            t for t in current_phase.topics if t.id not in occupied
+        ]
+        if candidates and all(
+            t.estimated_minutes > max_minutes for t in candidates
+        ):
+            return "minute_budget_exhausted"
+        return "no_available_topic"
 
     # ---------- 本地校验与创建 ----------
 
-    def _validate_and_create(self, plan, plan_date: str, max_tasks: int | None = None):
+    def _validate_and_create(
+        self, plan, plan_date: str, max_tasks: int | None = None,
+        max_minutes: int | None = None,
+    ):
         """本地规则二次校验 AI 建议，全部合法才创建任务。
 
         :return: (valid: bool, created_ids: list[int], problems: list[str])
@@ -698,6 +736,12 @@ class DailyPlannerService:
             if rec.topic_id not in valid_topic_ids:
                 problems.append(f"topic_id {rec.topic_id} 不属于当前阶段")
                 continue
+            if max_minutes is not None:
+                rec_topic = topic_by_id.get(rec.topic_id)
+                if rec_topic is not None and \
+                        rec_topic.estimated_minutes > max_minutes:
+                    # Phase D.1：全局剩余分钟不够 → 跳过（不算规划失败）
+                    continue
             if rec.topic_id in done_topic_ids:
                 problems.append(f"topic_id {rec.topic_id} 已完成，不应重新生成")
                 continue
