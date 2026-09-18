@@ -146,10 +146,21 @@ def build_planner_user_prompt(context: "object", long_term: "object | None" = No
     ctx_data = context.to_dict()
     lines = [
         "请根据以下上下文，为下一天（通常是明天）规划学习任务。",
+    ]
+    route_name = getattr(context, "route_name", "") or ""
+    route_goal = getattr(context, "route_goal", "") or ""
+    if route_name:
+        lines.extend([
+            "",
+            f"【学习路线】{route_name}",
+            f"【路线目标】{route_goal or '（未填写）'}",
+            "只允许从本路线的 available_topics 中选择，不得添加其它路线的主题。",
+        ])
+    lines.extend([
         "",
         "上下文 JSON：",
         json.dumps(ctx_data, ensure_ascii=False, indent=2),
-    ]
+    ])
     evidence_section = build_knowledge_evidence_section(context)
     if evidence_section:
         lines.extend(["", evidence_section])

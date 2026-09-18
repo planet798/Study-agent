@@ -631,6 +631,19 @@ def main() -> int:
         study_plan_service=study_plan_service,
         daily_planner_service=daily_planner,
     )
+    # Phase D：多路线全局 Scheduler（共享 Global Agent Daily Budget）
+    from app.services.route_scheduler import GlobalDailyScheduler
+
+    scheduler = GlobalDailyScheduler(
+        repo,
+        plan_repo,
+        route_repo,
+        assessment_repo=assessment_repo,
+        skill_service=skill_service,
+        jd_service=jd_service,
+        planner=daily_planner.planner,
+    )
+    date_service.scheduler = scheduler
     review_service = TaskReviewService(ai_client)
 
     # Phase 3D~6：验收 / 复习调度 / 额外学习 / 课外探索
@@ -728,6 +741,7 @@ def main() -> int:
         manual_task_service=manual_task_service,
         route_service=route_service,
         route_plan_service=route_plan_service,
+        scheduler=scheduler,
         # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
         assessment_service_factory=build_assessment_service,
         db_path=str(resolve_db_path()),

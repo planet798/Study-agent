@@ -129,6 +129,10 @@ class PlanningContext:
 
     current_date: str
     current_phase: str = ""
+    # Phase D：多路线上下文（route-scoped）
+    route_id: int | None = None
+    route_name: str = ""
+    route_goal: str = ""
     phase_goal: str = ""
     available_topics: list[ContextTopic] = field(default_factory=list)
     recent_7_days: list[DaySummary] = field(default_factory=list)
@@ -157,6 +161,9 @@ class PlanningContext:
         """转成可 JSON 序列化的 dict（供 prompt 拼装 / planner_decisions 落库）。"""
         return {
             "current_date": self.current_date,
+            "route_id": self.route_id,
+            "route_name": self.route_name,
+            "route_goal": self.route_goal,
             "current_phase": self.current_phase,
             "phase_goal": self.phase_goal,
             "available_topics": [

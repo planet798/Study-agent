@@ -198,6 +198,57 @@ class TaskRepository:
         )
         return self._rows_to_tasks(cur.fetchall())
 
+    # ---------- Phase D：Agent Scheduler 统计 ----------
+
+    def count_generated_new_by_date(
+        self, date_str: str, route_id: int | None = None
+    ) -> int:
+        """某天 Agent 已发布的 new task 数（cancelled 不计）。
+
+        只统计 source='generated' AND task_type='new'；manual/review/extra
+        均不消耗 Agent Daily Budget。
+        """
+        sql = (
+            "SELECT COUNT(*) AS n FROM tasks WHERE scheduled_date = ? "
+            "AND source = 'generated' AND task_type = 'new' "
+            "AND status != ?"
+        )
+        args: list = [date_str, STATUS_CANCELLED]
+        if route_id is not None:
+            sql += " AND route_id = ?"
+            args.append(int(route_id))
+        return int(self.conn.execute(sql, tuple(args)).fetchone()["n"] or 0)
+
+    def count_recent_generated_by_route(
+        self, route_id: int, start_date: str, end_date: str
+    ) -> int:
+        """[start_date, end_date]（含两端）内某路线的 Agent new task 数。
+
+        cancelled 不计为“实际服务量”。
+        """
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM tasks WHERE route_id = ? "
+            "AND source = 'generated' AND task_type = 'new' "
+            "AND status != ? AND scheduled_date BETWEEN ? AND ?",
+            (int(route_id), STATUS_CANCELLED, start_date, end_date),
+        ).fetchone()
+        return int(row["n"] or 0)
+
+    def has_generated_new_on_date(
+        self, date_str: str, route_id: int | None = None
+    ) -> bool:
+        """某天某路线是否已有 Agent new task（cancelled 不算）。"""
+        sql = (
+            "SELECT 1 FROM tasks WHERE scheduled_date = ? "
+            "AND source = 'generated' AND task_type = 'new' AND status != ?"
+        )
+        args: list = [date_str, STATUS_CANCELLED]
+        if route_id is not None:
+            sql += " AND route_id = ?"
+            args.append(int(route_id))
+        sql += " LIMIT 1"
+        return self.conn.execute(sql, tuple(args)).fetchone() is not None
+
     # ---------- 写入 ----------
 
     def create(

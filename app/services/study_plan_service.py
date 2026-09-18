@@ -153,6 +153,7 @@ class StudyPlanService:
         skill_service=None,
         route_id: int | None = None,
         learning_route_repo=None,
+        scope_tasks_by_route: bool = False,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -167,6 +168,9 @@ class StudyPlanService:
         # learning route（搜广推 + LLM）；路由数据缺失时回退旧行为。
         self.route_id = route_id
         self.learning_route_repo = learning_route_repo
+        # Phase D：多路线 Scheduler 创建的 route-scoped 实例置 True，
+        # 使“当天已有任务 / 预算 / 最近任务”只统计本路线，避免跨路线干扰。
+        self.scope_tasks_by_route = scope_tasks_by_route
         self._resolved_route_id_cache: int | None = None
         self._route_resolved = False
         self._default_plan_created = False
@@ -423,7 +427,7 @@ class StudyPlanService:
 
     # ================= 每日任务生成 =================
 
-    def generate_daily_tasks(self, date_str: str) -> dict:
+    def generate_daily_tasks(self, date_str: str, max_tasks: int | None = None) -> dict:
         """为 date_str 生成每日学习任务（不使用 LLM，规则简单可预测）。
 
         规则（Phase 8 起）：
@@ -435,6 +439,8 @@ class StudyPlanService:
         5. 若当天还没有任何任务，至少安排一个核心主题；
         6. 剩余预算装不下剩余主题时停止。
 
+        :param max_tasks: Phase D：本次最多创建多少个任务（Scheduler 每个 slot
+            调用一次，传 1）；None 表示不限制（保持旧行为）。
         :return: {"generated": [Task], "phase": name|None, "selected": [topic_id], ...}
         """
         result = {
@@ -455,12 +461,24 @@ class StudyPlanService:
             return result
         result["phase"] = phase.name
 
-        # 今天已有的任务（含延期进来的）
+        # 今天已有的任务（含延期进来的）；多路线模式下只看本路线
         today_tasks = self.repo.list_by_date(date_str)
+        scope_route = self._resolved_route_id() if self.scope_tasks_by_route else None
+        if scope_route is not None:
+            today_tasks = [
+                t for t in today_tasks if t.route_id == scope_route
+            ]
         active_topic_ids = {
             t.topic_id
             for t in today_tasks
             if t.topic_id is not None and t.status == STATUS_ACTIVE
+        }
+        # 任何非 cancelled、带 topic 的当天任务（含 manual / done / 延期）
+        # 都视为该 topic 今天已被占用，Scheduler 不得重复生成。
+        occupied_topic_ids = {
+            t.topic_id
+            for t in today_tasks
+            if t.topic_id is not None and t.status != STATUS_CANCELLED
         }
         # 用户当天主动移除（cancelled）的 topic：今天不再重新安排；
         # 只对“当天”生效，次日的候选集不受影响。
@@ -507,6 +525,9 @@ class StudyPlanService:
         )
 
         for topic in topics:
+            if max_tasks is not None and len(result["generated"]) >= max_tasks:
+                result["skipped_budget"].append(topic.id)
+                continue
             if topic.id in done_topic_ids or topic.id in skip_ids:
                 result["skipped_done"].append(topic.id)
                 continue
@@ -514,7 +535,7 @@ class StudyPlanService:
                 # 前置关键技能未满足：即使 JD 高频也不能生成
                 result["skipped_gate"].append(topic.id)
                 continue
-            if topic.id in active_topic_ids:
+            if topic.id in occupied_topic_ids or topic.id in active_topic_ids:
                 result["skipped_duplicate"].append(topic.id)
                 continue
             if topic.id in cancelled_topic_ids:

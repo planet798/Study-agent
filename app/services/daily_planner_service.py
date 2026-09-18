@@ -54,6 +54,7 @@ class DailyPlannerService:
         assessment_repo=None,
         skill_service=None,
         jd_service=None,
+        scope_tasks_by_route: bool = False,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -72,12 +73,88 @@ class DailyPlannerService:
         # 可选：SkillService 与 JdService（Phase C）；不注入则字段为空、行为与旧版一致
         self.skill_service = skill_service
         self.jd_service = jd_service
+        # Phase D：route-scoped 实例（Scheduler 创建）置 True，
+        # 使 recent/任务摘要/掌握证据只读本路线，避免跨路线污染。
+        self.scope_tasks_by_route = scope_tasks_by_route
+
+    def _route_id(self) -> int | None:
+        try:
+            return self.study_plan_service._resolved_route_id()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _route_name(self) -> str:
+        route_id = self._route_id()
+        repo = getattr(self.study_plan_service, "learning_route_repo", None)
+        if route_id is None or repo is None:
+            return ""
+        try:
+            route = repo.get(route_id)
+            return route.name if route is not None else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _route_goal(self) -> str:
+        route_id = self._route_id()
+        repo = getattr(self.study_plan_service, "learning_route_repo", None)
+        if route_id is None or repo is None:
+            return ""
+        try:
+            route = repo.get(route_id)
+            return (route.goal or "") if route is not None else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _allowed_skill_names(self) -> set[str] | None:
+        """本路线允许影响 Planner 的技能名集合。
+
+        - None：不做限制（默认路线且无显式 route_skills 绑定 → 保留旧行为）；
+        - set()：完全无技能信号（非默认路线且未绑定任何 skill）；
+        - 非空 set：只允许 route_skills 中显式绑定的技能。
+        """
+        binding = self.route_skill_ids()
+        route_id = self._route_id()
+        repo = getattr(self.study_plan_service, "learning_route_repo", None)
+        if repo is None or route_id is None:
+            # 无法读取路线/route_skills（旧调用）→ 不限制，保持旧行为
+            return None
+        is_default = False
+        try:
+            default = repo.get_default_learning_route()
+            is_default = default is not None and default.id == route_id
+        except Exception:  # noqa: BLE001
+            is_default = False
+        if not binding:
+            return None if is_default else set()
+        names: set[str] = set()
+        if self.skill_service is not None:
+            for skill_id in binding:
+                try:
+                    skill = self.skill_service.skill_repo.get(skill_id)
+                except Exception:  # noqa: BLE001
+                    skill = None
+                if skill is not None:
+                    names.add(skill["name"])
+        return names
+
+    def route_skill_ids(self) -> set[int]:
+        """本路线绑定的 skill id 集合（无绑定/无 repo 时为空集）。"""
+        route_id = self._route_id()
+        repo = getattr(self.study_plan_service, "learning_route_repo", None)
+        if route_id is None or repo is None:
+            return set()
+        try:
+            return set(repo.list_skill_ids(route_id))
+        except Exception:  # noqa: BLE001
+            return set()
 
     # ================= 幂等保护 =================
 
-    def latest_plan_for_date(self, date_str: str) -> dict | None:
-        """返回该日期已存在的规划决策（用于幂等）。"""
-        return self.decision_repo.latest_for_date(date_str)
+    def latest_plan_for_date(
+        self, date_str: str, route_id: int | None = None
+    ) -> dict | None:
+        """返回该日期已存在的规划决策（用于幂等）。Phase D 按路线查询。"""
+        return self.decision_repo.latest_for_date(date_str, route_id=route_id)
 
     # ================= 上下文构造 =================
 
@@ -85,7 +162,12 @@ class DailyPlannerService:
         """构造传给 AI 的上下文（目标日期为 date 的"下一天"）。"""
         plan_next_date = add_days(date_str, 1)
         phase = self.study_plan_service.get_current_phase(plan_next_date)
-        ctx = PlanningContext(current_date=plan_next_date)
+        ctx = PlanningContext(
+            current_date=plan_next_date,
+            route_id=self._route_id(),
+            route_name=self._route_name(),
+            route_goal=(self._route_goal() if hasattr(self, "_route_goal") else ""),
+        )
         if phase is None:
             return ctx
 
@@ -130,6 +212,10 @@ class DailyPlannerService:
         skill_service = self.skill_service
         if skill_service is None:
             return
+        # Phase D：route-scoped 技能过滤（无绑定的非默认路线→无技能信号）
+        allowed_skills = self._allowed_skill_names()
+        if allowed_skills is not None and len(allowed_skills) == 0:
+            return
 
         # 刷新近期市场（用计划日作为窗口结束日，保证与当天一致）
         market = None
@@ -142,6 +228,8 @@ class DailyPlannerService:
             ctx.market_sample_count_30d = int(market.get("sample_count_30d") or 0)
             trends = []
             for name, rec in (market.get("skills") or {}).items():
+                if allowed_skills is not None and name not in allowed_skills:
+                    continue
                 trends.append(MarketTrend(
                     skill=name,
                     market_30d=float(rec.get("freq30") or 0.0),
@@ -164,6 +252,10 @@ class DailyPlannerService:
             )
         except Exception:  # noqa: BLE001 - 技能数据异常不影响规划
             candidates = []
+        if allowed_skills is not None:
+            candidates = [
+                d for d in candidates if d.get("name") in allowed_skills
+            ]
         priorities: list[SkillPriority] = []
         for d in candidates:
             skill = skill_service.skill_repo.get_by_name(d["name"])
@@ -190,6 +282,8 @@ class DailyPlannerService:
         blocked_entries: list[PrerequisiteBlocked] = []
         for s in all_skills:
             name = s["name"]
+            if allowed_skills is not None and name not in allowed_skills:
+                continue
             rec = (market or {}).get("skills", {}).get(name) if market else None
             m30 = float(rec.get("freq30") or 0.0) if rec else 0.0
             sig = skill_service._market_signal_value(market, name)
@@ -254,6 +348,9 @@ class DailyPlannerService:
         for kp in self.assessment_repo.list_knowledge_points():
             if not kp.get("last_assessed_at"):
                 continue  # 没有真实验收证据：不进入 evidence
+            if self.scope_tasks_by_route and self._route_id() is not None:
+                if kp.get("route_id") != self._route_id():
+                    continue  # 只读本路线的掌握证据
             attempt = _latest_judged_attempt(self.assessment_repo, kp["id"])
             tid = kp.get("topic_id")
             topic_id = int(tid) if tid is not None else None
@@ -274,6 +371,15 @@ class DailyPlannerService:
                 )
             )
 
+    def _scoped_tasks(self, tasks: list) -> list:
+        """Phase D：route-scoped 实例只保留本路线任务。"""
+        if not self.scope_tasks_by_route:
+            return tasks
+        route_id = self._route_id()
+        if route_id is None:
+            return tasks
+        return [t for t in tasks if t.route_id == route_id]
+
     def _build_recent_days(self, anchor: str, week: int = WEEK_DAYS) -> list[DaySummary]:
         """anchor 之前 week 天（不含 anchor）的每日摘要，按日期升序。"""
         out: list[DaySummary] = []
@@ -282,7 +388,7 @@ class DailyPlannerService:
             stats = self.repo.stats_by_date(day)
             # cancelled 是“用户主动移除”，不进入有效任务 / 预计时间 / 完成率
             tasks = [
-                t for t in self.repo.list_by_date(day)
+                t for t in self._scoped_tasks(self.repo.list_by_date(day))
                 if t.status != STATUS_CANCELLED
             ]
             postponed = sum(
@@ -311,7 +417,9 @@ class DailyPlannerService:
     def _classify_tasks(self, anchor: str):
         """把最近任务分成未完成 / 延期 / 已完成三类摘要。"""
         start = add_days(anchor, -7)
-        tasks = self.repo.list_between(start, add_days(anchor, -1))
+        tasks = self._scoped_tasks(
+            self.repo.list_between(start, add_days(anchor, -1))
+        )
 
         unfinished: list[ContextTask] = []
         postponed: list[ContextTask] = []
@@ -362,8 +470,10 @@ class DailyPlannerService:
         # 幂等：同一天已有计划且当天确实已有任务时，直接返回（不重复生成）。
         # 只存在决策但当天没有任何任务（例如上次因阶段全部完成而生成为空），
         # 则允许重新生成，避免“当天永远空任务”的卡死。
-        existing = self.latest_plan_for_date(plan_date)
-        if not force and existing is not None and len(self.repo.list_by_date(plan_date)) > 0:
+        route_id = self._route_id()
+        existing = self.latest_plan_for_date(plan_date, route_id=route_id)
+        if not force and existing is not None and \
+                self.repo.has_generated_new_on_date(plan_date, route_id):
             return {
                 "date": plan_date,
                 "existing": True,
@@ -403,6 +513,77 @@ class DailyPlannerService:
             "adjustment": plan.adjustment,
         }
 
+    # ---------- Phase D：route-specific Planner API ----------
+
+    def generate_for_route(
+        self,
+        plan_date: str,
+        max_tasks: int | None = 1,
+        force: bool = False,
+    ) -> dict:
+        """只在本路线内选择 Topic 并生成任务（Scheduler 每个 slot 调用）。
+
+        - 严格 route-scoped：valid_topic_ids 只来自本路线当前 phase；
+        - max_tasks：本调用最多创建多少个任务；
+        - force：True 时不做“当天已有决策”幂等（Scheduler 依赖 budget +
+          topic 去重避免重复，不会重复生成同 topic）；
+        - 任何 AI/校验失败只 fallback 本路线，绝不抛给 Scheduler。
+        """
+        route_id = self._route_id()
+        result = {
+            "route_id": route_id,
+            "date": plan_date,
+            "existing": False,
+            "fallback": False,
+            "created": [],
+            "created_ids": [],
+        }
+        if not self.study_plan_service.is_planning_enabled():
+            result["planning_paused"] = True
+            return result
+
+        existing = self.latest_plan_for_date(plan_date, route_id=route_id)
+        if not force and existing is not None and \
+                self.repo.has_generated_new_on_date(plan_date, route_id):
+            result["existing"] = True
+            result["decision_id"] = existing["id"]
+            return result
+
+        context = self.build_context(add_days(plan_date, -1))
+        if self.planner is None or not self.planner.is_configured():
+            return self._fallback_plan_route(
+                plan_date, "ai_not_configured", max_tasks, result, context
+            )
+        try:
+            plan = self.planner.plan_next_day(context)
+        except AIServiceError:
+            return self._fallback_plan_route(
+                plan_date, "ai_error", max_tasks, result, context
+            )
+
+        valid, accepted, problems = self._validate_and_create(
+            plan, plan_date, max_tasks=max_tasks
+        )
+        if not valid:
+            return self._fallback_plan_route(
+                plan_date, "validation_failed", max_tasks, result, context
+            )
+        self._save_decision(
+            date=plan_date,
+            phase_id=self._current_phase_id(plan_date),
+            context=context,
+            plan=plan,
+            accepted=accepted,
+            source="ai",
+        )
+        result.update(
+            created=[self.repo.get(i) for i in accepted],
+            created_ids=list(accepted),
+            reasoning=plan.reasoning,
+            adjustment=plan.adjustment,
+        )
+        return result
+
     # ---------- fallback ----------
 
     def _fallback_plan(self, date_str: str, plan_date: str, reason: str) -> dict:
@@ -425,9 +606,38 @@ class DailyPlannerService:
             "created": accepted_ids,
         }
 
+    def _fallback_plan_route(
+        self,
+        plan_date: str,
+        reason: str,
+        max_tasks: int | None,
+        result: dict,
+        context,
+    ) -> dict:
+        """route-specific fallback：严格使用本路线（不触碰其它路线）。"""
+        gen = self.study_plan_service.generate_daily_tasks(
+            plan_date, max_tasks=max_tasks
+        )
+        accepted_ids = [t.id for t in gen.get("generated", [])]
+        self._save_decision(
+            date=plan_date,
+            phase_id=self._current_phase_id(plan_date),
+            context=context,
+            plan=None,
+            accepted=accepted_ids,
+            source="fallback_rule",
+        )
+        result.update(
+            fallback=True,
+            fallback_reason=reason,
+            created_ids=accepted_ids,
+            created=[self.repo.get(i) for i in accepted_ids],
+        )
+        return result
+
     # ---------- 本地校验与创建 ----------
 
-    def _validate_and_create(self, plan, plan_date: str):
+    def _validate_and_create(self, plan, plan_date: str, max_tasks: int | None = None):
         """本地规则二次校验 AI 建议，全部合法才创建任务。
 
         :return: (valid: bool, created_ids: list[int], problems: list[str])
@@ -458,6 +668,9 @@ class DailyPlannerService:
 
         done_topic_ids = self._done_topic_ids()
         scheduled_topic_ids = self._scheduled_topic_ids(plan_date)
+        # 当天任何非 cancelled、带 topic 的任务（含 manual / done / 延期）
+        # 都视为该 topic 今日已被占用，Agent 不得重复生成。
+        occupied_topic_ids = self._occupied_topic_ids(plan_date)
         # 当天被用户主动移除（cancelled）的 topic：今天 replan 不再重新生成，
         # 但次日不受影响（次日 plan_date 不同，查不到该 cancelled 记录）。
         today_cancelled_topic_ids = self._cancelled_topic_ids(plan_date)
@@ -503,6 +716,9 @@ class DailyPlannerService:
             if rec.topic_id in scheduled_topic_ids or rec.topic_id in seen_topic_ids:
                 # 已存在/已排过：去重，不算违规
                 continue
+            if rec.topic_id in occupied_topic_ids:
+                # 今天已有该 topic 的任意任务（含 manual/done）：不重复
+                continue
             seen_topic_ids.add(rec.topic_id)
             to_create.append(rec)
 
@@ -525,6 +741,11 @@ class DailyPlannerService:
                 if same is not None and same.id != carry.task_id:
                     continue
             to_carry.append((carry, task))
+
+        # Phase D：严格限制每个 slot 最多创建 max_tasks 个任务（含 carry_over）
+        if max_tasks is not None:
+            to_carry = to_carry[:max(0, int(max_tasks))]
+            to_create = to_create[:max(0, int(max_tasks) - len(to_carry))]
 
         # 任何违规 => 不采纳整份计划（不写库不建任务）
         if problems:
@@ -552,6 +773,16 @@ class DailyPlannerService:
             (date_str, STATUS_ACTIVE),
         ).fetchall()
         return {r["topic_id"] for r in rows}
+
+    def _occupied_topic_ids(self, date_str: str) -> set[int]:
+        """某天任意非 cancelled、带 topic 的任务（含 manual/done/延期）。"""
+        tasks = self.repo.list_by_date(date_str)
+        if self.scope_tasks_by_route and self._route_id() is not None:
+            tasks = [t for t in tasks if t.route_id == self._route_id()]
+        return {
+            t.topic_id for t in tasks
+            if t.topic_id is not None and t.status != STATUS_CANCELLED
+        }
 
     def _cancelled_topic_ids(self, date_str: str) -> set[int]:
         """某天被用户主动移除（cancelled）主题的 topic_id 集合。

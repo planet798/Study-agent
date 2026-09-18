@@ -39,6 +39,7 @@ class DateService:
         task_service: TaskService | None = None,
         study_plan_service: "StudyPlanService | None" = None,
         daily_planner_service: "DailyPlannerService | None" = None,
+        scheduler=None,
     ):
         self.repo = repo
         self.task_service = task_service or TaskService(repo)
@@ -46,6 +47,8 @@ class DateService:
         self.study_plan_service = study_plan_service
         # AI 动态规划服务（可选注入；优先级高于规则型）
         self.daily_planner_service = daily_planner_service
+        # Phase D：多路线 Global Scheduler（优先级最高）
+        self.scheduler = scheduler
 
     # ---------- 状态查询 ----------
 
@@ -139,6 +142,10 @@ class DateService:
         2. 否则若注入了 study_plan_service，使用规则型 generate_daily_tasks；
         3. 两者都未注入则不做任何事，纯本地功能不受影响。
         """
+        if self.scheduler is not None:
+            # Phase D：多路线 Global Scheduler（自己处理暂停/归档/公平分配）
+            result = self.scheduler.generate(current_date)
+            return result.get("created", [])
         if self.study_plan_service is not None and \
                 not self.study_plan_service.is_planning_enabled():
             # Phase C：暂停/归档路线不自动生成新任务

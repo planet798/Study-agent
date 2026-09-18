@@ -370,11 +370,19 @@ class PlannerDecisionRepository:
         self.conn.commit()
         return cur.lastrowid
 
-    def latest_for_date(self, date: str) -> dict | None:
+    def latest_for_date(self, date: str, route_id: int | None = None) -> dict | None:
+        """某日最新决策；传 route_id 时只看该路线（Phase D 多路线）。"""
+        if route_id is None:
+            row = self.conn.execute(
+                "SELECT * FROM planner_decisions WHERE date = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (date,),
+            ).fetchone()
+            return dict(row) if row else None
         row = self.conn.execute(
-            "SELECT * FROM planner_decisions WHERE date = ? "
+            "SELECT * FROM planner_decisions WHERE date = ? AND route_id = ? "
             "ORDER BY id DESC LIMIT 1",
-            (date,),
+            (date, int(route_id)),
         ).fetchone()
         return dict(row) if row else None
 

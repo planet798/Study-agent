@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         manual_task_service=None,
         route_service=None,
         route_plan_service=None,
+        scheduler=None,
         db_path=None,
     ):
         super().__init__()
@@ -136,6 +137,8 @@ class MainWindow(QMainWindow):
         # Phase C：学习路线服务（可选；不传则隐藏“学习路线”页）
         self.route_service = route_service
         self.route_plan_service = route_plan_service
+        # Phase D：多路线全局调度（可选；未传则回退单路线 Planner）
+        self.scheduler = scheduler
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -1426,6 +1429,29 @@ class MainWindow(QMainWindow):
 
     def _update_planner_info(self) -> None:
         """刷新 AI 今日规划区域的可用状态。"""
+        if self.scheduler is not None:
+            plannable = []
+            try:
+                plannable = self.scheduler.plannable_routes(self.current_date)
+            except Exception:  # noqa: BLE001
+                plannable = []
+            if plannable:
+                names = "、".join(r.name for r in plannable)
+                self.planner_status_label.setText(
+                    f"AI 状态：多路线调度已启用（{len(plannable)} 条路线）"
+                )
+                self.planner_note_label.setText(f"可自动规划：{names}")
+                self.planner_replan_btn.setEnabled(True)
+            else:
+                self.planner_status_label.setText(
+                    "AI 状态：当前没有可自动规划的学习路线"
+                )
+                self.planner_note_label.setText(
+                    "请在“学习路线”中启用自动规划或创建学习计划"
+                )
+                self.planner_replan_btn.setEnabled(False)
+            self.planner_container.setVisible(True)
+            return
         if self.daily_planner_service is None:
             self.planner_container.setVisible(False)
             return
@@ -1458,7 +1484,44 @@ class MainWindow(QMainWindow):
         """
         from .dialogs import show_warning
 
-        # 确认框
+        confirm = QMessageBox.question(
+            self,
+            "重新规划",
+            "重新规划可能改变未开始任务。\n已完成与延期任务不受影响，确定继续？",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        today_str = self.current_date
+
+        # ---- Phase D：全局多路线 Scheduler 路径 ----
+        if self.scheduler is not None:
+            plannable = []
+            try:
+                plannable = self.scheduler.plannable_routes(today_str)
+            except Exception:  # noqa: BLE001
+                plannable = []
+            if not plannable:
+                show_warning(self, "当前没有可自动规划的学习路线。")
+                return
+            # 只清理 today / generated / new / active；done、manual、cancelled 保留
+            cleaned_ids = []
+            for t in self.task_service.get_tasks_by_date(today_str):
+                if (t.status == "active" and t.source == "generated"
+                        and t.task_type == "new"):
+                    self.task_service.repo.delete(t.id)
+                    cleaned_ids.append(t.id)
+            result = self.scheduler.generate(today_str, force=True)
+            self.refresh()
+            n = len(result.get("created", []))
+            routes = len(result.get("plannable_route_ids", []))
+            msg = f"重新规划完成：生成了 {n} 个任务（{routes} 条路线）"
+            if cleaned_ids:
+                msg += f"，移除了 {len(cleaned_ids)} 个旧生成任务"
+            self.statusBar().showMessage(msg, 6000)
+            return
+
+        # ---- 单路线兼容路径 ----
         if self.daily_planner_service is None:
             show_warning(self, "AI 规划不可用，无法重新规划。")
             return
@@ -1474,16 +1537,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        confirm = QMessageBox.question(
-            self,
-            "重新规划",
-            "重新规划可能改变未开始任务。\n已完成与延期任务不受影响，确定继续？",
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-
         # 清理今天可被重排的普通生成任务（active + generated）
-        today_str = self.current_date
         tasks = self.task_service.get_tasks_by_date(today_str)
         cleaned_ids = []
         for t in tasks:
