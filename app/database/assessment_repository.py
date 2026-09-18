@@ -210,6 +210,113 @@ class AssessmentRepository:
         ).fetchall()
         return _rows(rows)
 
+    # ---------- Phase E：route-scoped 查询（kp 是知识身份核心） ----------
+
+    def list_knowledge_points_by_route(self, route_id: int | None) -> list[dict]:
+        """某路线的全部知识点（route_id=None → 未分类）。"""
+        if route_id is None:
+            rows = self.conn.execute(
+                "SELECT * FROM knowledge_points WHERE route_id IS NULL "
+                "ORDER BY id ASC"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM knowledge_points WHERE route_id = ? "
+                "ORDER BY id ASC",
+                (int(route_id),),
+            ).fetchall()
+        return _rows(rows)
+
+    def list_assessed_by_route(self, route_id: int | None) -> list[dict]:
+        """某路线中已有真实验收证据（last_assessed_at 非空）的知识点。"""
+        return [
+            kp for kp in self.list_knowledge_points_by_route(route_id)
+            if kp.get("last_assessed_at")
+        ]
+
+    def list_mastered_by_route(
+        self, route_id: int | None, threshold: float = 0.85
+    ) -> list[dict]:
+        """某路线中已达到 mastered 阈值的知识点（需有验收证据）。"""
+        return [
+            kp for kp in self.list_assessed_by_route(route_id)
+            if float(kp.get("mastery_estimate") or 0.0) >= float(threshold)
+        ]
+
+    def list_weak_by_route(
+        self, route_id: int | None, weak_threshold: float = 0.5
+    ) -> list[dict]:
+        """某路线中的薄弱知识点（低掌握或有 weak_points，仅真实证据）。"""
+        from ..services.knowledge_evidence import (
+            _attempt_weak_points,
+            _latest_judged_attempt,
+        )
+
+        out = []
+        for kp in self.list_assessed_by_route(route_id):
+            if float(kp.get("mastery_estimate") or 0.0) < float(weak_threshold):
+                out.append(kp)
+                continue
+            attempt = _latest_judged_attempt(self, kp["id"])
+            if _attempt_weak_points(attempt):
+                out.append(kp)
+        return out
+
+    def count_reviews_by_route_range(
+        self, route_id: int | None, start: str, end: str
+    ) -> int:
+        """某路线 next_review_date 落在 [start, end]（含）的已验收 kp 数。"""
+        return sum(
+            1 for kp in self.list_assessed_by_route(route_id)
+            if kp.get("next_review_date")
+            and start <= kp["next_review_date"] <= end
+        )
+
+    def count_reviews_by_route_before(
+        self, route_id: int | None, date_str: str
+    ) -> int:
+        """某路线逾期（next_review_date < date）的已验收 kp 数。"""
+        return sum(
+            1 for kp in self.list_assessed_by_route(route_id)
+            if kp.get("next_review_date")
+            and kp["next_review_date"] < date_str
+        )
+
+    def count_due_reviews_by_route(
+        self, route_id: int | None, date_str: str
+    ) -> int:
+        """某路线今日到期（next_review_date <= date）的已验收 kp 数。"""
+        return sum(
+            1 for kp in self.list_assessed_by_route(route_id)
+            if kp.get("next_review_date")
+            and kp["next_review_date"] <= date_str
+        )
+
+    def ensure_knowledge_point_route_consistency(self) -> int:
+        """确定性修复：topic-linked kp 的 route 必须等于 topic 的 route。
+
+        - 只处理 topic_id 非空且可推导 route 的 kp；
+        - manual kp（topic_id=NULL）不猜、不动；
+        - 幂等；返回修复条数。
+        """
+        fixed = 0
+        for kp in self.list_knowledge_points():
+            topic_id = kp.get("topic_id")
+            if topic_id is None:
+                continue
+            row = self.conn.execute(
+                "SELECT p.route_id FROM study_topics t "
+                "JOIN study_phases ph ON ph.id = t.phase_id "
+                "JOIN study_plans  p  ON p.id  = ph.plan_id "
+                "WHERE t.id = ?",
+                (int(topic_id),),
+            ).fetchone()
+            derived = row[0] if row and row[0] is not None else None
+            if derived is not None and kp.get("route_id") != derived:
+                self.update_knowledge_point(kp["id"], route_id=int(derived))
+                fixed += 1
+        return fixed
+
     def update_knowledge_point(
         self, knowledge_point_id: int, **fields
     ) -> dict | None:

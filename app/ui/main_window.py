@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         manual_task_service=None,
         route_service=None,
         route_plan_service=None,
+        route_progress_service=None,
         scheduler=None,
         db_path=None,
     ):
@@ -137,6 +138,8 @@ class MainWindow(QMainWindow):
         # Phase C：学习路线服务（可选；不传则隐藏“学习路线”页）
         self.route_service = route_service
         self.route_plan_service = route_plan_service
+        # Phase E：路线进度/掌握/复习状态
+        self.route_progress_service = route_progress_service
         # Phase D：多路线全局调度（可选；未传则回退单路线 Planner）
         self.scheduler = scheduler
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
@@ -305,7 +308,9 @@ class MainWindow(QMainWindow):
             from .routes_page import LearningRoutesPage
 
             self.routes_page = LearningRoutesPage(
-                self.route_service, route_plan_service=self.route_plan_service
+                self.route_service, route_plan_service=self.route_plan_service,
+                progress_service=self.route_progress_service,
+                today_provider=self.today_provider,
             )
             self.stack.addWidget(self.routes_page)
             self.routes_page_index = self.stack.count() - 1
@@ -1319,6 +1324,24 @@ class MainWindow(QMainWindow):
                 )
                 return
             task = healed
+        # Phase E：route 一致性守卫（task.route_id 与 kp.route_id 不得串路线）
+        if (task.route_id is not None and task.knowledge_point_id is not None
+                and self.assessment_repo is not None):
+            try:
+                kp = self.assessment_repo.get_knowledge_point(
+                    task.knowledge_point_id
+                )
+            except Exception:  # noqa: BLE001
+                kp = None
+            if kp is not None and kp.get("route_id") is not None \
+                    and kp["route_id"] != task.route_id:
+                from .dialogs import show_warning
+
+                show_warning(
+                    self,
+                    "该任务与知识点的所属路线不一致，已阻止跨路线验收。",
+                )
+                return
         if not svc.is_configured():
             from .dialogs import show_warning
 

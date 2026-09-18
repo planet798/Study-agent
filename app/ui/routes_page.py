@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from ..database.learning_route_repository import ROUTE_TYPE_GROUP
 from ..services.learning_route_service import RouteValidationError
 from ..services.route_plan_service import RouteStructureError
+from ..utils.date_utils import today as _default_today
 from .dialogs import show_warning
 from .route_dialogs import (
     AddPhaseDialog,
@@ -51,11 +52,14 @@ def _secondary(text: str, on_click) -> QPushButton:
 class RouteDetailDialog(QDialog):
     """路线详情：信息 + 手动学习结构（Plan/Phase/Topic）。"""
 
-    def __init__(self, route, route_service, route_plan_service, parent=None):
+    def __init__(self, route, route_service, route_plan_service, parent=None,
+                 progress_service=None, today_provider=None):
         super().__init__(parent)
         self.route = route
         self.route_service = route_service
         self.route_plan_service = route_plan_service
+        self.progress_service = progress_service
+        self.today_provider = today_provider or _default_today
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
         self.resize(640, 620)
@@ -152,22 +156,82 @@ class RouteDetailDialog(QDialog):
             return
 
         progress = self.route_plan_service.route_progress(route.id)
-        prog = QLabel(
-            f"已完成 Topic：{progress['done']} / {progress['total']}"
-            f"　阶段数：{progress['phases']}"
-        )
+        today = self.today_provider()
+        rp = None
+        if self.progress_service is not None:
+            try:
+                rp = self.progress_service.get_progress(route.id, today)
+            except Exception:  # noqa: BLE001
+                rp = None
+        if rp is not None:
+            prog = QLabel(
+                f"【路线进度】课程覆盖：{rp.topic_covered} / {rp.topic_total} Topic"
+                f"　已验收：{rp.assessment_evidence_count}"
+                f"　已掌握：{rp.mastered_count}"
+                f"　待复习：{rp.due_review_count}"
+                f"　薄弱：{rp.weak_count}"
+            )
+            mastery_txt = (
+                "暂无验收数据" if not rp.has_assessment
+                else f"掌握率 {rp.mastery_percent}%"
+            )
+            prog2 = QLabel(f"【掌握】{mastery_txt}")
+        else:
+            prog = QLabel(
+                f"已完成 Topic：{progress['done']} / {progress['total']}"
+                f"　阶段数：{progress['phases']}"
+            )
+            prog2 = None
         prog.setObjectName("TaskMeta")
         self.body_layout.addWidget(prog)
+        if prog2 is not None:
+            prog2.setObjectName("TaskMeta")
+            self.body_layout.addWidget(prog2)
 
+        if rp is not None and rp.knowledge:
+            self.body_layout.addWidget(self._section_label("知识掌握"))
+            for ks in rp.knowledge:
+                if ks.status == "已掌握":
+                    extra = f"　{ks.mastery_percent}%"
+                elif ks.status == "薄弱":
+                    extra = f"　{ks.mastery_percent}%" if ks.mastery_percent is not None else ""
+                    if ks.weak_points:
+                        extra += f"　弱点：{'、'.join(ks.weak_points[:3])}"
+                elif ks.status == "已验收":
+                    extra = f"　{ks.mastery_percent}%" if ks.mastery_percent is not None else ""
+                else:
+                    extra = ""
+                lbl = QLabel(f"{ks.name}　{ks.status}{extra}")
+                lbl.setObjectName("TaskMeta")
+                lbl.setWordWrap(True)
+                self.body_layout.addWidget(lbl)
+            self.body_layout.addWidget(self._section_label("复习状态"))
+            last_assessed = max(
+                (k.last_assessed_at for k in rp.knowledge if k.last_assessed_at),
+                default=None,
+            )
+            rev = QLabel(
+                f"今日到期：{rp.due_review_count}　未来7天：{rp.upcoming_review_count}"
+                f"　逾期：{rp.overdue_review_count}"
+                f"　最近复习：{last_assessed or '—'}"
+            )
+            rev.setObjectName("TaskMeta")
+            rev.setWordWrap(True)
+            self.body_layout.addWidget(rev)
+
+        done_ids = self.route_plan_service.done_topic_ids()
         if not structure.phases:
             self.body_layout.addWidget(
                 _secondary("＋ 添加阶段", self._on_add_phase)
             )
-
-        done_ids = self.route_plan_service.done_topic_ids()
         for phase in structure.phases:
             self.body_layout.addWidget(self._phase_card(phase, done_ids))
         self.body_layout.addStretch()
+
+    def _section_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("SectionTitle")
+        return lbl
 
     def _phase_card(self, phase, done_ids) -> QWidget:
         card = QFrame()
@@ -333,10 +397,13 @@ class RouteDetailDialog(QDialog):
 class LearningRoutesPage(QWidget):
     """学习路线总览页面。"""
 
-    def __init__(self, route_service, route_plan_service=None, parent=None):
+    def __init__(self, route_service, route_plan_service=None, parent=None,
+                 progress_service=None, today_provider=None):
         super().__init__(parent)
         self.route_service = route_service
         self.route_plan_service = route_plan_service
+        self.progress_service = progress_service
+        self.today_provider = today_provider or _default_today
         self.show_archived = False
         self._build_ui()
         self.refresh()
@@ -429,10 +496,25 @@ class LearningRoutesPage(QWidget):
         name = QLabel(route.name)
         name.setObjectName("TaskTitle")
         lay.addWidget(name)
-        meta = QLabel(
-            f"类型：分组　子路线：{len(active_children)}　"
-            f"优先级：{priority_text(route.priority)}"
-        )
+        if self.progress_service is not None:
+            try:
+                gs = self.progress_service.group_summary(route.id)
+            except Exception:  # noqa: BLE001
+                gs = None
+        else:
+            gs = None
+        if gs is not None:
+            meta_text = (
+                f"类型：分组　子路线：{gs['children_total']}（活跃 {gs['active']} /"
+                f" 暂停 {gs['paused']} / 已归档 {gs['archived']}）"
+                f"　优先级：{priority_text(route.priority)}"
+            )
+        else:
+            meta_text = (
+                f"类型：分组　子路线：{len(active_children)}　"
+                f"优先级：{priority_text(route.priority)}"
+            )
+        meta = QLabel(meta_text)
         meta.setObjectName("TaskMeta")
         lay.addWidget(meta)
         if route.goal:
@@ -560,7 +642,9 @@ class LearningRoutesPage(QWidget):
 
     def _open_detail(self, route) -> None:
         dlg = RouteDetailDialog(
-            route, self.route_service, self.route_plan_service, parent=self
+            route, self.route_service, self.route_plan_service, parent=self,
+            progress_service=self.progress_service,
+            today_provider=self.today_provider,
         )
         dlg.exec()
         self.refresh()

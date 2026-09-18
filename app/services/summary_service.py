@@ -32,17 +32,30 @@ class SummaryService:
         stats_service: StatsService,
         cache_repo: SummaryCacheRepository,
         ai_generator: AISummaryGenerator | None = None,
+        route_progress_service=None,
     ):
         self.stats_service = stats_service
         self.cache_repo = cache_repo
         self.ai_generator = ai_generator
+        # Phase E：月总结路线维度（可选；不注入则保持旧行为）
+        self.route_progress_service = route_progress_service
 
     # ================= 月总结 =================
 
     def get_monthly_summary(self, year: int, month: int) -> dict:
         start, end = month_range(year, month)
         stats = self.stats_service.get_monthly_stats(year, month)
+        # Phase E：加入 route 维度，纳入 fingerprint → 学习记录变化时缓存失效
+        stats["route_stats"] = self._route_stats(start, end)
         return self._resolve("monthly_summaries", start, end, stats)
+
+    def _route_stats(self, start: str, end: str) -> list[dict]:
+        if self.route_progress_service is None:
+            return []
+        try:
+            return self.route_progress_service.monthly_route_stats(start, end)
+        except Exception:  # noqa: BLE001 - 路线统计失败不影响月总结
+            return []
 
     # ---------- 通用解析 ----------
 

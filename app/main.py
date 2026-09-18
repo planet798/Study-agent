@@ -521,6 +521,20 @@ def main() -> int:
     route_repo = LearningRouteRepository(conn)
     route_service = LearningRouteService(route_repo, skill_repo=skill_repo)
     route_plan_service = RoutePlanService(plan_repo, repo, assessment_repo)
+    # Phase E：路线进度 / 掌握 / 复习状态统一计算
+    from app.services.route_progress_service import RouteProgressService
+    from app.services.route_repair_service import repair_route_assignments
+
+    route_progress_service = RouteProgressService(
+        repo, assessment_repo, plan_repo, route_repo
+    )
+    # 幂等修复历史 route 归属（绝不猜 manual NULL / ordinary todo）
+    try:
+        repaired = repair_route_assignments(conn, assessment_repo)
+        if any(repaired.values()):
+            print(f"[startup] route 归属修复：{repaired}")
+    except Exception:  # noqa: BLE001 - 修复失败不影响启动
+        pass
     study_plan_service = StudyPlanService(
         repo, plan_repo,
         assessment_repo=assessment_repo,
@@ -701,6 +715,7 @@ def main() -> int:
         stats_service=StatsService(repo),
         cache_repo=SummaryCacheRepository(conn),
         ai_generator=AISummaryGenerator(ai_client),
+        route_progress_service=route_progress_service,
     )
 
     # 不显式传 today_provider：MainWindow 默认跟随 date_utils.today()，
@@ -741,6 +756,7 @@ def main() -> int:
         manual_task_service=manual_task_service,
         route_service=route_service,
         route_plan_service=route_plan_service,
+        route_progress_service=route_progress_service,
         scheduler=scheduler,
         # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
         assessment_service_factory=build_assessment_service,

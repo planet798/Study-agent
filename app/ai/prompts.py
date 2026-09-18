@@ -501,6 +501,9 @@ MONTHLY_SUMMARY_INSTRUCTION = """
 - overview 与 progress 各不超过 100 字
 - 每个数组 1~3 项，每项不超过 80 字
 - 所有数字以输入统计为准，不要自己推算
+- route_stats 为各学习路线的真实统计；若提及路线/知识点/薄弱项，
+  必须来自 route_stats，不得虚构数据中不存在的知识点
+- 不要给出一个“整体 mastery 百分比”（不同路线不可简单平均）
 - 只输出 JSON，不要输出其他文字
 """
 

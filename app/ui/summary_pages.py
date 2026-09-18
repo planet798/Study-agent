@@ -137,6 +137,15 @@ class MonthlySummaryPage(QWidget):
         self.ranking_label.setObjectName("TaskMeta")
         outer.addWidget(self.ranking_label)
 
+        # Phase E：路线维度（本地真实统计）
+        route_title = QLabel("学习路线")
+        route_title.setObjectName("SectionTitle")
+        outer.addWidget(route_title)
+        self.route_label = QLabel("")
+        self.route_label.setWordWrap(True)
+        self.route_label.setObjectName("TaskMeta")
+        outer.addWidget(self.route_label)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -202,6 +211,24 @@ class MonthlySummaryPage(QWidget):
         self.ranking_label.setText(
             ("\n".join(ranking_lines) if ranking_lines else "暂无分类数据")
             + ("\n" + "　".join(highlight) if highlight else "")
+        )
+
+        # 路线维度（不硬算整体 mastery %）
+        route_lines = []
+        for rs in stats.get("route_stats", []):
+            parts = [
+                f"完成任务：{rs.get('done_tasks', 0)}",
+                f"课程覆盖：{rs.get('covered_topics', 0)} Topic",
+                f"验收：{rs.get('assessment_evidence_count', 0)}",
+                f"掌握：{rs.get('mastered_count', 0)}",
+                f"复习：{rs.get('review_count', 0)}",
+            ]
+            weak = rs.get("weak_topics") or []
+            if weak:
+                parts.append(f"薄弱：{'、'.join(weak[:3])}")
+            route_lines.append(f"{rs.get('route_name', '—')}：" + "　".join(parts))
+        self.route_label.setText(
+            "\n".join(route_lines) if route_lines else "暂无路线数据"
         )
 
         while self.ai_layout.count():
