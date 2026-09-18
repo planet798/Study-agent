@@ -652,6 +652,14 @@ def main() -> int:
         study_plan_service=study_plan_service,
         assessment_repo=assessment_repo,
     )
+    # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
+    from app.services.manual_task_service import ManualTaskService
+
+    manual_task_service = ManualTaskService(
+        repo,
+        assessment_repo=assessment_repo,
+        study_plan_service=study_plan_service,
+    )
     exploration_service = ExplorationService()
 
     # 周/月总结（本地统计 + AI 解读 + 缓存）
@@ -696,6 +704,7 @@ def main() -> int:
         jd_summary_service=jd_summary_service,
         outcome_service=outcome_service,
         notes_service=notes_service,
+        manual_task_service=manual_task_service,
         # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
         assessment_service_factory=build_assessment_service,
         db_path=str(resolve_db_path()),

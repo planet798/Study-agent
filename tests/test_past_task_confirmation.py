@@ -60,12 +60,28 @@ class TestFindUnresolved:
         _mk(repo, "R", YESTERDAY, task_type="review", source="review")
         assert _svc(repo, task_service).find_unresolved(TODAY) == []
 
-    def test_extra_not_found(self, repo, task_service):
-        _mk(repo, "E", YESTERDAY, task_type="extra", source="extra")
-        assert _svc(repo, task_service).find_unresolved(TODAY) == []
+    def test_extra_found(self, repo, task_service):
+        # Phase A：extra 也属于用户可执行任务，需要补确认。
+        t = _mk(repo, "E", YESTERDAY, task_type="extra", source="extra")
+        found = _svc(repo, task_service).find_unresolved(TODAY)
+        assert [x.id for x in found] == [t.id]
 
-    def test_manual_not_found(self, repo, task_service):
-        _mk(repo, "M", YESTERDAY, source="manual")
+    def test_manual_todo_found(self, repo, task_service):
+        # Phase A：手动普通 To-do（task_type=manual）需要补确认。
+        t = _mk(repo, "M", YESTERDAY, task_type="manual", source="manual")
+        found = _svc(repo, task_service).find_unresolved(TODAY)
+        assert [x.id for x in found] == [t.id]
+
+    def test_manual_knowledge_found(self, repo, task_service):
+        # Phase A：手动正式知识任务（source=manual, task_type=new）需要补确认。
+        t = _mk(repo, "K", YESTERDAY, source="manual")
+        found = _svc(repo, task_service).find_unresolved(TODAY)
+        assert [x.id for x in found] == [t.id]
+
+    def test_cancelled_not_found(self, repo, task_service):
+        # Phase A：cancelled 是“用户主动移除”，不再弹昨日确认。
+        t = _mk(repo, "C", YESTERDAY)
+        repo.cancel(t.id)
         assert _svc(repo, task_service).find_unresolved(TODAY) == []
 
     def test_today_active_not_found(self, repo, task_service):

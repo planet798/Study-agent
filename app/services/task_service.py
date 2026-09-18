@@ -13,7 +13,12 @@
 from __future__ import annotations
 
 from ..database.repository import Task, TaskRepository
-from ..database.schema import STATUS_ACTIVE, STATUS_DONE, STATUS_NOT_DONE
+from ..database.schema import (
+    STATUS_ACTIVE,
+    STATUS_CANCELLED,
+    STATUS_DONE,
+    STATUS_NOT_DONE,
+)
 from ..utils.date_utils import add_days
 
 
@@ -27,9 +32,11 @@ class InvalidTransitionError(Exception):
 
 # 允许的状态转换表：{当前状态: 可转换到的状态集合}
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    STATUS_ACTIVE: {STATUS_DONE, STATUS_NOT_DONE},  # 待办：可完成 / 可标记未完成
+    # 待办：可完成 / 可标记未完成 / 可主动从今天移除
+    STATUS_ACTIVE: {STATUS_DONE, STATUS_NOT_DONE, STATUS_CANCELLED},
     STATUS_NOT_DONE: {STATUS_ACTIVE},               # 未完成：只能延期回待办
     STATUS_DONE: set(),                             # 已完成：终态，不可再转换
+    STATUS_CANCELLED: set(),                        # 已移除：终态，不自动复活
 }
 
 
@@ -50,7 +57,7 @@ class TaskService:
         return task
 
     def get_status(self, task_id: int) -> str:
-        """获取任务当前状态：active / done / not_done。"""
+        """获取任务当前状态：active / done / not_done / cancelled。"""
         return self.get_task(task_id).status
 
     def get_details(self, task_id: int) -> dict:
@@ -62,6 +69,7 @@ class TaskService:
             "status": t.status,
             "is_done": t.status == STATUS_DONE,
             "is_not_done": t.status == STATUS_NOT_DONE,
+            "is_cancelled": t.status == STATUS_CANCELLED,
             "completed_at": t.completed_at,
             "not_done_at": t.not_done_at,
             "reason": t.reason,
@@ -86,10 +94,14 @@ class TaskService:
     def get_study_time_stats(self, date_str: str) -> dict:
         """指定日期的预计/实际学习时间统计（分钟）。
 
-        - total_minutes: 全部任务的预计时间之和
+        - total_minutes: 用户最终选择保留执行任务的预计时间之和
         - done_minutes: 已完成任务的预计时间之和
+        cancelled（用户主动移除）不计入。
         """
-        tasks = self.repo.list_by_date(date_str)
+        tasks = [
+            t for t in self.repo.list_by_date(date_str)
+            if t.status != STATUS_CANCELLED
+        ]
         total = sum(t.estimated_minutes for t in tasks)
         done = sum(t.estimated_minutes for t in tasks if t.status == STATUS_DONE)
         return {"total_minutes": total, "done_minutes": done}
@@ -134,6 +146,35 @@ class TaskService:
             knowledge_point_id=knowledge_point_id,
             difficulty=difficulty,
         )
+
+    def is_cancellable(self, task: Task) -> bool:
+        """该任务是否允许“移除今日任务”。
+
+        允许：active 的 generated/new、manual todo、manual knowledge、extra。
+        不允许：done / not_done / cancelled，以及正式 spaced review
+        （task_type='review' 不当作普通 To-do 移除）。
+        说明：pending Assessment 由 UI 层结合 assessment_repo 额外拦截。
+        """
+        if task.status != STATUS_ACTIVE:
+            return False
+        if task.task_type == "review":
+            return False
+        return True
+
+    def cancel_task(self, task_id: int) -> Task:
+        """移除今日任务：active -> cancelled（只改状态，绝不物理删除）。
+
+        cancelled 不是未完成、不是完成；用于“用户主动决定今天不执行”。
+        保留数据库记录，以后 Agent 仍可能重新安排该 topic。
+        """
+        task = self.get_task(task_id)
+        if task.task_type == "review":
+            raise InvalidTransitionError(
+                f"正式复习任务不能移除今日任务 (任务 id={task_id})"
+            )
+        self._transition(task_id, STATUS_CANCELLED)
+        self.repo.cancel(task_id)
+        return self.get_task(task_id)
 
     def complete_task(self, task_id: int) -> Task:
         """标记任务完成：active -> done。可选：完成后沉淀学习成果（Phase D）。"""

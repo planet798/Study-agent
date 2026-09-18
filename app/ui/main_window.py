@@ -39,12 +39,15 @@ from PySide6.QtWidgets import (
 )
 
 from ..services.date_service import DateService
+from ..services.manual_task_service import ManualTaskService
 from ..services.task_review_service import TaskReviewService
 from ..services.task_service import TaskService
 from ..utils.date_utils import add_days, today as _default_today
+from ..database.schema import STATUS_CANCELLED
 from .ai_worker import AIReviewWorker, AssessmentWorker, run_start_assessment
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
+from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
 from .styles import APP_STYLE, apply_secondary_button_text
 from .task_widget import TaskWidget
 
@@ -90,6 +93,7 @@ class MainWindow(QMainWindow):
         outcome_service=None,
         notes_service=None,
         assessment_service_factory=None,
+        manual_task_service=None,
         db_path=None,
     ):
         super().__init__()
@@ -126,6 +130,12 @@ class MainWindow(QMainWindow):
         self.jd_summary_service = jd_summary_service
         self.outcome_service = outcome_service
         self.notes_service = notes_service
+        # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
+        self.manual_task_service = manual_task_service or ManualTaskService(
+            task_service.repo,
+            assessment_repo=assessment_repo,
+            study_plan_service=study_plan_service,
+        )
 
         self._task_widgets: list[TaskWidget] = []
         self._quit_requested = False
@@ -187,6 +197,16 @@ class MainWindow(QMainWindow):
         section = QLabel("今日学习任务")
         section.setObjectName("SectionTitle")
         root_today.addWidget(section)
+
+        # 手动添加今日学习任务（不依赖 Agent 规划）
+        add_row = QHBoxLayout()
+        add_row.addStretch()
+        self.add_task_btn = QPushButton("＋ 添加学习任务")
+        self.add_task_btn.setObjectName("SecondaryButton")
+        apply_secondary_button_text(self.add_task_btn)
+        self.add_task_btn.clicked.connect(self._on_add_learning_task)
+        add_row.addWidget(self.add_task_btn)
+        root_today.addLayout(add_row)
 
         # 当前学习阶段（StudyPlanService 可选注入；不注入则隐藏）
         self.phase_container = QWidget()
@@ -335,14 +355,31 @@ class MainWindow(QMainWindow):
         self._exploration_added = False
         self._career_panel_added = False
 
-        new_tasks = [t for t in tasks if t.task_type not in ("review", "extra")]
-        review_tasks = [t for t in tasks if t.task_type == "review"]
-        extra_tasks = [t for t in tasks if t.task_type == "extra"]
+        new_tasks = [
+            t for t in tasks
+            if t.task_type not in ("review", "extra")
+            and t.status != STATUS_CANCELLED
+        ]
+        review_tasks = [
+            t for t in tasks
+            if t.task_type == "review" and t.status != STATUS_CANCELLED
+        ]
+        extra_tasks = [
+            t for t in tasks
+            if t.task_type == "extra" and t.status != STATUS_CANCELLED
+        ]
+        # 用户主动移除的任务：不进入“今日待执行任务”，仅折叠提示
+        cancelled_tasks = [t for t in tasks if t.status == STATUS_CANCELLED]
 
         # 1) 今日新知识
         self._add_section_header("今日新知识")
         for t in new_tasks:
             self._add_task_widget(t)
+        if cancelled_tasks:
+            names = "、".join(t.title for t in cancelled_tasks)
+            self._add_section_hint(
+                f"已移除今日任务 {len(cancelled_tasks)} 个（不计入完成率）：{names}"
+            )
 
         # 2) 今日复习
         if self.review_scheduler is not None or review_tasks:
@@ -371,13 +408,14 @@ class MainWindow(QMainWindow):
 
         self.list_layout.addStretch()
 
+        has_effective = any(t.status != STATUS_CANCELLED for t in tasks)
         has_content = (
             bool(self._task_widgets)
             or self._exploration_added
             or self._career_panel_added
         )
         scroll_visible = (
-            bool(tasks) or self._exploration_added or self._career_panel_added
+            has_effective or self._exploration_added or self._career_panel_added
         )
         self.empty_hint.setVisible(not has_content)
         self.scroll.setVisible(scroll_visible)
@@ -417,6 +455,7 @@ class MainWindow(QMainWindow):
         widget.complete_requested.connect(self._on_complete)
         widget.not_done_requested.connect(self._on_not_done)
         widget.postpone_requested.connect(self._on_postpone)
+        widget.remove_requested.connect(self._on_remove_task)
         widget.assessment_requested.connect(self._on_start_assessment)
         self.list_layout.addWidget(widget)
         self._task_widgets.append(widget)
@@ -459,6 +498,105 @@ class MainWindow(QMainWindow):
         else:
             msg = "今日额外额度已用完或没有可用学习来源"
         self.statusBar().showMessage(msg, 5000)
+
+    # ---------- Phase A：手动添加 / 移除今日任务 ----------
+
+    def _available_topics(self) -> list[dict]:
+        """当前计划下的全部 study_topics（供“关联已有 Topic”下拉）。"""
+        if self.study_plan_service is None:
+            return []
+        try:
+            plan = self.study_plan_service.get_active_plan_full()
+        except Exception:  # noqa: BLE001 - 计划异常不影响手动加任务
+            return []
+        if plan is None:
+            return []
+        out: list[dict] = []
+        for phase in plan.phases:
+            for topic in phase.topics:
+                out.append({"id": topic.id, "name": topic.name})
+        return out
+
+    def _on_add_learning_task(self) -> None:
+        """打开添加学习任务对话框（普通 To-do / 正式知识学习任务）。"""
+        from .dialogs import show_warning
+
+        dlg = AddLearningTaskDialog(
+            topics=self._available_topics(),
+            default_date=self.current_date,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        payload = dlg.result_payload()
+        try:
+            if payload["kind"] == KIND_TODO:
+                self.manual_task_service.create_todo(
+                    title=payload["title"],
+                    description=payload["description"],
+                    estimated_minutes=payload["estimated_minutes"],
+                    scheduled_date=payload["scheduled_date"],
+                )
+                msg = "已添加普通学习任务"
+            else:
+                self.manual_task_service.create_knowledge_task(
+                    title=payload["title"],
+                    description=payload["description"],
+                    estimated_minutes=payload["estimated_minutes"],
+                    scheduled_date=payload["scheduled_date"],
+                    topic_id=payload.get("topic_id"),
+                )
+                msg = "已添加正式知识学习任务"
+        except Exception as e:  # noqa: BLE001 - 添加失败不崩溃
+            show_warning(self, f"添加任务失败：{e}")
+            return
+        self.refresh()
+        self.statusBar().showMessage(msg, 4000)
+
+    def _confirm_remove_dialog(self) -> bool:
+        """移除确认框：默认“取消”，明确告知不会删除学习内容。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("移除今日任务")
+        box.setText(
+            "仅从今天的学习计划中移除此任务，不会删除学习内容，"
+            "以后 Agent 仍可能再次安排。"
+        )
+        confirm_btn = box.addButton("确认移除", QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel_btn)
+        box.exec()
+        return box.clickedButton() is confirm_btn
+
+    def _on_remove_task(self, task_id: int) -> None:
+        """移除今日任务：active -> cancelled，绝不物理删除。"""
+        from .dialogs import show_warning
+
+        try:
+            task = self.task_service.get_task(task_id)
+        except Exception:  # noqa: BLE001 - 任务不存在则不处理
+            return
+        if not self.task_service.is_cancellable(task):
+            show_warning(self, "该任务当前状态不能移除。")
+            return
+        # 正在 pending Assessment 的任务不允许移除
+        if task.knowledge_point_id is not None and self.assessment_repo is not None:
+            try:
+                if self.assessment_repo.find_pending_attempt_for_task(task.id):
+                    show_warning(
+                        self, "该任务正在进行验收，不能移除。请先完成或取消本次验收。"
+                    )
+                    return
+            except Exception:  # noqa: BLE001 - 校验异常时按可移除处理
+                pass
+        if not self._confirm_remove_dialog():
+            return
+        try:
+            self.task_service.cancel_task(task_id)
+        except Exception as e:  # noqa: BLE001
+            show_warning(self, f"移除失败：{e}")
+            return
+        self.refresh()
+        self.statusBar().showMessage("已移除今日任务（不算未完成）", 4000)
 
     def _add_exploration(self) -> None:
         """课外探索区域：展示已验证资源的卡片与打开链接按钮。"""
@@ -1158,9 +1296,11 @@ class MainWindow(QMainWindow):
                 self.task_service.repo.delete(t.id)
                 cleaned_ids.append(t.id)
 
-        # 对该日期重新生成（AI 优先，内部自动 fallback）
+        # 对该日期重新生成（AI 优先，内部自动 fallback）。
+        # force=True：即使当天已有 planner decision / cancelled 记录，也刷新计划；
+        # cancelled topic 会由 Planner 的当天排除集自动跳过。
         result = self.daily_planner_service.generate_next_day_plan(
-            add_days(today_str, -1)
+            add_days(today_str, -1), force=True
         )
         self.refresh()
         msg = f"重新规划完成：生成了 {len(result.get('created', []))} 个任务"

@@ -24,6 +24,7 @@ from ..database.schema import (
     PRIORITY_LOW,
     PRIORITY_MEDIUM,
     STATUS_ACTIVE,
+    STATUS_CANCELLED,
     STATUS_DONE,
     STATUS_NOT_DONE,
 )
@@ -57,6 +58,7 @@ class TaskWidget(QFrame):
     complete_requested = Signal(int)
     not_done_requested = Signal(int)
     postpone_requested = Signal(int)
+    remove_requested = Signal(int)  # 移除今日任务（Phase A）
     assessment_requested = Signal(int)  # 开始验收（Phase 7）
 
 
@@ -95,6 +97,11 @@ class TaskWidget(QFrame):
         self.review_tag_label.setObjectName("ReviewTag")
         self.review_tag_label.setVisible(False)
         top.addWidget(self.review_tag_label)
+        # 来源标签（【自定义】/【自定义知识】/【Agent规划】）
+        self.source_tag_label = QLabel("")
+        self.source_tag_label.setObjectName("ReviewTag")
+        self.source_tag_label.setVisible(False)
+        top.addWidget(self.source_tag_label)
         top.addStretch()
         top.addWidget(self.category_label)
         top.addWidget(self.priority_label)
@@ -157,6 +164,33 @@ class TaskWidget(QFrame):
         )
         self.action_row.addWidget(self.assessment_btn)
 
+    @staticmethod
+    def _source_tag(task: Task) -> str:
+        """轻量来源标签：Agent 规划 / 自定义 / 自定义知识。
+
+        普通 manual To-do 与 manual knowledge 都可能有 topic_id / kp，
+        manual knowledge 已在创建时关联知识点，因此以“有知识点关联”区分。
+        """
+        if task.task_type == "review":
+            return ""
+        if task.source == "generated":
+            return "Agent规划"
+        if task.source == "manual":
+            if task.knowledge_point_id is not None or task.topic_id is not None:
+                return "自定义知识"
+            return "自定义"
+        return ""
+
+    def _add_remove_button(self) -> None:
+        """移除今日任务（正式 spaced review 不提供，保持现有复习逻辑）。"""
+        if self._task.task_type == "review":
+            return
+        self.remove_btn = QPushButton("移除今日任务")
+        self.remove_btn.clicked.connect(
+            lambda: self.remove_requested.emit(self._task.id)
+        )
+        self.action_row.addWidget(self.remove_btn)
+
     def _add_action_buttons(self) -> None:
         """active 状态显示 [完成] [未完成]（可验收任务另加验收入口）。"""
         self.complete_btn = QPushButton("完成")
@@ -174,6 +208,7 @@ class TaskWidget(QFrame):
         self.action_row.addWidget(self.not_done_btn)
         if self._can_assess(self._task):
             self._add_assessment_button()
+        self._add_remove_button()
         self.action_row.addStretch()
 
     def _add_done_state(self) -> None:
@@ -218,6 +253,13 @@ class TaskWidget(QFrame):
             self.review_tag_label.setVisible(True)
         else:
             self.review_tag_label.setVisible(False)
+        # 来源标签（普通 / 自定义知识 / Agent 规划）
+        source_tag = self._source_tag(task)
+        if source_tag:
+            self.source_tag_label.setText(f"【{source_tag}】")
+            self.source_tag_label.setVisible(True)
+        else:
+            self.source_tag_label.setVisible(False)
         self.category_label.setText(f"分类：{task.category or '未分类'}")
         prio = _PRIORITY_TEXT.get(task.priority, "?")
         self.priority_label.setText(f"优先级：{prio}")
@@ -246,6 +288,11 @@ class TaskWidget(QFrame):
             self._add_action_buttons()
         elif task.status == STATUS_DONE:
             self._add_done_state()
+        elif task.status == STATUS_CANCELLED:
+            self.cancelled_label = QLabel("已移除（今日不再执行）")
+            self.cancelled_label.setObjectName("TaskMeta")
+            self.action_row.addWidget(self.cancelled_label)
+            self.action_row.addStretch()
         elif task.status == STATUS_NOT_DONE:
             self.reason_label.setVisible(True)
             self.reason_label.setText(f"未完成原因：{task.reason or ''}")
@@ -268,7 +315,7 @@ class TaskWidget(QFrame):
                 w.deleteLater()
         # 删除旧的按钮引用，避免重渲染时误判“已存在”而漏加，
         # 同时让 hasattr(widget, "assessment_btn") 真实反映是否展示了验收入口。
-        for name in ("assessment_btn", "complete_btn", "not_done_btn"):
+        for name in ("assessment_btn", "complete_btn", "not_done_btn", "remove_btn"):
             if hasattr(self, name):
                 delattr(self, name)
 

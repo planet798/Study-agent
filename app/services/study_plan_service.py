@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from ..database.repository import TaskRepository
-from ..database.schema import STATUS_ACTIVE, STATUS_DONE
+from ..database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_DONE
 from ..database.study_plan_repository import StudyPlan, StudyPlanRepository
 
 # 默认每日自主学习时间预算（分钟）
@@ -373,6 +373,7 @@ class StudyPlanService:
             "skipped_duplicate": [],
             "skipped_budget": [],
             "skipped_gate": [],
+            "skipped_cancelled": [],
         }
         phase = self.get_current_phase(date_str)
         if phase is None:
@@ -385,6 +386,13 @@ class StudyPlanService:
             t.topic_id
             for t in today_tasks
             if t.topic_id is not None and t.status == STATUS_ACTIVE
+        }
+        # 用户当天主动移除（cancelled）的 topic：今天不再重新安排；
+        # 只对“当天”生效，次日的候选集不受影响。
+        cancelled_topic_ids = {
+            t.topic_id
+            for t in today_tasks
+            if t.topic_id is not None and t.status == STATUS_CANCELLED
         }
         committed = sum(
             t.estimated_minutes
@@ -433,6 +441,10 @@ class StudyPlanService:
                 continue
             if topic.id in active_topic_ids:
                 result["skipped_duplicate"].append(topic.id)
+                continue
+            if topic.id in cancelled_topic_ids:
+                # 当天被用户移除过的 topic：今天 replan / 回退生成都不要再安排
+                result["skipped_cancelled"].append(topic.id)
                 continue
             # 至少安排一个核心任务：当天完全为空时，第一个可用的主题直接采纳
             if not today_tasks and not result["selected"]:
@@ -594,7 +606,12 @@ class StudyPlanService:
     # ================= topic -> knowledge_point 关联（Review 链路修复） =================
 
     # 允许建立 topic -> kp 关联的任务种类（source, task_type）
-    _LINKABLE_TASK_KINDS = {("generated", "new"), ("extra", "extra")}
+    # manual/new：用户手动添加的“正式知识学习任务”（关联已有 topic）
+    _LINKABLE_TASK_KINDS = {
+        ("generated", "new"),
+        ("extra", "extra"),
+        ("manual", "new"),
+    }
 
     def link_task_knowledge_point(self, task, topic=None):
         """把一个正式新知识任务 / 额外任务幂等关联到其 topic 的唯一知识点。
@@ -603,7 +620,8 @@ class StudyPlanService:
         fallback path 与 ExtraTaskService 都复用它，不各写一套）。
 
         约束：
-        - 只处理 (source,task_type) ∈ {('generated','new'), ('extra','extra')}；
+        - 只处理 (source,task_type) ∈ {('generated','new'), ('extra','extra'),
+          ('manual','new')}；
         - 只处理 topic_id 非空且能查到 topic 的任务；
         - 只写 tasks.knowledge_point_id（以及 updated_at），其它字段一律不动；
         - 幂等：已有 knowledge_point_id 直接返回，不重复建 kp；

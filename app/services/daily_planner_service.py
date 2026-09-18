@@ -32,7 +32,7 @@ from ..ai.planner_context import (
     WeeklyFocus,
 )
 from ..database.repository import Task, TaskRepository
-from ..database.schema import STATUS_ACTIVE, STATUS_DONE, STATUS_NOT_DONE
+from ..database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_DONE, STATUS_NOT_DONE
 from ..database.study_plan_repository import (
     PlannerDecisionRepository,
     StudyPlanRepository,
@@ -280,7 +280,11 @@ class DailyPlannerService:
         day = add_days(anchor, -week)
         for _ in range(week):
             stats = self.repo.stats_by_date(day)
-            tasks = self.repo.list_by_date(day)
+            # cancelled 是“用户主动移除”，不进入有效任务 / 预计时间 / 完成率
+            tasks = [
+                t for t in self.repo.list_by_date(day)
+                if t.status != STATUS_CANCELLED
+            ]
             postponed = sum(
                 1 for t in tasks if t.postpone_count > 0
             )
@@ -335,10 +339,12 @@ class DailyPlannerService:
 
     # ================= 主流程 =================
 
-    def generate_next_day_plan(self, date_str: str) -> dict:
+    def generate_next_day_plan(self, date_str: str, force: bool = False) -> dict:
         """为 date_str 的"下一天"生成计划（幂等）。
 
         :param date_str: 今天的日期
+        :param force: True 时忽略“当天已有决策”的幂等保护，强制重新生成
+            （供“重新规划今天”使用；仍受本地规则校验）。
         :return: {"date", "created", "fallback", "existing", ...}
         """
         plan_date = add_days(date_str, 1)
@@ -347,7 +353,7 @@ class DailyPlannerService:
         # 只存在决策但当天没有任何任务（例如上次因阶段全部完成而生成为空），
         # 则允许重新生成，避免“当天永远空任务”的卡死。
         existing = self.latest_plan_for_date(plan_date)
-        if existing is not None and len(self.repo.list_by_date(plan_date)) > 0:
+        if not force and existing is not None and len(self.repo.list_by_date(plan_date)) > 0:
             return {
                 "date": plan_date,
                 "existing": True,
@@ -442,6 +448,9 @@ class DailyPlannerService:
 
         done_topic_ids = self._done_topic_ids()
         scheduled_topic_ids = self._scheduled_topic_ids(plan_date)
+        # 当天被用户主动移除（cancelled）的 topic：今天 replan 不再重新生成，
+        # 但次日不受影响（次日 plan_date 不同，查不到该 cancelled 记录）。
+        today_cancelled_topic_ids = self._cancelled_topic_ids(plan_date)
         # Phase 8：高掌握且最近良好 / 已有未完成复习任务 的主题不重复安排
         # （复习交给 ReviewService；此处视为去重，不当作规划失败）
         evidence_skip: set[int] = set()
@@ -477,6 +486,9 @@ class DailyPlannerService:
                 continue
             if rec.topic_id in evidence_skip:
                 # 已掌握/复习进行中：不生成正式新任务，也不判为规划失败
+                continue
+            if rec.topic_id in today_cancelled_topic_ids:
+                # 今天已移除过该 topic：去重，不重新安排
                 continue
             if rec.topic_id in scheduled_topic_ids or rec.topic_id in seen_topic_ids:
                 # 已存在/已排过：去重，不算违规
@@ -528,6 +540,18 @@ class DailyPlannerService:
             "SELECT topic_id FROM tasks WHERE scheduled_date = ? AND status = ? "
             "AND topic_id IS NOT NULL",
             (date_str, STATUS_ACTIVE),
+        ).fetchall()
+        return {r["topic_id"] for r in rows}
+
+    def _cancelled_topic_ids(self, date_str: str) -> set[int]:
+        """某天被用户主动移除（cancelled）主题的 topic_id 集合。
+
+        仅用于阻止“取消 A → replan → 立即又生成 A”，只对当天生效。
+        """
+        rows = self.repo.conn.execute(
+            "SELECT topic_id FROM tasks WHERE scheduled_date = ? AND status = ? "
+            "AND topic_id IS NOT NULL",
+            (date_str, STATUS_CANCELLED),
         ).fetchall()
         return {r["topic_id"] for r in rows}
 

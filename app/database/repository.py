@@ -13,7 +13,12 @@ from typing import Any, Iterable
 import sqlite3
 
 from ..utils.date_utils import now_iso, today
-from .schema import STATUS_ACTIVE, STATUS_DONE, STATUS_NOT_DONE
+from .schema import (
+    STATUS_ACTIVE,
+    STATUS_CANCELLED,
+    STATUS_DONE,
+    STATUS_NOT_DONE,
+)
 
 # 允许通过 dict 批量更新的字段白名单（不允许直接改 id / created_at / scheduled_date 等）
 _UPDATABLE_FIELDS = (
@@ -80,6 +85,11 @@ class Task:
     @property
     def is_not_done(self) -> bool:
         return self.status == STATUS_NOT_DONE
+
+    @property
+    def is_cancelled(self) -> bool:
+        """是否被用户主动从当天计划移除（不是未完成，也不是完成）。"""
+        return self.status == STATUS_CANCELLED
 
     @property
     def over_postpone_limit(self) -> bool:
@@ -323,6 +333,20 @@ class TaskRepository:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def cancel(self, task_id: int) -> bool:
+        """把任务标记为 cancelled（用户主动移除今日任务）。
+
+        只改 status / updated_at，绝不 DELETE、不写 completed_at / not_done_at，
+        以保留 Planner 历史与用户取消记录。
+        """
+        ts = now_iso()
+        cur = self.conn.execute(
+            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+            (STATUS_CANCELLED, ts, task_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
     def delete(self, task_id: int) -> bool:
         """删除任务（保留，供后续 UI 删除功能使用）。"""
         cur = self.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
@@ -357,11 +381,14 @@ class TaskRepository:
             "WHERE scheduled_date = ? GROUP BY status",
             (date_str,),
         )
-        counts: dict[str, int] = {STATUS_ACTIVE: 0, STATUS_DONE: 0, STATUS_NOT_DONE: 0}
+        # 统计只覆盖“用户最终选择保留执行的任务”的状态；cancelled 不计入
+        # 总数与完成率分母（用户主动移除，不算未完成）。
+        counts = {STATUS_ACTIVE: 0, STATUS_DONE: 0, STATUS_NOT_DONE: 0}
         for row in cur:
-            counts[row["status"]] = row["n"]
+            if row["status"] in counts:
+                counts[row["status"]] = row["n"]
 
-        total = sum(counts.values())
+        total = counts[STATUS_ACTIVE] + counts[STATUS_DONE] + counts[STATUS_NOT_DONE]
         done = counts[STATUS_DONE]
         rate = round(done / total * 100, 1) if total else 0.0
         return {

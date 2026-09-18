@@ -9,7 +9,8 @@
 - category            分类（学习 / 工作 / 生活 / 其他）
 - estimated_minutes   预计时间（分钟）
 - priority            优先级（1=低, 2=中, 3=高）
-- status              状态（active=待办, done=已完成, not_done=已填写未完成）
+- status              状态（active=待办, done=已完成, not_done=已填写未完成,
+                              cancelled=用户主动从今天计划移除，不等于未完成、不物理删除）
 - reason              未完成原因 / 延期原因
 - scheduled_date      计划日期（YYYY-MM-DD），此即"所属哪一天"
 - postpone_count      累计延期次数
@@ -28,7 +29,10 @@ from typing import Callable
 STATUS_ACTIVE = "active"
 STATUS_DONE = "done"
 STATUS_NOT_DONE = "not_done"
-ALL_STATUS = (STATUS_ACTIVE, STATUS_DONE, STATUS_NOT_DONE)
+# cancelled：该任务原本安排在某天，但用户主动决定当天不执行。
+# 语义：不是未完成（not_done）、不是完成（done）；保留历史记录，绝不物理删除。
+STATUS_CANCELLED = "cancelled"
+ALL_STATUS = (STATUS_ACTIVE, STATUS_DONE, STATUS_NOT_DONE, STATUS_CANCELLED)
 
 # 优先级常量
 PRIORITY_LOW = 1

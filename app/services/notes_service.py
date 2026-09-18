@@ -110,8 +110,11 @@ class NotesService:
                     if kp:
                         kp_name = kp["name"] or kp_name
                 lines.append(f"- 相关知识点：{kp_name}")
-            status_txt = "已完成" if t.status == "done" else (
-                "进行中/待完成" if t.status == "active" else "未完成"
+            status_txt = (
+                "已完成" if t.status == "done"
+                else "已移除（今日不再执行）" if t.status == "cancelled"
+                else "进行中/待完成" if t.status == "active"
+                else "未完成"
             )
             lines.append(f"- 完成情况：{status_txt}")
             lines.append("")
@@ -159,7 +162,11 @@ class NotesService:
         if not extras:
             return lines + [_NONE, ""]
         for t in extras:
-            status_txt = "已完成" if t.status == "done" else "未完成"
+            status_txt = (
+                "已完成" if t.status == "done"
+                else "已移除" if t.status == "cancelled"
+                else "未完成"
+            )
             lines.append(f"- {t.title}（{status_txt}）")
         return lines + [""]
 

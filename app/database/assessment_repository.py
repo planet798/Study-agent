@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 
 from ..utils.date_utils import now_iso
@@ -46,6 +47,11 @@ def _row(row: sqlite3.Row | None) -> dict | None:
 
 def _rows(rows: list[sqlite3.Row]) -> list[dict]:
     return [dict(r) for r in rows]
+
+
+def _normalize_kp_name(name: str) -> str:
+    """知识点名称规范化：去首尾空白 + 折叠连续空白（含全角空格）；不做模糊匹配。"""
+    return re.sub(r"\s+", " ", (name or "").strip())
 
 
 class AssessmentRepository:
@@ -134,6 +140,32 @@ class AssessmentRepository:
         except sqlite3.IntegrityError:
             again = self.get_knowledge_point_by_topic(topic_id) or \
                 self.get_knowledge_point_by_name(clean)
+            if again is not None:
+                return again
+            raise
+
+    def get_or_create_manual_knowledge_point(
+        self, name: str, description: str = ""
+    ) -> dict:
+        """幂等地取得/创建用户手写的临时知识点（topic_id 保持 NULL）。
+
+        用于“今天主动学一个正式知识点，但当前没有对应 study_topic”的场景：
+        - 不创建/不污染 study_phases / study_topics；
+        - 按**规范化名称**幂等（去除首尾空白、把连续空白折叠为一个空格）；
+          “强化学习基础”重复输入只复用同一个 kp，“PPO”是另一个 kp；
+          不做 contains 模糊匹配；
+        - 若同名 kp 已存在（即使之前绑定过 topic），直接复用，不覆盖任何验收证据。
+        """
+        clean = _normalize_kp_name(name)
+        if not clean:
+            raise ValueError("知识点名不能为空")
+        existing = self.get_knowledge_point_by_name(clean)
+        if existing is not None:
+            return existing
+        try:
+            return self.create_knowledge_point(clean, description, None)
+        except sqlite3.IntegrityError:
+            again = self.get_knowledge_point_by_name(clean)
             if again is not None:
                 return again
             raise

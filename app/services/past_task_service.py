@@ -4,13 +4,14 @@
 未处理，从而影响 phase / coverage / Planner / Review。为在“自动归档为
 not_done”与“生成今日计划”之前拦截，这里提供：
 
-- find_unresolved(today)：找出今天以前仍未明确处理（status=active）的正式
-  每日新知识任务（task_type='new'），按日期从旧到新排序；
+- find_unresolved(today)：找出今天以前仍未明确处理（status=active）且用户可执行
+  的任务（Agent new / manual todo / manual knowledge / extra），按日期从旧到新排序；
+cancelled（用户主动移除）不在 active 之内，天然不会被询问。
 - apply_decisions(decisions)：把用户在补确认窗口的选择，**复用现有
   TaskService 业务逻辑**落库（完成=complete_task，未完成=mark_not_done）。
 
-边界：只处理 task_type='new' 的 active 历史任务；review / extra / manual
-不阻塞。不猜状态、不写 mastery、不创建 assessment。
+边界：不询问 cancelled / done / not_done / 正式 review / 系统内部任务；
+不猜状态、不写 mastery、不创建 assessment。
 """
 
 from __future__ import annotations
@@ -26,6 +27,11 @@ PAST_NOT_DONE_REASON = "跨日补确认：用户选择未完成"
 DECISION_DONE = "done"
 DECISION_NOT_DONE = "not_done"
 
+# 需要（且允许）补确认的用户可执行任务：Agent new / manual todo /
+# manual knowledge / extra。正式 review 与系统任务不在其中。
+_EXECUTABLE_TASK_TYPES = {"new", "manual", "extra"}
+_EXECUTABLE_SOURCES = {"generated", "manual", "extra"}
+
 
 class PastTaskConfirmationService:
     def __init__(
@@ -37,16 +43,18 @@ class PastTaskConfirmationService:
     # ---------- 查询 ----------
 
     def find_unresolved(self, today: str | None = None) -> list:
-        """今天以前仍未明确处理的正式新知识任务（按日期从旧到新）。
+        """今天以前仍未明确处理的用户可执行任务（按日期从旧到新）。
 
-        条件：scheduled_date < today AND status=active AND task_type='new'，
-        且 source != 'manual'（手动创建的任务不阻塞每天正式学习入口）。
-        不返回 done / not_done（用户已明确过），也不返回 review / extra / manual。
+        条件：scheduled_date < today AND status=active，且
+        task_type ∈ {new, manual, extra}、source ∈ {generated, manual, extra}。
+        不返回 done / not_done / cancelled（已明确或已移除），
+        也不返回正式 review（保持现有复习逻辑）。
         """
         date = today or _today()
         tasks = [
             t for t in self.repo.list_active_before(date)
-            if t.task_type == "new" and t.source != "manual"
+            if t.task_type in _EXECUTABLE_TASK_TYPES
+            and t.source in _EXECUTABLE_SOURCES
         ]
         tasks.sort(key=lambda t: (t.scheduled_date, t.id))
         return tasks

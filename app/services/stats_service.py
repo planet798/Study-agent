@@ -10,7 +10,12 @@ from collections import defaultdict
 from datetime import date as _date, timedelta
 
 from ..database.repository import Task, TaskRepository
-from ..database.schema import STATUS_ACTIVE, STATUS_DONE, STATUS_NOT_DONE
+from ..database.schema import (
+    STATUS_ACTIVE,
+    STATUS_CANCELLED,
+    STATUS_DONE,
+    STATUS_NOT_DONE,
+)
 from ..utils.date_utils import add_days, month_range, to_date, today, week_end, week_start
 
 
@@ -21,7 +26,11 @@ class StatsService:
     # ---------- 时段内任务 ----------
 
     def _tasks_between(self, start: str, end: str) -> list[Task]:
-        return self.repo.list_between(start, end)
+        # cancelled = 用户主动从当天计划移除，不算“任务”、不进完成率分母。
+        return [
+            t for t in self.repo.list_between(start, end)
+            if t.status != STATUS_CANCELLED
+        ]
 
     # ================= 周统计 =================
 
@@ -191,7 +200,11 @@ class StatsService:
         day = start
         while day <= anchor:
             stats = self.repo.stats_by_date(day)
-            tasks = self.repo.list_by_date(day)
+            # cancelled 不计入预计/完成时间
+            tasks = [
+                t for t in self.repo.list_by_date(day)
+                if t.status != STATUS_CANCELLED
+            ]
             completed_minutes = sum(
                 t.estimated_minutes for t in tasks if t.status == STATUS_DONE
             )
@@ -238,8 +251,8 @@ class StatsService:
         """全量学习习惯指标（本地计算）。"""
         anchor = end_date or today()
         tasks = self.repo.conn.execute(
-            "SELECT * FROM tasks WHERE scheduled_date <= ?",
-            (anchor,),
+            "SELECT * FROM tasks WHERE scheduled_date <= ? AND status != ?",
+            (anchor, STATUS_CANCELLED),
         ).fetchall()
         tasks = [Task(**dict(r)) for r in tasks]
         if not tasks:
