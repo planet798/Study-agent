@@ -110,7 +110,7 @@ PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是个人学习规划助手。
 11. 明确区分信息来源：career_context 决定长期方向；current_phase / available_topics
     决定当前阶段可学什么；knowledge_evidence 只反映当前实际掌握情况的动态估计
     （不是路线）；已到期的复习由复习调度（ReviewService）负责，你不得再为这些
-    知识点生成正式复习任务；额外学习由额外任务（ExtraTaskService）负责，与你无关。
+    知识点生成正式复习任务。
 12. 不要把 mastery_estimate 当作绝对事实或路线控制器：不得仅凭单次验收或某个
     较高 mastery 跳过整个阶段；不得因一次 poor 永久放弃某个知识点。阶段推进仍由
     学习计划顺序决定，你只能在当前阶段内调整“下一步学什么”。
@@ -296,7 +296,7 @@ def build_skill_priority_section(context: "object") -> str:
     lines.append(
         "职责与边界：career_context=长期职业方向；study_plan=当前阶段；"
         "skill_priorities / JD 缺口=近期优先级；knowledge_evidence=实际掌握情况；"
-        "ReviewService=到期复习；ExtraTaskService=用户主动额外学习。"
+        "ReviewService=到期复习。"
         "Planner 只能决定“当前阶段下一步优先学什么”，并从 available_topics 中选取："
         "不得跳阶段、不得越级安排前置未满足的技能、不要重复已掌握内容。"
     )

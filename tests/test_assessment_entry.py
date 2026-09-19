@@ -4,13 +4,13 @@
 1 done new(+topic/kp) 显示“开始验收”
 2 done new 仍可 start_assessment
 3 pending attempt -> “继续验收”
-4 extra(+kp) 显示验收入口
-5 extra 只有 topic_id 时仍显示入口，点击后自动补 kp
-6 extra 无 topic/kp 不显示
+4 legacy extra(+kp) 仍显示验收入口（历史记录兼容）
+5 legacy extra 只有 topic_id 时仍显示入口
+6 legacy extra 无 topic/kp 不显示
 7 review 验收行为不回归
 8 验收成功写 mastery / next_review_date
 9 new task 验收不被 done 状态阻止
-10 extra 验收正确关联 task_id / kp_id
+10 legacy extra 验收正确关联 task_id / kp_id
 11 完成/未完成按钮不回归
 12 不出现重复“开始验收”
 """
@@ -26,7 +26,6 @@ from PySide6.QtWidgets import QPushButton
 from app.database.assessment_repository import AssessmentRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
-from app.services.extra_task_service import ExtraTaskService
 from app.services.review_service import ReviewService
 from app.services.study_plan_service import StudyPlanService
 from app.ui.main_window import MainWindow
@@ -173,21 +172,21 @@ class TestWidgetVisibility:
     def test_extra_with_kp_shows_assessment(self, qtbot, repo, conn):
         arepo = AssessmentRepository(conn)
         kp = arepo.create_knowledge_point("kp.e")
-        t = repo.create(title="额外", scheduled_date=TODAY, source="extra",
+        t = repo.create(title="legacy额外", scheduled_date=TODAY, source="extra",
                         task_type="extra", knowledge_point_id=kp["id"])
         w = self._widget(qtbot, t)
         assert "开始验收" in _btns(w)
 
     def test_extra_topic_only_shows_assessment(self, qtbot, repo, conn):
         _, topics = _plan(conn)
-        t = repo.create(title="额外", scheduled_date=TODAY, source="extra",
+        t = repo.create(title="legacy额外", scheduled_date=TODAY, source="extra",
                         task_type="extra", topic_id=topics["RAG"].id)
         assert t.knowledge_point_id is None
         w = self._widget(qtbot, t)
         assert "开始验收" in _btns(w)
 
     def test_extra_no_topic_no_kp_hides(self, qtbot, repo):
-        t = repo.create(title="额外", scheduled_date=TODAY, source="extra",
+        t = repo.create(title="legacy额外", scheduled_date=TODAY, source="extra",
                         task_type="extra")
         w = self._widget(qtbot, t)
         assert "开始验收" not in _btns(w)
@@ -229,7 +228,7 @@ class TestWidgetVisibility:
             assert color.name() == "#2c6fbb"
 
 
-# ================= UI 流程：done new / extra 可验收 =================
+# ================= UI 流程：done new 可验收 =================
 
 def _window(qtbot, repo, task_service, date_service, conn, **extra):
     arepo = AssessmentRepository(conn)
@@ -270,25 +269,6 @@ class TestAssessmentFlow:
         assert at is not None and at["task_id"] == t.id
         assert at["knowledge_point_id"] is not None
         # 安全网已把 done 任务也补上 kp
-        assert repo.get(t.id).knowledge_point_id == at["knowledge_point_id"]
-
-    def test_extra_topic_only_flow_heals_and_associates(
-        self, qtbot, repo, task_service, date_service, conn, monkeypatch
-    ):
-        captured = _dummy_flow(monkeypatch)
-        w, arepo, _ = _window(qtbot, repo, task_service, date_service, conn)
-        topic_id = repo.conn.execute(
-            "SELECT id FROM study_topics WHERE name='RAG'").fetchone()["id"]
-        t = repo.create(title="【额外·实践】RAG", scheduled_date=TODAY,
-                        source="extra", task_type="extra", topic_id=topic_id)
-        repo.mark_done(t.id)
-        assert repo.get(t.id).knowledge_point_id is None
-        w.refresh()
-        w._on_start_assessment(t.id)
-        at = captured.get("attempt")
-        assert at is not None
-        assert at["task_id"] == t.id
-        assert at["knowledge_point_id"] is not None
         assert repo.get(t.id).knowledge_point_id == at["knowledge_point_id"]
 
     def test_review_flow_not_regressed(
@@ -336,22 +316,6 @@ class TestAssessmentFlow:
 
 
 # ================= Extra 服务创建即关联 kp =================
-
-class TestExtraLinking:
-    def test_extra_service_links_kp(self, conn, repo):
-        plan_repo, _ = _plan(conn)
-        arepo = AssessmentRepository(conn)
-        sps = StudyPlanService(repo, plan_repo, assessment_repo=arepo)
-        svc = ExtraTaskService(repo, study_plan_service=sps,
-                               assessment_repo=arepo)
-        # 让当前阶段有主题：把今天落在 phase 内
-        res = svc.generate_extra_tasks(today=PHASE_START)
-        assert res["created"]
-        for task in res["created"]:
-            assert task.knowledge_point_id is not None
-            kp = arepo.get_knowledge_point(task.knowledge_point_id)
-            assert kp["topic_id"] == task.topic_id
-
 
 # ================= 验收成功写 mastery / next_review_date =================
 

@@ -28,9 +28,10 @@ DECISION_DONE = "done"
 DECISION_NOT_DONE = "not_done"
 
 # 需要（且允许）补确认的用户可执行任务：Agent new / manual todo /
-# manual knowledge / extra。正式 review 与系统任务不在其中。
-_EXECUTABLE_TASK_TYPES = {"new", "manual", "extra"}
-_EXECUTABLE_SOURCES = {"generated", "manual", "extra"}
+# manual knowledge。正式 review 与系统任务不在其中。
+# 注：legacy extra 已移除功能，不再阻塞启动（由 legacy cleanup 置 cancelled）。
+_EXECUTABLE_TASK_TYPES = {"new", "manual"}
+_EXECUTABLE_SOURCES = {"generated", "manual"}
 
 
 class PastTaskConfirmationService:
@@ -46,9 +47,9 @@ class PastTaskConfirmationService:
         """今天以前仍未明确处理的用户可执行任务（按日期从旧到新）。
 
         条件：scheduled_date < today AND status=active，且
-        task_type ∈ {new, manual, extra}、source ∈ {generated, manual, extra}。
+        task_type ∈ {new, manual}、source ∈ {generated, manual}。
         不返回 done / not_done / cancelled（已明确或已移除），
-        也不返回正式 review（保持现有复习逻辑）。
+        也不返回正式 review（保持现有复习逻辑）与 legacy extra。
         """
         date = today or _today()
         tasks = [

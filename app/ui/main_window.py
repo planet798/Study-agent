@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
-    QDesktopServices,
     QIcon,
     QPixmap,
 )
@@ -61,6 +61,13 @@ from .task_widget import TaskWidget
 POSTPONE_WARNING = "该任务已经连续延期 3 次，请考虑拆分任务或调整计划。"
 
 
+@dataclass
+class TodayViewState:
+    """今日页可恢复的视图状态（第一版只保存滚动位置）。"""
+
+    scroll_value: int = 0
+
+
 def _tray_icon() -> QIcon:
     """生成一个简单的程序图标（托盘 / 窗口通用）。"""
     pm = QPixmap(64, 64)
@@ -92,8 +99,6 @@ class MainWindow(QMainWindow):
         assessment_service=None,
         assessment_repo=None,
         review_scheduler=None,
-        extra_service=None,
-        exploration_service=None,
         skill_service=None,
         jd_service=None,
         jd_summary_service=None,
@@ -133,8 +138,6 @@ class MainWindow(QMainWindow):
         )
         # 复习调度服务（ReviewService，区别于上面的 review_service=TaskReviewService）
         self.review_scheduler = review_scheduler
-        self.extra_service = extra_service
-        self.exploration_service = exploration_service
         # Phase A~E 服务：可选；未传则对应职业面板隐藏（不回归旧行为）
         self.skill_service = skill_service
         self.jd_service = jd_service
@@ -164,7 +167,6 @@ class MainWindow(QMainWindow):
         self._ai_workers: list[AIReviewWorker] = []
         # 防止连续双击【开始验收】创建多个 worker / 多个 pending attempt
         self._assessment_inflight: set[int] = set()
-        self._exploration_added = False
 
         self.setWindowTitle("Study Agent")
         self.setMinimumSize(560, 460)
@@ -407,8 +409,13 @@ class MainWindow(QMainWindow):
         self.date_label.setText(today_str)
         self.refresh()
 
-    def refresh(self) -> None:
-        """重建今日页：新知识 / 复习 / 额外 / 课外探索 + 职业面板 + 统计。"""
+    def refresh(self, preserve_scroll: bool = False) -> None:
+        """重建今日页（新知识 / 复习 + 职业面板）。
+
+        :param preserve_scroll: 同页面 mutation（完成/未完成/移除/复习完成等）
+            时置 True，重建后恢复原滚动位置，避免自动跳到底部。
+        """
+        state = self.capture_today_view_state() if preserve_scroll else None
         today_str = self.current_date
         tasks = self.task_service.get_tasks_by_date(today_str)
         self._today_tasks = tasks
@@ -424,9 +431,11 @@ class MainWindow(QMainWindow):
         # 清空滚动区动态内容
         self._clear_dynamic_list()
         self._task_widgets.clear()
-        self._exploration_added = False
         self._career_panel_added = False
 
+        # legacy 兼容：
+        # - review 单独区域；
+        # - 已移除的 extra 不再展示（历史记录保留在 DB，但不作为产品功能）。
         new_tasks = [
             t for t in tasks
             if t.task_type not in ("review", "extra")
@@ -436,11 +445,6 @@ class MainWindow(QMainWindow):
         review_tasks = [
             t for t in tasks
             if t.task_type == "review" and t.status != STATUS_CANCELLED
-            and self._matches_route(t, selected_route)
-        ]
-        extra_tasks = [
-            t for t in tasks
-            if t.task_type == "extra" and t.status != STATUS_CANCELLED
             and self._matches_route(t, selected_route)
         ]
         # 用户主动移除的任务：不进入“今日待执行任务”，仅折叠提示
@@ -470,18 +474,6 @@ class MainWindow(QMainWindow):
             else:
                 self._add_section_hint("暂无可复习内容")
 
-        # 3) 额外学习
-        if self.extra_service is not None or extra_tasks:
-            self._add_section_header("额外学习")
-            self._add_extra_control(extra_tasks)
-            for t in extra_tasks:
-                self._add_task_widget(t)
-
-        # 4) 课外探索
-        if self.exploration_service is not None:
-            self._add_section_header("课外探索")
-            self._add_exploration()
-
         # Phase E：职业 / 技能 / JD 面板（可选注入，异常不崩溃）
         self._add_skill_overview()
         self._add_jd_trend_panel()
@@ -489,16 +481,48 @@ class MainWindow(QMainWindow):
         self.list_layout.addStretch()
 
         has_effective = any(t.status != STATUS_CANCELLED for t in tasks)
-        has_content = (
-            bool(self._task_widgets)
-            or self._exploration_added
-            or self._career_panel_added
-        )
-        scroll_visible = (
-            has_effective or self._exploration_added or self._career_panel_added
-        )
+        has_content = bool(self._task_widgets) or self._career_panel_added
+        scroll_visible = has_effective or self._career_panel_added
         self.empty_hint.setVisible(not has_content)
         self.scroll.setVisible(scroll_visible)
+
+        if state is not None:
+            self.restore_today_view_state(state)
+
+    # ---------- 今日页滚动位置保持 ----------
+
+    def capture_today_view_state(self) -> TodayViewState:
+        try:
+            bar = self.scroll.verticalScrollBar()
+            return TodayViewState(scroll_value=int(bar.value()))
+        except Exception:  # noqa: BLE001
+            return TodayViewState()
+
+    def restore_today_view_state(self, state: TodayViewState) -> None:
+        """在 layout 完成后恢复滚动位置（clamp 到当前 maximum）。
+
+        Qt 的 deleteLater / layout 是异步的，且被删除的焦点控件会让 Qt 自动
+        ensureWidgetVisible 而滚动；因此先清除焦点，再用 QTimer 在事件循环后
+        恢复，并做一次延迟兜底。
+        """
+        from PySide6.QtWidgets import QApplication
+
+        focused = QApplication.focusWidget()
+        if focused is not None:
+            focused.clearFocus()
+
+        def _apply() -> None:
+            try:
+                bar = self.scroll.verticalScrollBar()
+                if bar.maximum() <= 0 and state.scroll_value > 0:
+                    return  # layout 还未完成，等待下一个 timer
+                bar.setValue(min(int(state.scroll_value), bar.maximum()))
+            except Exception:  # noqa: BLE001
+                pass
+
+        _apply()
+        for delay in (0, 16, 60, 160):
+            QTimer.singleShot(delay, _apply)
 
     # ---------- Phase C：路线筛选 / 统计 ----------
 
@@ -621,45 +645,6 @@ class MainWindow(QMainWindow):
         self.list_layout.addWidget(widget)
         self._task_widgets.append(widget)
 
-    def _add_extra_control(self, extra_tasks) -> None:
-        """额外学习区域的额度提示 + 生成按钮。"""
-        if self.extra_service is None:
-            return
-        used = len(extra_tasks)
-        cap = int(getattr(self.extra_service, "max_daily_extra", 0))
-        remaining = max(0, cap - used)
-        row_w = QWidget()
-        row = QHBoxLayout(row_w)
-        row.setContentsMargins(0, 0, 0, 0)
-        info = QLabel(f"已生成 {used} / {cap} 个，今日剩余额度 {remaining} 个")
-        info.setObjectName("TaskMeta")
-        btn = QPushButton("继续学习 / 生成额外任务")
-        btn.setObjectName("SecondaryButton")
-        apply_secondary_button_text(btn)
-        btn.clicked.connect(self._on_generate_extra)
-        row.addWidget(info)
-        row.addStretch()
-        row.addWidget(btn)
-        self.list_layout.addWidget(row_w)
-
-    def _on_generate_extra(self) -> None:
-        if self.extra_service is None:
-            return
-        try:
-            result = self.extra_service.generate_extra_tasks(today=self.current_date)
-        except Exception as e:  # noqa: BLE001
-            self.statusBar().showMessage(f"生成额外任务失败: {e}", 5000)
-            return
-        self.refresh()
-        created = result.get("created", [])
-        if created:
-            msg = f"生成了 {len(created)} 个额外任务"
-        elif result.get("skipped_duplicate"):
-            msg = "额外任务已存在或今天已生成，未重复创建"
-        else:
-            msg = "今日额外额度已用完或没有可用学习来源"
-        self.statusBar().showMessage(msg, 5000)
-
     # ---------- Phase A：手动添加 / 移除今日任务 ----------
 
     def _available_topics(self) -> list[dict]:
@@ -731,7 +716,7 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001 - 添加失败不崩溃
             show_warning(self, f"添加任务失败：{e}")
             return
-        self.refresh()
+        self.refresh(preserve_scroll=True)
         self.statusBar().showMessage(msg, 4000)
 
     def _confirm_remove_dialog(self) -> bool:
@@ -776,64 +761,8 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             show_warning(self, f"移除失败：{e}")
             return
-        self.refresh()
+        self.refresh(preserve_scroll=True)
         self.statusBar().showMessage("已移除今日任务（不算未完成）", 4000)
-
-    def _add_exploration(self) -> None:
-        """课外探索区域：展示已验证资源的卡片与打开链接按钮。"""
-        svc = self.exploration_service
-        try:
-            context = svc.build_context(
-                self.current_date, self.study_plan_service, self.assessment_repo
-            )
-            items = svc.recommend(context, limit=3)
-        except Exception:  # noqa: BLE001
-            self._add_section_hint("课外探索暂不可用")
-            return
-        if not items:
-            self._add_section_hint("暂无匹配的课外探索资源")
-            return
-        self._exploration_added = True
-        type_label = {"github": "GitHub", "leetcode": "LeetCode", "docs": "文档/资料"}
-        for it in items:
-            card = QWidget()
-            cl = QVBoxLayout(card)
-            cl.setContentsMargins(8, 6, 8, 6)
-            head = QHBoxLayout()
-            badge = QLabel(f"[{type_label.get(it.get('type'), it.get('type'))}] {it.get('title')}")
-            badge.setObjectName("TaskTitle")
-            head.addWidget(badge)
-            head.addStretch()
-            minutes = int(it.get("minutes") or 0)
-            mlabel = QLabel(f"{minutes} 分钟" if minutes else "")
-            mlabel.setObjectName("TaskMeta")
-            head.addWidget(mlabel)
-            cl.addLayout(head)
-            why = QLabel(it.get("reason") or "")
-            why.setWordWrap(True)
-            why.setObjectName("TaskMeta")
-            cl.addWidget(why)
-            open_btn = QPushButton("打开链接")
-            open_btn.setObjectName("SecondaryButton")
-            apply_secondary_button_text(open_btn)
-            open_btn.clicked.connect(
-                lambda _=False, u=it.get("url", ""): self._open_exploration_url(u)
-            )
-            br = QHBoxLayout()
-            br.addStretch()
-            br.addWidget(open_btn)
-            cl.addLayout(br)
-            self.list_layout.addWidget(card)
-
-    def _open_exploration_url(self, url: str) -> None:
-        """打开课外资源链接（URL 只能来自已验证资源集合）。"""
-        if not url:
-            self.statusBar().showMessage("该资源没有可用链接", 3000)
-            return
-        if QDesktopServices.openUrl(QUrl(url)):
-            self.statusBar().showMessage("已在浏览器中打开", 3000)
-        else:
-            self.statusBar().showMessage("无法打开链接", 3000)
 
     # ---------- Phase E：职业面板 ----------
 
@@ -1200,7 +1129,7 @@ class MainWindow(QMainWindow):
                 "近期岗位需求已更新，将影响后续学习规划。",
                 6000,
             )
-            self.refresh()
+            self.refresh(preserve_scroll=True)
 
     def _on_view_history_jd(self) -> None:
         if self.jd_service is None:
@@ -1320,7 +1249,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.statusBar().showMessage(f"已加入技能「{name}」。", 5000)
-        self.refresh()
+        self.refresh(preserve_scroll=True)
 
     def _on_ignore_candidate(self, candidate_id: int) -> None:
         if self.jd_summary_service is None:
@@ -1330,7 +1259,7 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             return
         self.statusBar().showMessage("已忽略该 JD 新技能候选。", 3000)
-        self.refresh()
+        self.refresh(preserve_scroll=True)
 
     def _add_jd_panel(self) -> None:
         """兼容保留：旧“最新 JD / 岗位需求”面板（已由 _add_jd_trend_panel 取代）。"""
@@ -1348,7 +1277,7 @@ class MainWindow(QMainWindow):
             )
             if self.jd_service is not None:
                 self.skill_service.recompute_all_priority_scores()
-                self.refresh()
+                self.refresh(preserve_scroll=True)
 
     def _show_jd_detail(self, jd: dict) -> None:
         from .career_dialogs import JdDetailDialog
@@ -1468,7 +1397,7 @@ class MainWindow(QMainWindow):
                 self.task_service.complete_task(task_id)
         except Exception:  # noqa: BLE001
             pass
-        self.refresh()
+        self.refresh(preserve_scroll=True)
 
     def _update_phase_info(self, today_str: str) -> None:
         """显示当前学习阶段与今日学习目标。"""
@@ -1590,7 +1519,7 @@ class MainWindow(QMainWindow):
                     self.task_service.repo.delete(t.id)
                     cleaned_ids.append(t.id)
             result = self.scheduler.generate(today_str, force=True)
-            self.refresh()
+            self.refresh(preserve_scroll=True)
             n = len(result.get("created", []))
             routes = len(result.get("plannable_route_ids", []))
             msg = f"重新规划完成：生成了 {n} 个任务（{routes} 条路线）"
@@ -1629,7 +1558,7 @@ class MainWindow(QMainWindow):
         result = self.daily_planner_service.generate_next_day_plan(
             add_days(today_str, -1), force=True
         )
-        self.refresh()
+        self.refresh(preserve_scroll=True)
         msg = f"重新规划完成：生成了 {len(result.get('created', []))} 个任务"
         if cleaned_ids:
             msg += f"，移除了 {len(cleaned_ids)} 个旧生成任务"
@@ -1639,7 +1568,7 @@ class MainWindow(QMainWindow):
 
     def _on_complete(self, task_id: int) -> None:
         self.task_service.complete_task(task_id)
-        self.refresh()
+        self.refresh(preserve_scroll=True)
         self.statusBar().showMessage("任务已完成", 3000)
 
     def _on_not_done(self, task_id: int) -> None:
@@ -1650,7 +1579,7 @@ class MainWindow(QMainWindow):
             return  # 用户取消
         # 原因已保证非空（对话框内校验）
         self.task_service.mark_not_done(task_id, reason)
-        self.refresh()
+        self.refresh(preserve_scroll=True)
         self.statusBar().showMessage("已记录未完成原因", 3000)
 
         task = self.task_service.get_task(task_id)
@@ -1695,12 +1624,12 @@ class MainWindow(QMainWindow):
 
     def _on_dialog_no_postpone(self, task_id: int) -> None:
         """用户选择不延期：保持 not_done，刷新界面。"""
-        self.refresh()
+        self.refresh(preserve_scroll=True)
         self.statusBar().showMessage("已保持未完成状态", 3000)
 
     def _on_postpone(self, task_id: int) -> None:
         task = self.task_service.postpone_task(task_id)
-        self.refresh()
+        self.refresh(preserve_scroll=True)
         self.statusBar().showMessage(
             f"已延期到 {task.scheduled_date}", 3000
         )

@@ -163,11 +163,6 @@ class TestBudget:
                            task_type="review")
         assert env["repo"].count_generated_new_by_date(TODAY) == 0
 
-    def test_extra_does_not_consume(self, env):
-        env["repo"].create("额外", scheduled_date=TODAY, source="extra",
-                           task_type="extra")
-        assert env["repo"].count_generated_new_by_date(TODAY) == 0
-
     def test_cancelled_does_not_consume(self, env):
         t = env["repo"].create("取消", scheduled_date=TODAY,
                                source="generated", task_type="new",

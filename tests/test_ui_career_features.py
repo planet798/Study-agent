@@ -42,8 +42,6 @@ from app.database.skill_repository import (
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
 from app.services.date_service import DateService
-from app.services.exploration_service import ExplorationService
-from app.services.extra_task_service import ExtraTaskService
 from app.services.jd_service import JdService
 from app.services.learning_outcome_service import LearningOutcomeService
 from app.services.notes_service import NotesService
@@ -263,6 +261,7 @@ class TestNoRegression:
         env["repo"].create(title="复习 kp1", scheduled_date=TODAY,
                            source="review", task_type="review",
                            knowledge_point_id=kp["id"])
+        # legacy extra：功能已移除，不应再出现在今日页
         env["repo"].create(title="【额外】实践", scheduled_date=TODAY,
                            source="extra", task_type="extra",
                            difficulty="practice")
@@ -274,9 +273,13 @@ class TestNoRegression:
         txt = _label_text(w)
         assert "今日新知识" in txt
         assert "今日复习" in txt
-        assert "额外学习" in txt
         assert "今日新知识任务" in txt
         assert "复习 kp1" in txt
+        # 额外学习 / 课外探索区域已完整移除
+        assert "额外学习" not in txt
+        assert "课外探索" not in txt
+        # legacy extra 被安全转为 cancelled（只在“已移除”提示中出现）
+        assert "已移除今日任务" in txt
 
     def test_assessment_no_regression(self, qtbot, conn, plan_repo, monkeypatch):
         from app.ai.client import DeepSeekClient
@@ -402,13 +405,7 @@ class TestReadableButtons:
         # 一个 active 任务 -> 出现“完成 / 未完成”按钮
         env["repo"].create(title="学习任务", scheduled_date=TODAY,
                            source="generated", task_type="new")
-        extra = ExtraTaskService(
-            env["repo"], study_plan_service=env["sps"],
-            assessment_repo=env["arepo"],
-        )
-        exploration = ExplorationService()
-        w = _window(qtbot, env, extra_service=extra,
-                    exploration_service=exploration)
+        w = _window(qtbot, env)
         return w
 
     def _buttons_by_text(self, w):
@@ -422,8 +419,7 @@ class TestReadableButtons:
         from PySide6.QtGui import QColor, QPalette
 
         w = self._window_with_all(qtbot, conn, plan_repo)
-        targets = ("继续学习 / 生成额外任务", "添加今日 JD 技术汇总",
-                   "查看历史 JD")
+        targets = ("添加今日 JD 技术汇总", "查看历史 JD")
         found = self._buttons_by_text(w)
         assert set(targets) <= set(found)
         for text in targets:
@@ -450,7 +446,6 @@ class TestReadableButtons:
         # 已有按钮样式保持不变
         assert found["完成"].objectName() == "SecondaryButton"
         assert found["未完成"].objectName() == "DangerButton"
-        assert found["打开链接"].objectName() == "SecondaryButton"
         # “重新规划今天”仍是普通按钮（无 PrimaryButton 白字；非滚动区）
         assert w.planner_replan_btn.objectName() == ""
         assert w.planner_replan_btn.text() == "重新规划今天"

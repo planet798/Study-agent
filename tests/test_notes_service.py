@@ -4,7 +4,6 @@
 13 Markdown 生成
 14 Markdown 结构
 15 Markdown 重复导出幂等
-16 无 exploration usage 时不伪造“已学习”
 + 写入失败返回明确错误、不崩溃
 """
 
@@ -34,7 +33,7 @@ def _build(conn, plan_repo):
     lo_repo = LearningOutcomeRepository(conn)
     lo_service = LearningOutcomeService(lo_repo)
 
-    # 当日新知识 / 复习 / 额外
+    # 当日新知识 / 复习
     repo.create(title="PyTorch 实现 Attention", scheduled_date=DAY,
                 description="实现 scaled dot-product attention",
                 source="generated", topic_id=1, task_type="new")
@@ -42,8 +41,6 @@ def _build(conn, plan_repo):
     repo.create(title="复习 pytorch.autograd", scheduled_date=DAY,
                 source="review", task_type="review",
                 knowledge_point_id=kp["id"])
-    repo.create(title="【额外】PyTorch 实践", scheduled_date=DAY,
-                source="extra", task_type="extra", difficulty="practice")
     # 一个失败任务的薄弱验收证据
     att = assessment_repo.create_attempt(
         kp["id"], '[{"question":"q","type":"concept","expected_points":1}]')
@@ -80,8 +77,6 @@ class TestNoteGeneration:
             "## 今日学习目标",
             "## 今日新知识",
             "## 今日复习",
-            "## 今日额外学习",
-            "## 课外探索",
             "## 学习成果",
             "## 薄弱点",
             "## 简历素材",
@@ -122,15 +117,6 @@ class TestNoteGeneration:
             assert "实现" not in content  # 不伪造任何实现细节
         finally:
             c2.close()
-
-    def test_no_exploration_usage_fabrication(self, conn, plan_repo, tmp_path):
-        ns, _, _ = _build(conn, plan_repo)
-        content = ns.build_daily_note(DAY)
-        # 系统不知道用户是否学了资源 → 不出现“学习了该资源”
-        assert "推荐了哪些资源" in content
-        assert "不声称“已学习”" in content
-        assert "学习了" not in content.split("## 学习成果")[0].split(
-            "## 课外探索")[1] or True  # 课外探索节内不声称已学习
 
     def test_write_failure_raises_clear_error(self, conn, plan_repo, tmp_path):
         ns, _, _ = _build(conn, plan_repo)

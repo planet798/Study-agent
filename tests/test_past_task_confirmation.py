@@ -60,11 +60,10 @@ class TestFindUnresolved:
         _mk(repo, "R", YESTERDAY, task_type="review", source="review")
         assert _svc(repo, task_service).find_unresolved(TODAY) == []
 
-    def test_extra_found(self, repo, task_service):
-        # Phase A：extra 也属于用户可执行任务，需要补确认。
-        t = _mk(repo, "E", YESTERDAY, task_type="extra", source="extra")
-        found = _svc(repo, task_service).find_unresolved(TODAY)
-        assert [x.id for x in found] == [t.id]
+    def test_legacy_extra_not_found(self, repo, task_service):
+        # 额外学习功能已移除：legacy extra 不再阻塞昨日补确认。
+        _mk(repo, "E", YESTERDAY, task_type="extra", source="extra")
+        assert _svc(repo, task_service).find_unresolved(TODAY) == []
 
     def test_manual_todo_found(self, repo, task_service):
         # Phase A：手动普通 To-do（task_type=manual）需要补确认。

@@ -12,7 +12,6 @@ from app.database.learning_route_repository import LearningRouteRepository
 from app.database.repository import TaskRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.date_service import DateService
-from app.services.extra_task_service import ExtraTaskService
 from app.services.learning_route_service import LearningRouteService
 from app.services.manual_task_service import ManualTaskService
 from app.services.review_service import ReviewService
@@ -324,13 +323,6 @@ class TestNoRegression:
         svc = ReviewService(env["repo"], env["arepo"], plan_repo=env["plan_repo"])
         schedule = svc._create_review_task(kp, TODAY)
         assert env["repo"].get(schedule["task_id"]).route_id == rl.id
-
-    def test_extra_inherits_route(self, env):
-        svc = ExtraTaskService(env["repo"], study_plan_service=env["sps"],
-                               assessment_repo=env["arepo"])
-        result = svc.generate_extra_tasks(today=TODAY)
-        assert result["created"]
-        assert all(t.route_id == env["default"].id for t in result["created"])
 
     def test_historical_null_manual_kp_not_guessed(self, env):
         kp = env["arepo"].create_knowledge_point("历史基础")

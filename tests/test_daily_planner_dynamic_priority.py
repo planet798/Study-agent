@@ -221,19 +221,6 @@ class TestReviewExtraIsolation:
         assert any(t.task_type == "review"
                    for t in env["repo"].list_by_date("2026-09-08"))
 
-    def test_extra_task_does_not_interfere(self, conn, plan_repo):
-        env = _build(conn, plan_repo, with_jd=True)
-        env["repo"].create(
-            title="【额外】", scheduled_date="2026-09-08", source="extra",
-            task_type="extra", difficulty="practice",
-        )
-        dp = _planner(env, CountingPlanner(configured=False))
-        dp.generate_next_day_plan("2026-09-07")
-        tasks = env["repo"].list_by_date("2026-09-08")
-        extras = [t for t in tasks if t.task_type == "extra"]
-        assert len(extras) == 1  # 未被复制、未被占用
-
-
 class TestBoundaries:
     def test_date_transition_idempotent_with_jd(self, conn, plan_repo):
         env = _build(conn, plan_repo, with_jd=True)

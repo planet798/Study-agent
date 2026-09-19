@@ -20,7 +20,6 @@ from app.database.repository import TaskRepository
 from app.database.skill_repository import JdRepository, SkillRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.daily_planner_service import DailyPlannerService
-from app.services.extra_task_service import ExtraTaskService
 from app.services.learning_route_service import LearningRouteService
 from app.services.manual_task_service import ManualTaskService
 from app.services.past_task_service import PastTaskConfirmationService
@@ -123,16 +122,6 @@ class TestReviewRoute:
 
 
 # ================= 29：Extra 继承 route =================
-
-class TestExtraRoute:
-    def test_extra_topic_task_inherits_route(self, env):
-        svc = ExtraTaskService(env["repo"], study_plan_service=env["sps"],
-                               assessment_repo=env["arepo"])
-        result = svc.generate_extra_tasks(today=TODAY)
-        assert result["created"]
-        for task in result["created"]:
-            assert task.route_id == env["default_route"].id
-
 
 # ================= 30~31：Manual =================
 

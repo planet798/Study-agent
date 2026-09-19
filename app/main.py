@@ -663,10 +663,8 @@ def main() -> int:
     date_service.scheduler = scheduler
     review_service = TaskReviewService(ai_client)
 
-    # Phase 3D~6：验收 / 复习调度 / 额外学习 / 课外探索
+    # Phase 3D~6：验收 / 复习调度
     from app.services.assessment_service import AssessmentService
-    from app.services.exploration_service import ExplorationService
-    from app.services.extra_task_service import ExtraTaskService
     from app.services.review_service import ReviewService
 
     # 复习调度（依赖 TaskRepository + AssessmentRepository）
@@ -698,11 +696,6 @@ def main() -> int:
             review_service=fresh_review,
             outcome_service=fresh_outcome,
         )
-    extra_service = ExtraTaskService(
-        repo,
-        study_plan_service=study_plan_service,
-        assessment_repo=assessment_repo,
-    )
     # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
     from app.services.manual_task_service import ManualTaskService
 
@@ -711,7 +704,6 @@ def main() -> int:
         assessment_repo=assessment_repo,
         study_plan_service=study_plan_service,
     )
-    exploration_service = ExplorationService()
 
     # 周/月总结（本地统计 + AI 解读 + 缓存）
     summary_service = SummaryService(
@@ -754,8 +746,6 @@ def main() -> int:
         assessment_service=assessment_service,
         assessment_repo=assessment_repo,
         review_scheduler=review_scheduler,
-        extra_service=extra_service,
-        exploration_service=exploration_service,
         skill_service=skill_service,
         jd_service=jd_service,
         jd_summary_service=jd_summary_service,

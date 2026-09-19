@@ -65,8 +65,6 @@ class NotesService:
         lines += self._section_goals(date)
         lines += self._section_new_knowledge(date)
         lines += self._section_review(date)
-        lines += self._section_extra(date)
-        lines += self._section_exploration(date)
         lines += self._section_outcomes(date)
         lines += self._section_weak_points(date)
         lines += self._section_resume_material(date)
@@ -152,32 +150,6 @@ class NotesService:
                 lines.append("- 暂无关联验收结果")
             lines.append("")
         return lines
-
-    def _section_extra(self, date: str) -> list[str]:
-        lines = ["## 今日额外学习", ""]
-        extras = []
-        if self.repo is not None:
-            extras = [t for t in self.repo.list_by_date(date)
-                      if t.task_type == "extra"]
-        if not extras:
-            return lines + [_NONE, ""]
-        for t in extras:
-            status_txt = (
-                "已完成" if t.status == "done"
-                else "已移除" if t.status == "cancelled"
-                else "未完成"
-            )
-            lines.append(f"- {t.title}（{status_txt}）")
-        return lines + [""]
-
-    def _section_exploration(self, date: str) -> list[str]:
-        lines = ["## 课外探索", ""]
-        lines.append(
-            "> 系统目前只记录“推荐了哪些资源”，不掌握用户是否真正学习；"
-            "因此这里只作资源记录，不声称“已学习”。"
-        )
-        lines.append(_NONE)
-        return lines + [""]
 
     def _section_outcomes(self, date: str) -> list[str]:
         lines = ["## 学习成果", ""]
