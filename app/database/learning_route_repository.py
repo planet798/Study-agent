@@ -259,13 +259,15 @@ class LearningRouteRepository:
 
     # ---------- route_skills ----------
 
-    def assign_skill(self, route_id: int, skill_id: int) -> bool:
+    def assign_skill(self, route_id: int, skill_id: int,
+                     commit: bool = True) -> bool:
         cur = self.conn.execute(
             "INSERT OR IGNORE INTO route_skills (route_id, skill_id, created_at) "
             "VALUES (?, ?, ?)",
             (int(route_id), int(skill_id), now_iso()),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return cur.rowcount > 0
 
     def unassign_skill(self, route_id: int, skill_id: int) -> bool:

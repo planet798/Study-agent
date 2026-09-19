@@ -521,6 +521,8 @@ def main() -> int:
     route_repo = LearningRouteRepository(conn)
     route_service = LearningRouteService(route_repo, skill_repo=skill_repo)
     route_plan_service = RoutePlanService(plan_repo, repo, assessment_repo)
+    # Phase F：route-specific curriculum gap 需要 route_skills
+    skill_service.route_repo = route_repo
     # Phase E：路线进度 / 掌握 / 复习状态统一计算
     from app.services.route_progress_service import RouteProgressService
     from app.services.route_repair_service import repair_route_assignments
@@ -555,6 +557,7 @@ def main() -> int:
         JdDailySummaryRepository(conn),
         skill_repo,
         candidate_repo=JdSkillCandidateRepository(conn),
+        route_repo=route_repo,
     )
     skill_service.market_signal = MarketSignal(jd_summary_service)
     # stage alignment 排序偏好：当前 phase 有对应 topic 的技能优先
@@ -718,6 +721,11 @@ def main() -> int:
         route_progress_service=route_progress_service,
     )
 
+    # Phase F：AI 学习路线草稿（纯 AI，不碰 DB）
+    from app.services.ai_route_service import AIRouteBuilderService
+
+    ai_route_service = AIRouteBuilderService(ai_client)
+
     # 不显式传 today_provider：MainWindow 默认跟随 date_utils.today()，
     # 因此 --date 注入的日期会自动作用于整个应用（GUI 日期/阶段/任务/统计/AI）。
     # Phase D：Obsidian 每日笔记（供 UI 导出；未注入则 UI 隐藏导出能力）
@@ -757,6 +765,7 @@ def main() -> int:
         route_service=route_service,
         route_plan_service=route_plan_service,
         route_progress_service=route_progress_service,
+        ai_route_service=ai_route_service,
         scheduler=scheduler,
         # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
         assessment_service_factory=build_assessment_service,

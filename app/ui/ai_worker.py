@@ -114,3 +114,55 @@ def run_start_assessment(
 def run_submit_answers(service, attempt_id, answers, today=None):
     """AssessmentWorker 操作：提交答案 + AI 判题 + 回写知识点。"""
     return service.submit_answers(attempt_id, answers, today=today)
+
+
+class AIRouteBuilderWorker(QThread):
+    """后台生成学习路线草稿（Phase F）。
+
+    只持有 AIRouteBuilderService（AI client 只是 HTTP/config）+ 纯数据 context，
+    **不使用任何 SQLite 连接 / repository**，因此线程安全。
+    成功后由主线程打开 Preview，用户确认后才写库。
+    """
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, service, context: dict, route_skills=None,
+                 market=None, parent=None):
+        super().__init__(parent)
+        self._service = service
+        self._context = context
+        self._route_skills = route_skills or []
+        self._market = market
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            draft = self._service.build_draft(
+                self._context, route_skills=self._route_skills,
+                market=self._market,
+            )
+            self.succeeded.emit(draft)
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(str(e))
+
+
+class RouteSuggestionWorker(QThread):
+    """后台为 JD 候选技能建议关联路线（Phase F，纯数据，无 DB）。"""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, service, candidate_name: str, routes: list,
+                 parent=None):
+        super().__init__(parent)
+        self._service = service
+        self._candidate_name = candidate_name
+        self._routes = list(routes or [])
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            self.succeeded.emit(
+                self._service.suggest_routes(self._candidate_name, self._routes)
+            )
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(str(e))

@@ -554,3 +554,198 @@ def parse_assessment_judgment_from_json(text: str) -> AssessmentJudgment:
     except json.JSONDecodeError as e:
         raise AIServiceError(f"判题返回的不是合法 JSON：{e}") from e
     return parse_assessment_judgment(data)
+
+
+# ============================================================
+# AI 学习路线草稿（Route Builder）输出结构（Phase F）
+# ============================================================
+#
+# 只生成课程结构草稿；不包含任何数据库 id / route_id / phase_id / topic_id。
+# 规模限制防止一次生成过多内容；任何越界都抛 AIServiceError，绝不部分写库。
+
+MIN_ROUTE_PHASES = 2
+MAX_ROUTE_PHASES = 8
+MIN_PHASE_TOPICS = 2
+MAX_PHASE_TOPICS = 12
+MAX_ROUTE_TOPICS = 40
+MIN_TOPIC_MINUTES = 10
+MAX_TOPIC_MINUTES = 180
+MIN_TOPIC_PRIORITY = 1
+MAX_TOPIC_PRIORITY = 5
+
+
+def normalize_draft_name(name: str) -> str:
+    """仅规范化完全一致的名称（去首尾/折叠空白/小写）；不做模糊合并。"""
+    return " ".join((name or "").split()).lower()
+
+
+@dataclass(frozen=True)
+class AITopicDraft:
+    name: str
+    description: str
+    estimated_minutes: int
+    priority: int
+    order: int
+
+
+@dataclass(frozen=True)
+class AIPhaseDraft:
+    name: str
+    goal: str
+    order: int
+    topics: tuple[AITopicDraft, ...]
+
+
+@dataclass(frozen=True)
+class AIRouteDraft:
+    route_name: str
+    plan_name: str
+    summary: str
+    phases: tuple[AIPhaseDraft, ...]
+
+    @property
+    def topic_count(self) -> int:
+        return sum(len(p.topics) for p in self.phases)
+
+
+def _require_int(value: object, field: str, low: int, high: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AIServiceError(f"字段 {field} 必须是整数，实际为 {type(value).__name__}")
+    num = int(value)
+    if not (low <= num <= high):
+        raise AIServiceError(f"字段 {field} 越界：{num}，应在 [{low}, {high}] 内")
+    return num
+
+
+def parse_route_draft(raw: object) -> AIRouteDraft:
+    """校验并解析 AI 返回的学习路线草稿 JSON。"""
+    if not isinstance(raw, dict):
+        raise AIServiceError(
+            f"路线草稿必须是 JSON 对象，实际为 {type(raw).__name__}"
+        )
+    route_name = _require_str(raw.get("route_name"), "route_name", max_len=100)
+    plan_name = _require_str(raw.get("plan_name"), "plan_name", max_len=120)
+    summary = raw.get("summary", "")
+    if not isinstance(summary, str):
+        summary = ""
+    raw_phases = raw.get("phases")
+    if not isinstance(raw_phases, list):
+        raise AIServiceError("phases 必须是数组")
+    if not (MIN_ROUTE_PHASES <= len(raw_phases) <= MAX_ROUTE_PHASES):
+        raise AIServiceError(
+            f"phases 数量必须在 {MIN_ROUTE_PHASES}~{MAX_ROUTE_PHASES} 之间"
+        )
+
+    phases: list[AIPhaseDraft] = []
+    phase_names: set[str] = set()
+    topic_names: set[str] = set()
+    total_topics = 0
+    for pi, p in enumerate(raw_phases):
+        if not isinstance(p, dict):
+            raise AIServiceError(f"phases[{pi}] 必须是对象")
+        pname = _require_str(p.get("name"), f"phases[{pi}].name", max_len=100)
+        key = normalize_draft_name(pname)
+        if key in phase_names:
+            raise AIServiceError(f"阶段名称重复：{pname}")
+        phase_names.add(key)
+        goal = p.get("goal", "")
+        if not isinstance(goal, str):
+            goal = ""
+        order = _require_int(
+            p.get("order", pi + 1), f"phases[{pi}].order", 1, 999
+        )
+        raw_topics = p.get("topics")
+        if not isinstance(raw_topics, list):
+            raise AIServiceError(f"phases[{pi}].topics 必须是数组")
+        if not (MIN_PHASE_TOPICS <= len(raw_topics) <= MAX_PHASE_TOPICS):
+            raise AIServiceError(
+                f"phases[{pi}].topics 数量必须在 "
+                f"{MIN_PHASE_TOPICS}~{MAX_PHASE_TOPICS} 之间"
+            )
+        topics: list[AITopicDraft] = []
+        for ti, t in enumerate(raw_topics):
+            if not isinstance(t, dict):
+                raise AIServiceError(f"phases[{pi}].topics[{ti}] 必须是对象")
+            tname = _require_str(
+                t.get("name"), f"phases[{pi}].topics[{ti}].name", max_len=120
+            )
+            tkey = normalize_draft_name(tname)
+            if tkey in topic_names:
+                raise AIServiceError(f"知识点名称重复：{tname}")
+            topic_names.add(tkey)
+            desc = t.get("description", "")
+            if not isinstance(desc, str) or not desc.strip():
+                raise AIServiceError(
+                    f"phases[{pi}].topics[{ti}].description 不能为空"
+                )
+            minutes = _require_int(
+                t.get("estimated_minutes"),
+                f"phases[{pi}].topics[{ti}].estimated_minutes",
+                MIN_TOPIC_MINUTES, MAX_TOPIC_MINUTES,
+            )
+            priority = _require_int(
+                t.get("priority", 3),
+                f"phases[{pi}].topics[{ti}].priority",
+                MIN_TOPIC_PRIORITY, MAX_TOPIC_PRIORITY,
+            )
+            order_no = _require_int(
+                t.get("order", ti + 1),
+                f"phases[{pi}].topics[{ti}].order", 1, 999,
+            )
+            topics.append(AITopicDraft(
+                name=tname, description=desc.strip(),
+                estimated_minutes=minutes, priority=priority, order=order_no,
+            ))
+        total_topics += len(topics)
+        if total_topics > MAX_ROUTE_TOPICS:
+            raise AIServiceError(f"总知识点数量不能超过 {MAX_ROUTE_TOPICS}")
+        phases.append(AIPhaseDraft(
+            name=pname, goal=goal.strip(), order=order, topics=tuple(topics),
+        ))
+    return AIRouteDraft(
+        route_name=route_name, plan_name=plan_name,
+        summary=summary.strip(), phases=tuple(phases),
+    )
+
+
+def parse_route_draft_from_json(text: str) -> AIRouteDraft:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise AIServiceError(f"路线草稿返回的不是合法 JSON：{e}") from e
+    return parse_route_draft(data)
+
+
+@dataclass(frozen=True)
+class AIRouteSuggestion:
+    suggested_route_names: tuple[str, ...]
+    reason: str = ""
+
+
+def parse_route_suggestion(raw: object) -> AIRouteSuggestion:
+    if not isinstance(raw, dict):
+        raise AIServiceError(
+            f"路线建议必须是 JSON 对象，实际为 {type(raw).__name__}"
+        )
+    names = raw.get("suggested_route_names", [])
+    if not isinstance(names, list):
+        raise AIServiceError("suggested_route_names 必须是数组")
+    out = []
+    for i, n in enumerate(names):
+        if not isinstance(n, str) or not n.strip():
+            continue
+        out.append(n.strip())
+    reason = raw.get("reason", "")
+    if not isinstance(reason, str):
+        reason = ""
+    return AIRouteSuggestion(
+        suggested_route_names=tuple(dict.fromkeys(out)), reason=reason.strip()
+    )
+
+
+def parse_route_suggestion_from_json(text: str) -> AIRouteSuggestion:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise AIServiceError(f"路线建议返回的不是合法 JSON：{e}") from e
+    return parse_route_suggestion(data)

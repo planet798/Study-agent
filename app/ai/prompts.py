@@ -517,3 +517,101 @@ def build_monthly_summary_prompt(stats: dict) -> str:
         + "\n\n"
         + MONTHLY_SUMMARY_INSTRUCTION
     )
+
+
+# ============================================================
+# AI 学习路线草稿（Route Builder，Phase F）
+# ============================================================
+
+ROUTE_BUILDER_SYSTEM_PROMPT = """你负责生成“结构化学习课程草稿”，最终由用户预览确认后才写入系统。
+
+必须遵守：
+1. 阶段（phase）必须有明确先后依赖，从基础到进阶；
+2. 每个知识点（topic）粒度适合单次学习（10~180 分钟）；
+3. 不重复知识点，不生成已有内容；
+4. 每个 topic 的 description 必须可直接执行，包含：
+   学习目标 / 核心概念 / 最小实践 / 完成标准；
+5. estimated_minutes 为合理整数；
+6. priority 使用 1~5 的整数（3 为默认）；
+7. 不要输出任何数据库字段（id / route_id / phase_id / topic_id）；
+8. 不要生成系统中不存在的学习记录；
+9. 不要声称用户已经掌握任何内容；
+10. 只输出草稿 JSON，不要输出任何多余文字。
+
+严格输出 JSON：
+{
+  "route_name": "路线名称",
+  "plan_name": "学习计划名称",
+  "summary": "一句话说明这份计划的组织思路",
+  "phases": [
+    {
+      "name": "阶段名",
+      "goal": "阶段目标",
+      "order": 1,
+      "topics": [
+        {"name": "知识点", "description": "可执行说明", "estimated_minutes": 45, "priority": 3, "order": 1}
+      ]
+    }
+  ]
+}
+
+规模限制：
+- 阶段数量 2~8；
+- 每个阶段知识点 2~12；
+- 总知识点不超过 40。
+
+围绕用户给定的路线目标 / 基础 / 重点 / 深度生成，不要因为模型知道某领域就无限扩展。
+"""
+
+
+def build_route_builder_prompt(
+    context: dict, route_skills: list | None = None, market: dict | None = None
+) -> str:
+    import json
+
+    lines = [
+        "请根据以下信息生成一份学习路线草稿。",
+        "",
+        "【路线信息】",
+        json.dumps(context, ensure_ascii=False, indent=2),
+    ]
+    if route_skills:
+        lines += [
+            "",
+            "【该路线关注的技能（仅作重点参考，不要求每个都生成 Topic）】",
+            json.dumps(route_skills, ensure_ascii=False, indent=2),
+        ]
+    if market:
+        lines += [
+            "",
+            "【近期目标岗位样本信号（仅用于调整重点，不代表全行业，"
+            "不允许跳过基础依赖）】",
+            json.dumps(market, ensure_ascii=False, indent=2),
+        ]
+    lines += ["", "只输出严格 JSON 草稿。"]
+    return "\n".join(lines)
+
+
+ROUTE_SUGGEST_SYSTEM_PROMPT = """你负责把一个新技能候选建议到“已有的学习路线”。
+
+硬性要求：
+- 只能从给定候选路线中选择，返回其 name；
+- 不得创建新路线名；
+- 不确定时返回空数组；
+- 只输出严格 JSON，不要输出多余文字。
+
+输出：
+{"suggested_route_names": ["路线名"], "reason": "简短理由"}
+"""
+
+
+def build_route_suggest_prompt(candidate_name: str, routes: list) -> str:
+    import json
+
+    return (
+        "技能候选：\n"
+        f"{candidate_name}\n\n"
+        "现有学习路线（只能从中选择 name）：\n"
+        + json.dumps(routes, ensure_ascii=False, indent=2)
+        + "\n\n请给出建议关联路线。"
+    )

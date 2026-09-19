@@ -79,6 +79,7 @@ class SkillRepository:
         linked_topics: list[int] | None = None,
         shared_connector: bool = False,
         priority_score: float = 0.0,
+        commit: bool = True,
     ) -> dict:
         name = (name or "").strip()
         if not name:
@@ -100,7 +101,8 @@ class SkillRepository:
                 int(bool(shared_connector)), now, now,
             ),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return self.get(cur.lastrowid)
 
     def create_many(self, specs: list[dict]) -> list[dict]:

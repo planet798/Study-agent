@@ -30,6 +30,12 @@ from ..services.learning_route_service import RouteValidationError
 from ..services.route_plan_service import RouteStructureError
 from ..utils.date_utils import today as _default_today
 from .dialogs import show_warning
+from .route_builder_dialogs import (
+    AIRouteBuilderDialog,
+    RouteDraftPreviewDialog,
+    SkillPickerDialog,
+)
+from .ai_worker import AIRouteBuilderWorker
 from .route_dialogs import (
     AddPhaseDialog,
     AddTopicDialog,
@@ -53,13 +59,17 @@ class RouteDetailDialog(QDialog):
     """路线详情：信息 + 手动学习结构（Plan/Phase/Topic）。"""
 
     def __init__(self, route, route_service, route_plan_service, parent=None,
-                 progress_service=None, today_provider=None):
+                 progress_service=None, today_provider=None,
+                 ai_route_service=None, skill_service=None):
         super().__init__(parent)
         self.route = route
         self.route_service = route_service
         self.route_plan_service = route_plan_service
         self.progress_service = progress_service
         self.today_provider = today_provider or _default_today
+        self.ai_route_service = ai_route_service
+        self.skill_service = skill_service
+        self._ai_worker = None
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
         self.resize(640, 620)
@@ -122,6 +132,9 @@ class RouteDetailDialog(QDialog):
             self.action_row.addWidget(
                 _secondary("＋ 添加阶段", self._on_add_phase)
             )
+            self.action_row.addWidget(
+                _secondary("AI 生成学习计划", self._on_ai_generate)
+            )
             if route.planning_enabled:
                 self.action_row.addWidget(
                     _secondary("暂停自动规划", self._on_pause)
@@ -149,9 +162,15 @@ class RouteDetailDialog(QDialog):
             hint.setObjectName("EmptyHint")
             self.body_layout.addWidget(hint)
             if not route.is_archived:
-                self.body_layout.addWidget(
+                row = QHBoxLayout()
+                row.addWidget(
                     _secondary("创建手动学习计划", self._on_create_plan)
                 )
+                row.addWidget(
+                    _secondary("AI 生成学习计划", self._on_ai_generate)
+                )
+                row.addStretch()
+                self.body_layout.addLayout(row)
             self.body_layout.addStretch()
             return
 
@@ -226,6 +245,8 @@ class RouteDetailDialog(QDialog):
             )
         for phase in structure.phases:
             self.body_layout.addWidget(self._phase_card(phase, done_ids))
+        self._add_skills_section()
+        self._add_curriculum_gap_section()
         self.body_layout.addStretch()
 
     def _section_label(self, text: str) -> QLabel:
@@ -393,17 +414,244 @@ class RouteDetailDialog(QDialog):
         self.route_service.restore_route(self.route.id)
         self.refresh()
 
+    # ---------- Phase F：关联技能 / 课程缺口 / AI 生成 ----------
+
+    def _route_topic_ids(self) -> set[int]:
+        try:
+            return {
+                t.id for t in self.route_plan_service.plan_repo.list_topics_by_route(
+                    self.route.id
+                )
+            }
+        except Exception:  # noqa: BLE001
+            return set()
+
+    def _skill_linked_in_route(self, skill: dict) -> bool:
+        linked = set(skill.get("linked_topics") or [])
+        return bool(linked & self._route_topic_ids())
+
+    def _add_skills_section(self) -> None:
+        if self.skill_service is None:
+            return
+        self.body_layout.addWidget(self._section_label("关联技能"))
+        route_repo = self.route_service.route_repo
+        try:
+            skill_ids = route_repo.list_skill_ids(self.route.id)
+        except Exception:  # noqa: BLE001
+            skill_ids = []
+        skills = []
+        for sid in skill_ids:
+            s = self.skill_service.skill_repo.get(sid)
+            if s is not None:
+                skills.append(s)
+        if not skills:
+            empty = QLabel("尚未关联学习路线")
+            empty.setObjectName("TaskMeta")
+            self.body_layout.addWidget(empty)
+        for s in skills:
+            row = QHBoxLayout()
+            lbl = QLabel(f"{s['name']}（{s.get('tier', '')}级）")
+            row.addWidget(lbl, 1)
+            if not self.route.is_archived:
+                row.addWidget(_secondary(
+                    "移除关联", lambda _=False, sk=s: self._on_remove_skill(sk)
+                ))
+            self.body_layout.addLayout(row)
+        if not self.route.is_archived:
+            self.body_layout.addWidget(_secondary(
+                "＋ 关联已有技能", self._on_assign_skill
+            ))
+
+    def _on_assign_skill(self) -> None:
+        route_repo = self.route_service.route_repo
+        try:
+            bound = set(route_repo.list_skill_ids(self.route.id))
+            names = [
+                s["name"] for s in self.skill_service.skill_repo.list_all()
+                if s["id"] not in bound
+            ]
+        except Exception:  # noqa: BLE001
+            names = []
+        if not names:
+            show_warning(self, "没有可关联的新技能。")
+            return
+        dlg = SkillPickerDialog(names, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.selected:
+            return
+        skill = self.skill_service.skill_repo.get_by_name(dlg.selected)
+        if skill is not None:
+            route_repo.assign_skill(self.route.id, skill["id"])
+        self.refresh()
+
+    def _on_remove_skill(self, skill: dict) -> None:
+        if self.skill_service is not None:
+            fresh = self.skill_service.skill_repo.get(skill["id"])
+            if fresh is not None:
+                skill = fresh
+        if self._skill_linked_in_route(skill):
+            show_warning(
+                self,
+                "该技能与当前路线课程存在 Topic 关联，已阻止解除关联。",
+            )
+            return
+        route_repo = self.route_service.route_repo
+        route_repo.unassign_skill(self.route.id, skill["id"])
+        self.refresh()
+
+    def _add_curriculum_gap_section(self) -> None:
+        if self.skill_service is None:
+            return
+        try:
+            gaps = self.skill_service.curriculum_gap_skills(
+                route_id=self.route.id
+            )
+        except Exception:  # noqa: BLE001
+            gaps = []
+        self.body_layout.addWidget(self._section_label("课程缺口"))
+        if not gaps:
+            empty = QLabel("暂无课程缺口")
+            empty.setObjectName("TaskMeta")
+            self.body_layout.addWidget(empty)
+            return
+        for g in gaps:
+            row = QHBoxLayout()
+            freq = float(g.get("frequency_30d") or 0.0) * 100
+            lbl = QLabel(
+                f"{g['skill']}　近30天目标岗位需求：{freq:.1f}%　当前路线暂无 Topic"
+            )
+            lbl.setWordWrap(True)
+            row.addWidget(lbl, 1)
+            if not self.route.is_archived:
+                row.addWidget(_secondary(
+                    "添加知识点",
+                    lambda _=False, name=g["skill"]: self._on_gap_add_topic(name),
+                ))
+            self.body_layout.addLayout(row)
+
+    def _on_gap_add_topic(self, skill_name: str) -> None:
+        structure = self.route_plan_service.get_structure(self.route.id)
+        if structure is None or not structure.phases:
+            show_warning(self, "请先创建学习计划与阶段。")
+            return
+        from .route_dialogs import AddTopicDialog
+
+        dlg = AddTopicDialog(
+            default_order=len(structure.phases[0].topics) + 1, parent=self
+        )
+        dlg.title_edit.setText(skill_name)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        payload = dlg.result_payload()
+        try:
+            self.route_plan_service.add_topic(
+                self.route.id, structure.phases[0].id, **payload
+            )
+        except RouteStructureError as e:  # noqa: BLE001
+            show_warning(self, str(e))
+        self.refresh()
+
+    # ---------- AI 生成 ----------
+
+    def _ai_context_data(self) -> tuple[list, dict | None]:
+        """主线程收集纯数据：route_skills + 该路线 skill 的 market signal。"""
+        skills: list[dict] = []
+        market_payload: dict | None = None
+        if self.skill_service is None:
+            return skills, market_payload
+        try:
+            market = self.skill_service.refresh_market(self.today_provider())
+        except Exception:  # noqa: BLE001
+            market = None
+        try:
+            bound = self.route_service.route_repo.list_skill_ids(self.route.id)
+        except Exception:  # noqa: BLE001
+            bound = []
+        market_skills: dict = {}
+        for sid in bound:
+            s = self.skill_service.skill_repo.get(sid)
+            if s is None:
+                continue
+            rec = (market or {}).get("skills", {}).get(s["name"])
+            freq = float(rec.get("freq30") or 0.0) if rec else 0.0
+            skills.append({"name": s["name"], "frequency_30d": freq})
+            if freq > 0:
+                market_skills[s["name"]] = {
+                    "freq30": freq,
+                    "mention_30d": int(rec.get("mention_30d") or 0),
+                }
+        if market_skills:
+            market_payload = {"skills": market_skills}
+        return skills, market_payload
+
+    def _on_ai_generate(self) -> None:
+        if self.ai_route_service is None or \
+                not self.ai_route_service.is_configured():
+            show_warning(self, "AI 未配置，无法生成学习路线；可继续手动创建。")
+            return
+        mode, reason = self.route_plan_service.ai_plan_mode(self.route.id)
+        if mode == "blocked":
+            show_warning(self, reason)
+            return
+        dlg = AIRouteBuilderDialog(
+            self.route.name, self.route.goal or "", parent=self
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        context = dlg.result_payload()
+        route_skills, market = self._ai_context_data()
+        worker = AIRouteBuilderWorker(
+            self.ai_route_service, context,
+            route_skills=route_skills, market=market, parent=self,
+        )
+        worker.succeeded.connect(self._on_draft_ready)
+        worker.failed.connect(self._on_draft_failed)
+        self._ai_worker = worker
+        worker.start()
+
+    def _on_draft_failed(self, message: str) -> None:
+        show_warning(self, f"AI 生成失败：{message}")
+
+    def _on_draft_ready(self, draft) -> None:
+        mode, reason = self.route_plan_service.ai_plan_mode(self.route.id)
+        if mode == "blocked":
+            show_warning(self, reason)
+            return
+        preview = RouteDraftPreviewDialog(draft, mode=mode, parent=self)
+        if preview.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_draft = preview.draft()
+        from ..ai.schemas import AIRouteDraft
+
+        new_draft = AIRouteDraft(
+            route_name=self.route.name,
+            plan_name=new_draft.plan_name,
+            summary=draft.summary,
+            phases=new_draft.phases,
+        )
+        try:
+            self.route_plan_service.create_plan_from_draft(
+                self.route.id, new_draft,
+                replace_empty=preview.replace_empty,
+            )
+        except RouteStructureError as e:  # noqa: BLE001
+            show_warning(self, str(e))
+            return
+        self.refresh()
+
 
 class LearningRoutesPage(QWidget):
     """学习路线总览页面。"""
 
     def __init__(self, route_service, route_plan_service=None, parent=None,
-                 progress_service=None, today_provider=None):
+                 progress_service=None, today_provider=None,
+                 ai_route_service=None, skill_service=None):
         super().__init__(parent)
         self.route_service = route_service
         self.route_plan_service = route_plan_service
         self.progress_service = progress_service
         self.today_provider = today_provider or _default_today
+        self.ai_route_service = ai_route_service
+        self.skill_service = skill_service
         self.show_archived = False
         self._build_ui()
         self.refresh()
@@ -645,6 +893,8 @@ class LearningRoutesPage(QWidget):
             route, self.route_service, self.route_plan_service, parent=self,
             progress_service=self.progress_service,
             today_provider=self.today_provider,
+            ai_route_service=self.ai_route_service,
+            skill_service=self.skill_service,
         )
         dlg.exec()
         self.refresh()

@@ -157,6 +157,106 @@ class RoutePlanService:
             )
         self.plan_repo.delete_topic(topic_id)
 
+    # ================= Phase F：AI 路线草稿持久化 =================
+
+    def route_has_history(self, route_id: int) -> bool:
+        """该路线是否已有任何 task / knowledge_point（保护历史记录）。"""
+        row = self.task_repo.conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE route_id = ?", (int(route_id),)
+        ).fetchone()
+        if (row[0] or 0) > 0:
+            return True
+        row = self.task_repo.conn.execute(
+            "SELECT COUNT(*) FROM knowledge_points WHERE route_id = ?",
+            (int(route_id),),
+        ).fetchone()
+        return (row[0] or 0) > 0
+
+    def ai_plan_mode(self, route_id: int) -> tuple[str, str]:
+        """返回 (mode, reason)；mode ∈ no_plan / empty_plan / blocked。"""
+        plan = self.plan_repo.get_plan_by_route(route_id)
+        if plan is None:
+            return "no_plan", ""
+        phases = self.plan_repo.list_phases(plan.id)
+        topics = self.plan_repo.list_topics_by_route(route_id)
+        if not phases and not topics and not self.route_has_history(route_id):
+            return "empty_plan", ""
+        return (
+            "blocked",
+            "当前路线已有学习结构或历史学习记录，AI 计划只能作为参考，"
+            "不能直接替换。",
+        )
+
+    def create_plan_from_draft(
+        self, route_id: int, draft, replace_empty: bool = False
+    ) -> dict:
+        """把已确认的 AI 草稿原子化写入 Plan/Phase/Topic。
+
+        - 与手动路线使用完全相同的表结构与字段（study_plans.route_id /
+          study_phases.order_index / study_topics.order_index）；
+        - 任何一步失败 → rollback；
+        - 不创建 task / kp / assessment / mastery / skill。
+        """
+        mode, reason = self.ai_plan_mode(route_id)
+        if mode == "blocked":
+            raise RouteStructureError(reason)
+        if mode == "empty_plan" and not replace_empty:
+            raise RouteStructureError(
+                "当前路线已有空计划；如需替换请明确确认“替换空计划”。"
+            )
+        conn = self.plan_repo.conn
+        plan_id = None
+        try:
+            plan = self.plan_repo.get_plan_by_route(route_id)
+            if plan is None:
+                cur = conn.execute(
+                    "INSERT INTO study_plans "
+                    "(name, description, start_date, end_date, status, route_id) "
+                    "VALUES (?, ?, ?, ?, 'active', ?)",
+                    (draft.plan_name, draft.summary, "2026-09-01",
+                     "2099-12-31", int(route_id)),
+                )
+                plan_id = cur.lastrowid
+            else:
+                plan_id = plan.id
+                # 空计划替换：清掉空结构后重建（此时无 task/kp 引用）
+                conn.execute(
+                    "DELETE FROM study_topics WHERE phase_id IN "
+                    "(SELECT id FROM study_phases WHERE plan_id = ?)",
+                    (plan_id,),
+                )
+                conn.execute(
+                    "DELETE FROM study_phases WHERE plan_id = ?", (plan_id,)
+                )
+                conn.execute(
+                    "UPDATE study_plans SET name = ?, description = ?, "
+                    "route_id = ? WHERE id = ?",
+                    (draft.plan_name, draft.summary, int(route_id), plan_id),
+                )
+            for phase in sorted(draft.phases, key=lambda p: p.order):
+                cur = conn.execute(
+                    "INSERT INTO study_phases (plan_id, name, description, "
+                    "start_date, end_date, priority, goals, order_index) "
+                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                    (plan_id, phase.name, phase.goal, "2026-09-01",
+                     "2099-12-31", phase.goal, int(phase.order)),
+                )
+                phase_id = cur.lastrowid
+                for topic in sorted(phase.topics, key=lambda t: t.order):
+                    conn.execute(
+                        "INSERT INTO study_topics (phase_id, name, description, "
+                        "estimated_minutes, priority, order_index) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (phase_id, topic.name, topic.description,
+                         int(topic.estimated_minutes), int(topic.priority),
+                         int(topic.order)),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return {"plan_id": plan_id, "mode": mode}
+
     # ================= 进度 =================
 
     def done_topic_ids(self) -> set[int]:

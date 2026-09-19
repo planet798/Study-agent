@@ -45,7 +45,13 @@ from ..services.task_review_service import TaskReviewService
 from ..services.task_service import TaskService
 from ..utils.date_utils import add_days, today as _default_today
 from ..database.schema import STATUS_CANCELLED
-from .ai_worker import AIReviewWorker, AssessmentWorker, run_start_assessment
+from .ai_worker import (
+    AIReviewWorker,
+    AIRouteBuilderWorker,
+    AssessmentWorker,
+    RouteSuggestionWorker,
+    run_start_assessment,
+)
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
@@ -98,6 +104,7 @@ class MainWindow(QMainWindow):
         route_service=None,
         route_plan_service=None,
         route_progress_service=None,
+        ai_route_service=None,
         scheduler=None,
         db_path=None,
     ):
@@ -140,6 +147,8 @@ class MainWindow(QMainWindow):
         self.route_plan_service = route_plan_service
         # Phase E：路线进度/掌握/复习状态
         self.route_progress_service = route_progress_service
+        # Phase F：AI 路线草稿（纯 AI，不碰 DB，可跨线程）
+        self.ai_route_service = ai_route_service
         # Phase D：多路线全局调度（可选；未传则回退单路线 Planner）
         self.scheduler = scheduler
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
@@ -311,6 +320,8 @@ class MainWindow(QMainWindow):
                 self.route_service, route_plan_service=self.route_plan_service,
                 progress_service=self.route_progress_service,
                 today_provider=self.today_provider,
+                ai_route_service=self.ai_route_service,
+                skill_service=self.skill_service,
             )
             self.stack.addWidget(self.routes_page)
             self.routes_page_index = self.stack.count() - 1
@@ -1222,9 +1233,52 @@ class MainWindow(QMainWindow):
                 ]
             except Exception:  # noqa: BLE001
                 existing_names = []
+        routes = []
+        if self.route_service is not None:
+            try:
+                routes = [
+                    {"id": r.id, "name": r.name, "goal": r.goal or ""}
+                    for r in self.route_service.route_repo.list_learning_routes()
+                    if not r.is_archived
+                ]
+            except Exception:  # noqa: BLE001
+                routes = []
+        # 确定性优先：若同名技能已存在，直接显示已有关联
+        existing_route_ids: list[int] = []
+        suggested_name = (cand.get("suggested_name")
+                          or cand.get("canonical_name") or "").strip()
+        if suggested_name and self.skill_service is not None:
+            try:
+                s = self.skill_service.skill_repo.get_by_name(suggested_name)
+                if s is not None and self.route_service is not None:
+                    existing_route_ids = self.route_service.route_repo \
+                        .list_route_ids_for_skill(s["id"])
+            except Exception:  # noqa: BLE001
+                existing_route_ids = []
         dlg = JdCandidateAcceptDialog(
-            cand, existing_names=existing_names, parent=self
+            cand, existing_names=existing_names, parent=self,
+            routes=routes, existing_route_ids=existing_route_ids,
         )
+        # AI 建议：仅在无确定关联且 AI 可用时；失败不影响手动选择
+        self._suggestion_worker = None
+        if (not existing_route_ids and routes
+                and self.ai_route_service is not None
+                and self.ai_route_service.is_configured()):
+            worker = RouteSuggestionWorker(
+                self.ai_route_service, suggested_name, routes, parent=self
+            )
+            worker.succeeded.connect(
+                lambda sugg, d=dlg: d.apply_ai_suggestion(
+                    sugg.suggested_route_names, sugg.reason
+                )
+            )
+            worker.failed.connect(
+                lambda _msg, d=dlg: d.set_suggestion_failed()
+            )
+            self._suggestion_worker = worker
+            worker.start()
+        elif routes:
+            dlg.set_suggestion_failed()
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         try:
@@ -1233,6 +1287,7 @@ class MainWindow(QMainWindow):
                 name=dlg.result_name,
                 tier=dlg.result_tier,
                 linked_skill=dlg.result_linked_skill,
+                route_ids=dlg.result_route_ids,
             )
         except Exception as e:  # noqa: BLE001 - 不崩溃
             self.statusBar().showMessage(f"加入技能失败：{e}", 5000)

@@ -328,6 +328,7 @@ class JdSkillCandidateRepository:
     def set_status(
         self, candidate_id: int, status: str,
         accepted_skill_name: str | None = None,
+        commit: bool = True,
     ) -> dict | None:
         if status not in ("candidate", "accepted", "ignored"):
             raise ValueError(f"未知候选状态: {status}")
@@ -345,5 +346,6 @@ class JdSkillCandidateRepository:
                 "WHERE id = ?",
                 (status, now_iso(), candidate_id),
             )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return self.get(candidate_id)

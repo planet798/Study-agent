@@ -153,10 +153,13 @@ class JdSummaryService:
         summary_repo: JdDailySummaryRepository,
         skill_repo: SkillRepository,
         candidate_repo=None,
+        route_repo=None,
     ):
         self.summary_repo = summary_repo
         self.skill_repo = skill_repo
         self.candidate_repo = candidate_repo
+        # Phase F：JD candidate 可关联到一条或多条 learning route
+        self.route_repo = route_repo
 
     # ================= 技能标准化 =================
 
@@ -579,39 +582,59 @@ class JdSummaryService:
         tier: str = "A",
         description: str = "",
         linked_skill: str | None = None,
+        route_ids: list[int] | None = None,
     ) -> dict:
         """用户确认后：把候选转为正式 skill（初始 not_started），并标记 accepted。
 
-        - 不自动 mastered / learning / 创建 task / 创建 assessment。
-        - linked_skill 非空时只关联到已存在技能，不新建。
-        - 新 skill 没有 linked_topics → 由 SkillService 标记为课程缺口。
+        - 不自动 mastered / learning / 创建 task / 创建 assessment；
+        - linked_skill 非空时只关联到已存在技能，不新建；
+        - route_ids：用户勾选的关联路线（可多选，可为空 = 暂不关联）；
+        - 核心写入（skill + candidate + route_skills）在同一事务内，失败全部回滚。
         """
         if self.candidate_repo is None:
             raise RuntimeError("未注入 candidate_repo")
         cand = self.candidate_repo.get(candidate_id)
         if cand is None:
             raise ValueError(f"候选不存在: id={candidate_id}")
-        skill = None
-        if linked_skill:
-            skill = self.skill_repo.get_by_name(linked_skill)
-            if skill is None:
-                raise ValueError(f"关联技能不存在: {linked_skill}")
-        else:
-            final_name = (name or cand["canonical_name"] or "").strip()
-            if not final_name:
-                raise ValueError("技能名不能为空")
-            skill = self.skill_repo.get_by_name(final_name)
-            if skill is None:
-                skill = self.skill_repo.create(
-                    name=final_name,
-                    tier=tier,
-                    status="not_started",
-                )
-        self.candidate_repo.set_status(
-            candidate_id, "accepted", accepted_skill_name=skill["name"]
-        )
-        # 立即让历史未匹配行按新映射生效（幂等）
-        self.repair_unmatched_jd_skills()
+        conn = self.candidate_repo.conn
+        route_ids = [int(r) for r in (route_ids or [])]
+        if route_ids and self.route_repo is not None:
+            for rid in route_ids:
+                if self.route_repo.get(rid) is None:
+                    raise ValueError(f"学习路线不存在: id={rid}")
+        try:
+            if linked_skill:
+                skill = self.skill_repo.get_by_name(linked_skill)
+                if skill is None:
+                    raise ValueError(f"关联技能不存在: {linked_skill}")
+            else:
+                final_name = (name or cand["canonical_name"] or "").strip()
+                if not final_name:
+                    raise ValueError("技能名不能为空")
+                skill = self.skill_repo.get_by_name(final_name)
+                if skill is None:
+                    skill = self.skill_repo.create(
+                        name=final_name, tier=tier, status="not_started",
+                        commit=False,
+                    )
+            self.candidate_repo.set_status(
+                candidate_id, "accepted", accepted_skill_name=skill["name"],
+                commit=False,
+            )
+            if route_ids and self.route_repo is not None:
+                for rid in route_ids:
+                    self.route_repo.assign_skill(
+                        rid, skill["id"], commit=False
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        # 派生数据（幂等，失败不影响已提交结果）
+        try:
+            self.repair_unmatched_jd_skills()
+        except Exception:  # noqa: BLE001
+            pass
         return {"skill": skill, "candidate": self.candidate_repo.get(candidate_id)}
 
     def ignore_candidate(self, candidate_id: int) -> dict | None:

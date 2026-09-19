@@ -92,10 +92,13 @@ class SkillService:
         assessment_repo=None,
         market_signal=None,
         current_phase_provider=None,
+        route_repo=None,
     ):
         self.skill_repo = skill_repo
         self.plan_repo = plan_repo
         self.assessment_repo = assessment_repo
+        # Phase F：route-specific curriculum gap 需要 route_skills / route topics
+        self.route_repo = route_repo
         # Step 6：近期市场需求（Daily Summary 优先，individual JD fallback）
         self.market_signal = market_signal
         # 可选：
@@ -225,20 +228,50 @@ class SkillService:
         return self.jd_factor(skill.get("jd_frequency"))
 
     def curriculum_gap_skills(
-        self, min_frequency: float = CURRICULUM_GAP_MIN_FREQUENCY
+        self,
+        route_id: int | None = None,
+        min_frequency: float = CURRICULUM_GAP_MIN_FREQUENCY,
     ) -> list[dict]:
-        """正式技能市场上高频、但课程体系还未覆盖（linked_topics 为空）。
+        """市场上高频、但课程体系还未覆盖的技能（课程缺口）。
 
-        条件：有近 30 天市场信号 + 未掌握 + 无任何 linked topic。
-        只用于 UI 展示“课程缺口”，Planner 不得凭空生成课程/任务。
+        - route_id=None（旧行为）：只要该技能全局没有任何 linked topic 就算缺口；
+        - route_id 指定（Phase F）：只看该 route 已绑定的 route_skills，且要求
+          该技能在本 route 的 topics 中没有覆盖（不能用全局 linked_topics 判断，
+          否则“在别的路线有 topic”会错误地掩盖本路线缺口）；
+        - 只用于 UI 展示“课程缺口”，Planner 不得凭空生成课程/任务。
         """
         market = self._market or {}
         if market.get("source") != "daily_summary":
             return []
         status_by_name = self._default_status_by_name()
         mastery_by_name = self._default_mastery_by_name()
+        route_topic_ids: set[int] = set()
+        if route_id is not None:
+            if self.route_repo is not None:
+                try:
+                    skill_ids = self.route_repo.list_skill_ids(int(route_id))
+                except Exception:  # noqa: BLE001
+                    skill_ids = []
+                skills = []
+                for sid in skill_ids:
+                    s = self.skill_repo.get(sid)
+                    if s is not None:
+                        skills.append(s)
+            else:
+                skills = []
+            if self.plan_repo is not None:
+                try:
+                    route_topic_ids = {
+                        t.id for t in self.plan_repo.list_topics_by_route(
+                            int(route_id)
+                        )
+                    }
+                except Exception:  # noqa: BLE001
+                    route_topic_ids = set()
+        else:
+            skills = self.skill_repo.list_all()
         gaps: list[dict] = []
-        for skill in self.skill_repo.list_all():
+        for skill in skills:
             name = skill["name"]
             rec = (market.get("skills") or {}).get(name)
             if not rec:
@@ -251,15 +284,19 @@ class SkillService:
             ) == "mastered":
                 continue
             try:
-                linked = self.topics_for_skill(name) or []
+                linked = set(self.topics_for_skill(name) or [])
             except Exception:  # noqa: BLE001
-                linked = []
-            if linked:
-                continue
+                linked = set()
+            if route_id is not None:
+                if linked & route_topic_ids:
+                    continue  # 本 route 已覆盖
+            elif linked:
+                continue  # 全局已有 topic
             gaps.append({
                 "skill": name,
                 "frequency_30d": round(freq, 4),
                 "mention_30d": int(rec.get("mention_30d") or 0),
+                "route_id": route_id,
             })
         gaps.sort(key=lambda g: (-g["frequency_30d"], g["skill"]))
         return gaps

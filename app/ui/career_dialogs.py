@@ -7,6 +7,7 @@ LearningOutcomeService / NotesService；本模块不重算任何优先级。
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -340,18 +341,26 @@ def format_summary_preview(preview: dict) -> str:
 
 
 class JdCandidateAcceptDialog(QDialog):
-    """确认把 JD 新技能候选加入正式技能体系（用户确认，不自动创建）。"""
+    """确认把 JD 新技能候选加入正式技能体系（用户确认，不自动创建）。
 
-    def __init__(self, candidate: dict, existing_names=None, parent=None):
+    Phase F：额外让用户勾选“关联学习路线”（可多选 / 可不选）；
+    AI 建议只作为预勾选提示，用户可随时取消或改选。
+    """
+
+    def __init__(self, candidate: dict, existing_names=None, parent=None,
+                 routes=None, existing_route_ids=None):
         super().__init__(parent)
         self.candidate = candidate
         self.existing_names = list(existing_names or [])
+        self.routes = list(routes or [])
+        self.existing_route_ids = {int(r) for r in (existing_route_ids or [])}
         self.result_name = ""
         self.result_tier = "A"
         self.result_linked_skill = None
+        self.result_route_ids: list[int] = []
         self.setWindowTitle("加入技能体系")
         self.setModal(True)
-        self.resize(520, 300)
+        self.resize(560, 460)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -393,9 +402,30 @@ class JdCandidateAcceptDialog(QDialog):
         tier_row.addWidget(self.link_combo, 1)
         layout.addLayout(tier_row)
 
+        # 关联学习路线（多选）
+        layout.addWidget(QLabel("关联学习路线（可多选 / 可不选）："))
+        self.suggestion_label = QLabel("")
+        self.suggestion_label.setObjectName("TaskMeta")
+        self.suggestion_label.setWordWrap(True)
+        layout.addWidget(self.suggestion_label)
+
+        route_box = QWidget()
+        route_layout = QVBoxLayout(route_box)
+        route_layout.setContentsMargins(0, 0, 0, 0)
+        self.route_checks: dict[int, QCheckBox] = {}
+        for r in self.routes:
+            cb = QCheckBox(r.get("name") or f"路线{r.get('id')}")
+            if int(r.get("id")) in self.existing_route_ids:
+                cb.setChecked(True)
+            self.route_checks[int(r["id"])] = cb
+            route_layout.addWidget(cb)
+        if not self.routes:
+            route_layout.addWidget(QLabel("（暂无可关联的学习路线）"))
+        layout.addWidget(route_box)
+
         hint = QLabel(
             "加入后：初始状态为 not_started；不自动创建任务 / 验收 / 掌握度。"
-            "若该技能尚无可对应课程，会被标记为“课程缺口”。"
+            "关联路线只影响该路线的 Planner / 课程缺口。"
         )
         hint.setObjectName("TaskMeta")
         hint.setWordWrap(True)
@@ -409,6 +439,8 @@ class JdCandidateAcceptDialog(QDialog):
         btns = QHBoxLayout()
         btns.addStretch()
         cancel = QPushButton("取消")
+        cancel.setObjectName("SecondaryButton")
+        apply_secondary_button_text(cancel)
         cancel.clicked.connect(self.reject)
         ok = QPushButton("确认加入")
         ok.setObjectName("SecondaryButton")
@@ -418,7 +450,28 @@ class JdCandidateAcceptDialog(QDialog):
         btns.addWidget(ok)
         layout.addLayout(btns)
 
+    # ---------- AI 建议 ----------
+
+    def apply_ai_suggestion(self, names, reason: str = "") -> None:
+        """AI 建议：只预勾选匹配的路线，用户仍可取消/改选。"""
+        name_set = set(names or [])
+        for r in self.routes:
+            cb = self.route_checks.get(int(r["id"]))
+            if cb is not None and (r.get("name") in name_set):
+                cb.setChecked(True)
+        if name_set:
+            text = f"建议关联：{'、'.join(sorted(name_set))}（AI建议）"
+            if reason:
+                text += f"　{reason}"
+            self.suggestion_label.setText(text)
+
+    def set_suggestion_failed(self) -> None:
+        self.suggestion_label.setText("未生成路线建议，请手动选择。")
+
     def _confirm(self) -> None:
+        self.result_route_ids = [
+            rid for rid, cb in self.route_checks.items() if cb.isChecked()
+        ]
         linked = self.link_combo.currentData()
         if linked:
             self.result_linked_skill = linked
