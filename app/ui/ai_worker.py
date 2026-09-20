@@ -16,6 +16,54 @@ from ..database.repository import Task
 from ..services.task_review_service import TaskReviewService
 
 
+class AIConnectionTestWorker(QThread):
+    """后台测试 AI 连接（只接收普通 base_url / model / api_key）。
+
+    线程安全铁律：**不接收 SQLite repository / connection / service**，
+    因此不会出现 “SQLite objects created in a thread can only be used in
+    that same thread”。API Key 只存在于内存，绝不打印 / 回显。
+    """
+
+    succeeded = Signal(object)  # ConnectionTestResult
+
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str,
+        timeout: float = 10.0,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._base_url = base_url
+        self._model = model
+        self._api_key = api_key
+        self._timeout = timeout
+
+    def run(self) -> None:  # noqa: D102
+        from ..ai.config_service import run_connection_test
+
+        try:
+            result = run_connection_test(
+                self._base_url,
+                self._model,
+                self._api_key,
+                timeout=self._timeout,
+            )
+        except Exception as e:  # noqa: BLE001 - 任何异常都转为一条结果
+            from ..ai.client import sanitize_text
+            from ..ai.config_service import ConnectionTestResult, classify_connection_error
+
+            result = ConnectionTestResult(
+                ok=False,
+                message=classify_connection_error(
+                    sanitize_text(str(e), self._api_key)
+                ),
+                model=self._model,
+            )
+        self.succeeded.emit(result)
+
+
 class AIReviewWorker(QThread):
     """在子线程中调用 TaskReviewService 的 QThread。"""
 

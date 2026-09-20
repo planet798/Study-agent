@@ -77,9 +77,25 @@ python app\main.py --date 2026-09-05
   - 周/月总结结果缓存到 weekly_summaries/monthly_summaries，统计未变则直接复用
   - 习惯指标：最常延期分类/Topic、平均每日任务数、平均完成率、连续天数等
 
-## AI 配置（可选）
+## AI 设置中心（推荐）
 
-通过**环境变量**配置，不要把 API Key 写进任何代码/配置文件：
+在顶部导航打开 **AI 设置**，无需修改任何源码或环境变量：
+
+- **模型 / API**：添加 / 删除 / 重命名 API 配置，修改 Base URL / Model / API Key，
+  切换当前配置，测试连接。切换后**下一次 AI 请求立即生效**（无需重启）。
+- **Prompt 管理**：查看 Study Agent 全部内置 Prompt、用途、变量；直接编辑并保存；
+  恢复系统默认；查看最终实际发送给模型的 Prompt 预览（含真实运行时上下文）。
+
+### API Key 存在哪里
+
+- API Key **绝不写入 SQLite / JSON / 源码 / 日志**；
+- 数据库只保存 `secret_ref`，真实 Key 由 `keyring` 写入系统凭据存储
+  （Windows 上为 **Windows Credential Manager**）；
+- 需要 `keyring` 依赖（见 `requirements.txt`）。
+
+### 环境变量（legacy 兼容）
+
+数据库还没有任何 API 配置时，仍会回退使用环境变量：
 
 ```bash
 # Linux/macOS
@@ -93,12 +109,22 @@ $env:DEEPSEEK_BASE_URL="https://api.deepseek.com"
 $env:DEEPSEEK_MODEL="deepseek-chat"
 ```
 
+此时 AI 设置页会显示“当前正在使用环境变量配置”，可点击【保存为配置】把
+Base URL / Model 迁入数据库，并把环境变量中的 Key 写入系统凭据存储。
+
 - 不配置则 GUI 正常运行，AI 区域提示"AI 未配置"，其余功能不受影响
 - BASE_URL 缺省为 https://api.deepseek.com；MODEL 未设置时视为未配置
-- 也可替换为任何 OpenAI-compatible 服务（Gemini / OpenAI / USTC 等）
+- 可替换为任何 OpenAI-compatible 服务（Gemini / OpenAI / USTC 等）
 - `AIClient.chat(..., json_mode=True)`（默认）发送 `response_format=json_object`；
   通用文本对话可传 `json_mode=False`。注意 DeepSeek 要求 prompt 中包含
   "json" 字样才能配合 json_object 模式，否则返回 HTTP 400
+
+### Prompt 覆盖机制
+
+- 系统默认 Prompt 永远保留在代码中（`app/ai/prompt_defaults.py`），是 canonical default；
+- 用户在 UI 中的修改只写 `prompt_overrides` 表，`git pull` 不会覆盖；
+- “恢复默认” = 删除对应 override，重新使用代码默认；
+- 保存时会校验必需变量与未知变量（`{{variable}}` 语法，安全替换，绝不 eval/format）。
 
 ## 真实 API 冒烟测试
 

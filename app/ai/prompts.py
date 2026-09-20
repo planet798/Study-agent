@@ -1,14 +1,45 @@
-"""Prompt 管理。
+"""Prompt 管理（registry 驱动）。
 
-系统提示 / 用户提示集中于此，便于统一维护与测试。
+- 系统默认模板集中在 :mod:`app.ai.prompt_defaults`（single source of truth）；
+- 本模块负责“运行时上下文（Runtime Context）”的动态构造，并统一通过
+  :class:`app.ai.prompt_registry.PromptRegistry` 渲染最终 Prompt；
+- 保留旧的 ``build_*`` 函数签名以兼容既有调用/测试（未注入 registry 时用默认）。
+
+模板语法：``{{variable}}``（安全替换，绝不 eval / exec / format）。
 """
 
 from __future__ import annotations
+
+import json
 
 from ..database.repository import Task
 from ..database.schema import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_MEDIUM
 from ..utils.date_utils import to_display
 from .long_term_context import LongTermContext, make_long_term_summary
+from .prompt_defaults import (
+    ASSESSMENT_JUDGE_OUTPUT_INSTRUCTION,
+    ASSESSMENT_JUDGE_SYSTEM,
+    ASSESSMENT_OUTPUT_INSTRUCTION,
+    ASSESSMENT_SYSTEM,
+    ASSESSMENT_USER,
+    JD_PARSE_SYSTEM,
+    JD_PARSE_USER,
+    PLANNER_OUTPUT_INSTRUCTION,
+    PLANNER_SYSTEM,
+    PLANNER_USER,
+    RESUME_MATERIAL_SYSTEM,
+    RESUME_MATERIAL_USER,
+    ROUTE_BUILDER_SYSTEM,
+    ROUTE_BUILDER_USER,
+    ROUTE_SUGGEST_SYSTEM,
+    ROUTE_SUGGEST_USER,
+    SUMMARY_MONTHLY_USER,
+    SUMMARY_SYSTEM,
+    TASK_REVIEW_OUTPUT_FORMAT,
+    TASK_REVIEW_SYSTEM,
+    TASK_REVIEW_USER,
+)
+from .prompt_registry import PromptRegistry, default_prompt_registry, render_template
 from .schemas import (
     ASSESSMENT_QUESTION_TYPES,
     ASSESSMENT_RESULT_LEVELS,
@@ -17,18 +48,17 @@ from .schemas import (
     MAX_ASSESSMENT_POINTS,
 )
 
-SYSTEM_PROMPT = """你是一个学习计划辅助助手。
-
-你的职责不是批评用户，而是判断任务未完成原因是否合理，并根据任务的重要程度、预计耗时和用户提供的原因，判断是否适合延期到下一天。
-
-判断标准：
-- 突发课程、实验室任务、学校事务、合理身体原因、明显时间冲突：通常合理
-- 无计划刷视频、游戏、拖延、忘记任务等：通常不合理
-- 不要因为一次未完成就过度惩罚用户
-- 如果任务明显过大，可以建议拆分
-- 最终判断只作为学习辅助，不代表绝对正确
-
-你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
+# ---------- 兼容旧常量名（统一来自 prompt_defaults） ----------
+SYSTEM_PROMPT = TASK_REVIEW_SYSTEM
+PLANNER_SYSTEM_PROMPT_TEMPLATE = PLANNER_SYSTEM
+ASSESSMENT_SYSTEM_PROMPT = ASSESSMENT_SYSTEM
+ASSESSMENT_JUDGE_SYSTEM_PROMPT = ASSESSMENT_JUDGE_SYSTEM
+SUMMARY_SYSTEM_PROMPT = SUMMARY_SYSTEM
+MONTHLY_SUMMARY_INSTRUCTION = SUMMARY_MONTHLY_USER
+ROUTE_BUILDER_SYSTEM_PROMPT = ROUTE_BUILDER_SYSTEM
+ROUTE_SUGGEST_SYSTEM_PROMPT = ROUTE_SUGGEST_SYSTEM
+JD_AI_SYSTEM = JD_PARSE_SYSTEM
+_RESUME_SYSTEM_PROMPT = RESUME_MATERIAL_SYSTEM
 
 _PRIORITY_TEXT = {
     PRIORITY_LOW: "低",
@@ -36,147 +66,137 @@ _PRIORITY_TEXT = {
     PRIORITY_HIGH: "高",
 }
 
-_OUTPUT_FORMAT_INSTRUCTION = """
-请严格按照以下 JSON 结构输出（作为 assistant 消息的纯文本，不要包裹在代码块里）：
-{
-  "reasonable": true,
-  "score": 0.85,
-  "should_postpone": true,
-  "suggested_date": "2026-09-05",
-  "analysis": "简短中文分析",
-  "suggestion": "简短中文建议"
-}
+# JD 解析输出格式（运行时变量 output_format 的值）
+JD_AI_FORMAT = (
+    '{"direction": "...", "must": ["..."], "plus": ["..."], "intern": true/false}\n'
+    "字段说明：direction 为岗位方向；must 为必备技能；plus 为加分技能；"
+    "intern 是否实习岗位。must/plus 使用技能名称。"
+)
 
-字段说明：
-- reasonable: boolean，原因是否合理
-- score: 0 到 1 之间的数字，合理性得分
-- should_postpone: boolean，是否建议延期到下一天
-- suggested_date: 如果建议延期，给出具体的下一天日期（YYYY-MM-DD），否则为 null
-- analysis: 简短中文分析（不超过 150 字）
-- suggestion: 简短中文建议（不超过 150 字）
-"""
+# 简历素材输出格式（运行时变量 output_format 的值）
+RESUME_OUTPUT_FORMAT = (
+    '{"keywords": ["..."], "bullets": ["..."], "summary": "..."}'
+)
+
+
+def _registry(registry: PromptRegistry | None) -> PromptRegistry:
+    return registry if registry is not None else default_prompt_registry()
+
+
+def render_prompt(key: str, context: dict, registry: PromptRegistry | None = None) -> str:
+    """统一入口：按 key 用 effective template（默认/override）渲染。"""
+    return _registry(registry).render(key, context)
+
+
+# ============================================================
+# 任务复核（Task Review）
+# ============================================================
+
+
+def build_task_review_vars(
+    task: Task,
+    reason: str,
+    today: str | None = None,
+) -> dict:
+    """构造任务复核的运行时上下文变量。"""
+    estimated = (
+        f"{task.estimated_minutes} 分钟"
+        if task.estimated_minutes > 0
+        else "未设置"
+    )
+    return {
+        "task_title": task.title,
+        "task_description": task.description or "（无）",
+        "task_category": task.category or "未分类",
+        "task_estimated_minutes": estimated,
+        "task_priority": _PRIORITY_TEXT.get(task.priority, "未知"),
+        "task_scheduled_date": to_display(task.scheduled_date),
+        "task_postpone_count": task.postpone_count,
+        "reason": reason,
+        "today_line": (
+            f"今天是 {today}，你建议的日期应不早于今天。" if today else ""
+        ),
+        "output_instruction": TASK_REVIEW_OUTPUT_FORMAT,
+    }
 
 
 def build_user_prompt(
     task: Task,
     reason: str,
     today: str | None = None,
+    registry: PromptRegistry | None = None,
 ) -> str:
-    """根据任务 + 用户原因构造用户提示。"""
-    lines = [
-        "请判断以下学习任务未完成原因是否合理。",
-        "",
-        "【任务信息】",
-        f"- 标题：{task.title}",
-        f"- 描述：{task.description or '（无）'}",
-        f"- 分类：{task.category or '未分类'}",
-        f"- 预计时间：{task.estimated_minutes} 分钟"
-        if task.estimated_minutes > 0
-        else "- 预计时间：未设置",
-        f"- 优先级：{_PRIORITY_TEXT.get(task.priority, '未知')}",
-        f"- 计划日期：{to_display(task.scheduled_date)}",
-        f"- 已延期次数：{task.postpone_count}",
-        "",
-        "【用户填写的未完成原因】",
-        f"{reason}",
-        "",
-        "请给出判断结果。",
-    ]
-    if today:
-        lines.append("")
-        lines.append(f"今天是 {today}，你建议的日期应不早于今天。")
-    return "\n".join(lines) + _OUTPUT_FORMAT_INSTRUCTION
+    """根据任务 + 用户原因构造用户提示（向后兼容入口）。"""
+    return render_prompt(
+        "task_review.user", build_task_review_vars(task, reason, today), registry
+    )
 
 
 # ============================================================
-# AI 动态规划（Daily Planner）Prompt
+# AI 动态规划（Daily Planner）
 # ============================================================
 
-PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是个人学习规划助手。
 
-你的目标不是让用户每天学习越多越好，而是制定"能够持续完成"的学习计划。
-
-遵守以下规划原则：
-1. 延期任务优先处理，但不要无限堆积。
-2. 如果用户连续多天完成率低，应降低第二天任务量。
-3. 如果完成率稳定较高，可以逐步增加任务难度。
-4. 同一任务连续延期 3 次以上，应建议：拆分任务、降低预计时长、调整任务顺序。
-5. 不要因为一天完成率低就大幅调整整个学习路线。
-6. 不允许修改 StudyPhase 日期。
-7. 不允许跳过当前阶段核心知识。
-8. 每天自主学习总时间默认不超过 {daily_limit} 分钟。
-9. 给出的任务必须来自当前 StudyTopic 或合法延期任务。
-10. AI 的建议必须可解释。
-11. 明确区分信息来源：career_context 决定长期方向；current_phase / available_topics
-    决定当前阶段可学什么；knowledge_evidence 只反映当前实际掌握情况的动态估计
-    （不是路线）；已到期的复习由复习调度（ReviewService）负责，你不得再为这些
-    知识点生成正式复习任务。
-12. 不要把 mastery_estimate 当作绝对事实或路线控制器：不得仅凭单次验收或某个
-    较高 mastery 跳过整个阶段；不得因一次 poor 永久放弃某个知识点。阶段推进仍由
-    学习计划顺序决定，你只能在当前阶段内调整“下一步学什么”。
-13. 已完成且掌握度较高的知识点不要重复安排基础任务；已存在 active/not_done 的
-    同知识点正式任务不要重复创建。
-14. skill_priorities / jd_gap_skills / weekly_focus 由 SkillService 依据
-    技能池 + 近期市场需求 + 掌握证据 + 前置门禁计算，只决定当前阶段内“下一步”的
-    相对优先级，不是路线控制器：不得仅凭 JD 高频或高分跳过当前阶段；不得为
-    prerequisite_blocked（前置未满足）的技能越级安排任务；已掌握技能不因 JD 高频
-    而重复安排。
-15. market_trends / skill_priorities.market_30d 来自用户人工收集的“目标岗位样本”
-    （每日 JD 技术汇总的近 30 天），只代表用户近期看的目标岗位，**不代表全行业需求**；
-    引用时必须写成“近期目标岗位样本需求”。
-16. 高频但被前置阻塞的技能（如 RAG 高需求但缺 LLM 基础 / Embedding）不得直接
-    安排；应改为提升其必要前置技能的近期优先级。
-
-你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
+def build_planner_system_vars(daily_limit: int = 180) -> dict:
+    return {"daily_limit": int(daily_limit)}
 
 
-def build_planner_system_prompt(daily_limit: int = 180) -> str:
+def build_planner_system_prompt(
+    daily_limit: int = 180, registry: PromptRegistry | None = None
+) -> str:
     """构造规划系统提示（填入每日时间上限）。"""
-    return PLANNER_SYSTEM_PROMPT_TEMPLATE.format(daily_limit=daily_limit)
+    return render_prompt(
+        "planner.system", build_planner_system_vars(daily_limit), registry
+    )
 
 
-def build_planner_user_prompt(context: "object", long_term: "object | None" = None) -> str:
-    """根据 PlanningContext 构造用户提示；可选附带长期学习上下文。
-
-    :param long_term: LongTermContext 或已渲染好的摘要字符串；None 表示不带。
-    :return: user prompt，含上下文 JSON + 知识掌握证据段 +（可选）长期上下文段。
-    """
-    import json
-
+def build_planner_user_vars(
+    context: "object", long_term: "object | None" = None
+) -> dict:
+    """构造 Planner 用户提示的运行时上下文变量（动态、不硬编码路线）。"""
     ctx_data = context.to_dict()
-    lines = [
-        "请根据以下上下文，为下一天（通常是明天）规划学习任务。",
-    ]
     route_name = getattr(context, "route_name", "") or ""
     route_goal = getattr(context, "route_goal", "") or ""
     if route_name:
-        lines.extend([
-            "",
-            f"【学习路线】{route_name}",
-            f"【路线目标】{route_goal or '（未填写）'}",
-            "只允许从本路线的 available_topics 中选择，不得添加其它路线的主题。",
-        ])
-    lines.extend([
-        "",
-        "上下文 JSON：",
-        json.dumps(ctx_data, ensure_ascii=False, indent=2),
-    ])
-    evidence_section = build_knowledge_evidence_section(context)
-    if evidence_section:
-        lines.extend(["", evidence_section])
-    skill_section = build_skill_priority_section(context)
-    if skill_section:
-        lines.extend(["", skill_section])
-    market_section = build_market_trend_section(context)
-    if market_section:
-        lines.extend(["", market_section])
+        route_section = (
+            "\n\n"
+            f"【学习路线】{route_name}\n"
+            f"【路线目标】{route_goal or '（未填写）'}\n"
+            "只允许从本路线的 available_topics 中选择，不得添加其它路线的主题。"
+        )
+    else:
+        route_section = ""
+
+    evidence = build_knowledge_evidence_section(context)
+    skill = build_skill_priority_section(context)
+    market = build_market_trend_section(context)
     long_term_section = build_long_term_context_section(long_term)
-    if long_term_section:
-        lines.extend(["", long_term_section])
-    lines.extend(
-        ["", PLANNER_OUTPUT_INSTRUCTION.format(daily_limit=context.current_daily_limit)]
+
+    daily_limit = getattr(context, "current_daily_limit", 180)
+    output_instruction = render_template(
+        PLANNER_OUTPUT_INSTRUCTION, {"daily_limit": daily_limit}
     )
-    return "\n".join(lines)
+    return {
+        "route_section": route_section,
+        "context_json": json.dumps(ctx_data, ensure_ascii=False, indent=2),
+        "knowledge_evidence_section": ("\n\n" + evidence) if evidence else "",
+        "skill_priority_section": ("\n\n" + skill) if skill else "",
+        "market_trend_section": ("\n\n" + market) if market else "",
+        "long_term_section": long_term_section,
+        "output_instruction": "\n\n" + output_instruction,
+        "daily_limit": daily_limit,
+    }
+
+
+def build_planner_user_prompt(
+    context: "object",
+    long_term: "object | None" = None,
+    registry: PromptRegistry | None = None,
+) -> str:
+    """根据 PlanningContext 构造用户提示（向后兼容入口）。"""
+    return render_prompt(
+        "planner.user", build_planner_user_vars(context, long_term), registry
+    )
 
 
 def build_knowledge_evidence_section(context: "object") -> str:
@@ -314,304 +334,199 @@ def build_long_term_context_section(long_term: "object | None") -> str:
     return ""
 
 
-PLANNER_OUTPUT_INSTRUCTION = """
-请严格按照以下 JSON 结构输出（作为 assistant 消息的纯文本，不要包裹 Markdown 代码块）：
-
-{{
-  "reasoning": "简短分析（为什么这样安排）",
-  "recommended_tasks": [
-    {{
-      "topic_id": 1,
-      "title": "Python 函数练习",
-      "description": "...",
-      "estimated_minutes": 45,
-      "priority": 2
-    }}
-  ],
-  "carry_over_tasks": [
-    {{
-      "task_id": 10,
-      "reason": "为什么建议继续处理"
-    }}
-  ],
-  "daily_minutes": 135,
-  "adjustment": "相对前几天的调整说明"
-}}
-
-约束：
-- recommended_tasks 数量 1~5
-- estimated_minutes 必须 > 0
-- daily_minutes <= {daily_limit}
-- topic_id 必须属于当前 Phase 的 available_topics
-- task_id 必须属于上下文中的历史未完成任务（unfinished/postponed）
-- 不要推荐已经完成的主题
-- 每个 recommended_tasks[].description 必须是“可直接执行”的学习内容，
-  至少包含：【学习目标】【具体学习事项】(3~5 条编号、能直接照做)
-  【实践】(理论讲清核心机制 / 编码给最小可运行实践)
-  【完成标准】(可检查的完成标志，含如何客观验收)。
-  要求用词具体、能直接指导开工；不要只是把标题扩写成一两句；
-  不要写成长篇教材（每个 description 控制在 10~20 行内）。
-"""
-
-
 # ============================================================
-# AI 验收题生成（Assessment）Prompt
+# AI 验收题生成（Assessment）
 # ============================================================
 
-ASSESSMENT_SYSTEM_PROMPT = """你是严格的学习验收出题助手。
 
-你的任务是围绕给定知识点，出客观、可验证的验收题目。
-
-规则：
-- 禁止让用户自评掌握程度（不要问“你掌握了吗 / 会了吗 / 给自己打几分”）。
-- 题目必须能检验真实理解与动手能力。
-- 题型只能是：
-  concept       概念解释
-  code_reading  代码阅读
-  coding        编程实现
-  debug         Debug / 错误分析
-  scenario      简单应用场景
-- 每道题必须给出 expected_points（该题应得的分数/关键点数量）。
-
-你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
-
-ASSESSMENT_OUTPUT_INSTRUCTION = """
-请输出严格 JSON：
-{{
-  "questions": [
-    {{"question": "题干", "type": "concept", "expected_points": 2}}
-  ]
-}}
-
-约束：
-- questions 数量 1~{max_questions}
-- type 只能是：{types}
-- expected_points 是 1~{max_points} 的整数，表示该题分值/关键点数量
-"""
+def build_assessment_generate_vars(
+    knowledge_point_name: str,
+    description: str = "",
+    num_questions: int = 4,
+) -> dict:
+    types = " / ".join(ASSESSMENT_QUESTION_TYPES)
+    output_instruction = render_template(
+        ASSESSMENT_OUTPUT_INSTRUCTION,
+        {
+            "max_questions": MAX_ASSESSMENT_QUESTIONS,
+            "types": ", ".join(ASSESSMENT_QUESTION_TYPES),
+            "max_points": MAX_ASSESSMENT_POINTS,
+        },
+    )
+    return {
+        "knowledge_point_name": knowledge_point_name,
+        "knowledge_point_description": (
+            f"- 描述：{description}" if description else ""
+        ),
+        "num_questions": int(num_questions),
+        "types": types,
+        "max_questions": MAX_ASSESSMENT_QUESTIONS,
+        "max_points": MAX_ASSESSMENT_POINTS,
+        "output_instruction": "\n\n" + output_instruction,
+    }
 
 
 def build_assessment_prompt(
     knowledge_point_name: str,
     description: str = "",
     num_questions: int = 4,
+    registry: PromptRegistry | None = None,
 ) -> str:
-    """根据知识点构造验收题 Prompt。"""
-    lines = [
-        "请为以下知识点生成验收题。",
-        "",
-        "【知识点】",
-        f"- 名称：{knowledge_point_name}",
-    ]
-    if description:
-        lines.append(f"- 描述：{description}")
-    lines.append(f"- 目标题数：{int(num_questions)}")
-    lines.extend(
-        [
-            "",
-            "要求：",
-            "- 题目必须能检验真实理解与动手能力，不能问主观掌握度。",
-            f"- 尽量覆盖多种题型：{' / '.join(ASSESSMENT_QUESTION_TYPES)}。",
-            "- 围绕该知识点出题，不要扩展到无关领域。",
-        ]
-    )
-    return "\n".join(lines) + ASSESSMENT_OUTPUT_INSTRUCTION.format(
-        max_questions=MAX_ASSESSMENT_QUESTIONS,
-        types=", ".join(ASSESSMENT_QUESTION_TYPES),
-        max_points=MAX_ASSESSMENT_POINTS,
+    """根据知识点构造验收题 Prompt（向后兼容入口）。"""
+    return render_prompt(
+        "assessment.generate.user",
+        build_assessment_generate_vars(knowledge_point_name, description, num_questions),
+        registry,
     )
 
 
-# ============================================================
-# AI 验收判题（Assessment grading）Prompt
-# ============================================================
-
-ASSESSMENT_JUDGE_SYSTEM_PROMPT = """你是严格的学习验收判题助手。
-
-你会收到“题目 + 用户实际作答”，你的任务是：
-- 对每道题给出判定：correct（正确）/ partial（部分正确）/ incorrect（错误），并给简要理由；
-- 只依据作答证据判断，绝不采信用户自评；
-- 识别答错/理解薄弱的具体知识点，写入 weak_points；
-- 给出整体 result_level 与 mastery_estimate（0~1 浮点数，是对“真实掌握程度”的估计）。
-
-你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
-
-ASSESSMENT_JUDGE_OUTPUT_INSTRUCTION = """
-请输出严格 JSON：
-{{
-  "questions": [
-    {{"question_index": 0, "verdict": "correct", "reason": "简要理由"}}
-  ],
-  "weak_points": ["如：零梯度清理", "如：梯度累积"],
-  "result_level": "good",
-  "mastery_estimate": 0.72
-}}
-
-约束：
-- questions 必须与题目逐题对应（question_index 从 0 开始，数量必须等于题目数）
-- verdict 只能是：{verdicts}
-- weak_points 是字符串数组，可为空数组
-- result_level 只能是：{levels}
-- mastery_estimate 是 0~1 之间的数字
-"""
+def build_assessment_judge_vars(questions: list[dict], answers: list[str]) -> dict:
+    output_instruction = render_template(
+        ASSESSMENT_JUDGE_OUTPUT_INSTRUCTION,
+        {
+            "verdicts": ", ".join(ASSESSMENT_VERDICTS),
+            "levels": ", ".join(ASSESSMENT_RESULT_LEVELS),
+        },
+    )
+    return {
+        "questions_json": json.dumps(questions, ensure_ascii=False, indent=2),
+        "answers_json": json.dumps(answers, ensure_ascii=False, indent=2),
+        "verdicts": ", ".join(ASSESSMENT_VERDICTS),
+        "levels": ", ".join(ASSESSMENT_RESULT_LEVELS),
+        "output_instruction": output_instruction,
+    }
 
 
 def build_assessment_judge_prompt(
     questions: list[dict],
     answers: list[str],
+    registry: PromptRegistry | None = None,
 ) -> str:
-    """根据题目 + 用户答案构造判题 Prompt。"""
-    import json as _json
+    """根据题目 + 用户答案构造判题 Prompt（向后兼容入口）。"""
+    return render_prompt(
+        "assessment.judge.user",
+        build_assessment_judge_vars(questions, answers),
+        registry,
+    )
 
-    return (
-        "请根据以下题目与用户作答进行判断。\n\n"
-        "【题目】\n"
-        + _json.dumps(questions, ensure_ascii=False, indent=2)
-        + "\n\n【用户答案】\n"
-        + _json.dumps(answers, ensure_ascii=False, indent=2)
-        + "\n\n"
-        + ASSESSMENT_JUDGE_OUTPUT_INSTRUCTION.format(
-            verdicts=", ".join(ASSESSMENT_VERDICTS),
-            levels=", ".join(ASSESSMENT_RESULT_LEVELS),
+
+# ============================================================
+# AI 学习总结（月）
+# ============================================================
+
+
+def build_monthly_summary_vars(stats: dict) -> dict:
+    return {"stats_json": json.dumps(stats, ensure_ascii=False, indent=2)}
+
+
+def build_monthly_summary_prompt(
+    stats: dict, registry: PromptRegistry | None = None
+) -> str:
+    return render_prompt(
+        "summary.monthly.user", build_monthly_summary_vars(stats), registry
+    )
+
+
+# ============================================================
+# AI 学习路线草稿（Route Builder）
+# ============================================================
+
+
+def build_route_builder_vars(
+    context: dict, route_skills: list | None = None, market: dict | None = None
+) -> dict:
+    route_skills_section = ""
+    if route_skills:
+        route_skills_section = (
+            "\n\n【该路线关注的技能（仅作重点参考，不要求每个都生成 Topic）】\n"
+            + json.dumps(route_skills, ensure_ascii=False, indent=2)
         )
-    )
-
-
-# ============================================================
-# AI 学习总结（月）Prompt
-# ============================================================
-
-SUMMARY_SYSTEM_PROMPT = """你是学习数据解读助手。
-
-你的职责是解释用户的学习统计，找出问题、总结趋势、给出建议。
-你不需要、也不应该重新计算任何统计数字——所有数值都以输入数据为准。
-不要批评用户，保持客观、建设性、简洁。"""
-
-MONTHLY_SUMMARY_INSTRUCTION = """
-请根据以下本月学习统计（JSON）输出严格 JSON 总结：
-{{
-  "overview": "一句话概述本月学习总体情况",
-  "progress": "对比月初到月末的进展描述",
-  "strengths": ["优势1", "优势2"],
-  "weaknesses": ["不足1", "不足2"],
-  "recommendations": ["建议1", "建议2"],
-  "next_month_focus": ["下月重点1", "下月重点2"]
-}}
-
-要求：
-- overview 与 progress 各不超过 100 字
-- 每个数组 1~3 项，每项不超过 80 字
-- 所有数字以输入统计为准，不要自己推算
-- route_stats 为各学习路线的真实统计；若提及路线/知识点/薄弱项，
-  必须来自 route_stats，不得虚构数据中不存在的知识点
-- 不要给出一个“整体 mastery 百分比”（不同路线不可简单平均）
-- 只输出 JSON，不要输出其他文字
-"""
-
-
-def build_monthly_summary_prompt(stats: dict) -> str:
-    import json
-
-    return (
-        "请解读以下本月学习统计：\n\n"
-        + json.dumps(stats, ensure_ascii=False, indent=2)
-        + "\n\n"
-        + MONTHLY_SUMMARY_INSTRUCTION
-    )
-
-
-# ============================================================
-# AI 学习路线草稿（Route Builder，Phase F）
-# ============================================================
-
-ROUTE_BUILDER_SYSTEM_PROMPT = """你负责生成“结构化学习课程草稿”，最终由用户预览确认后才写入系统。
-
-必须遵守：
-1. 阶段（phase）必须有明确先后依赖，从基础到进阶；
-2. 每个知识点（topic）粒度适合单次学习（10~180 分钟）；
-3. 不重复知识点，不生成已有内容；
-4. 每个 topic 的 description 必须可直接执行，包含：
-   学习目标 / 核心概念 / 最小实践 / 完成标准；
-5. estimated_minutes 为合理整数；
-6. priority 使用 1~5 的整数（3 为默认）；
-7. 不要输出任何数据库字段（id / route_id / phase_id / topic_id）；
-8. 不要生成系统中不存在的学习记录；
-9. 不要声称用户已经掌握任何内容；
-10. 只输出草稿 JSON，不要输出任何多余文字。
-
-严格输出 JSON：
-{
-  "route_name": "路线名称",
-  "plan_name": "学习计划名称",
-  "summary": "一句话说明这份计划的组织思路",
-  "phases": [
-    {
-      "name": "阶段名",
-      "goal": "阶段目标",
-      "order": 1,
-      "topics": [
-        {"name": "知识点", "description": "可执行说明", "estimated_minutes": 45, "priority": 3, "order": 1}
-      ]
+    market_section = ""
+    if market:
+        market_section = (
+            "\n\n【近期目标岗位样本信号（仅用于调整重点，不代表全行业，"
+            "不允许跳过基础依赖）】\n"
+            + json.dumps(market, ensure_ascii=False, indent=2)
+        )
+    return {
+        "route_context_json": json.dumps(context, ensure_ascii=False, indent=2),
+        "route_skills_section": route_skills_section,
+        "market_section": market_section,
     }
-  ]
-}
-
-规模限制：
-- 阶段数量 2~8；
-- 每个阶段知识点 2~12；
-- 总知识点不超过 40。
-
-围绕用户给定的路线目标 / 基础 / 重点 / 深度生成，不要因为模型知道某领域就无限扩展。
-"""
 
 
 def build_route_builder_prompt(
-    context: dict, route_skills: list | None = None, market: dict | None = None
+    context: dict,
+    route_skills: list | None = None,
+    market: dict | None = None,
+    registry: PromptRegistry | None = None,
 ) -> str:
-    import json
-
-    lines = [
-        "请根据以下信息生成一份学习路线草稿。",
-        "",
-        "【路线信息】",
-        json.dumps(context, ensure_ascii=False, indent=2),
-    ]
-    if route_skills:
-        lines += [
-            "",
-            "【该路线关注的技能（仅作重点参考，不要求每个都生成 Topic）】",
-            json.dumps(route_skills, ensure_ascii=False, indent=2),
-        ]
-    if market:
-        lines += [
-            "",
-            "【近期目标岗位样本信号（仅用于调整重点，不代表全行业，"
-            "不允许跳过基础依赖）】",
-            json.dumps(market, ensure_ascii=False, indent=2),
-        ]
-    lines += ["", "只输出严格 JSON 草稿。"]
-    return "\n".join(lines)
+    return render_prompt(
+        "route_builder.user",
+        build_route_builder_vars(context, route_skills, market),
+        registry,
+    )
 
 
-ROUTE_SUGGEST_SYSTEM_PROMPT = """你负责把一个新技能候选建议到“已有的学习路线”。
-
-硬性要求：
-- 只能从给定候选路线中选择，返回其 name；
-- 不得创建新路线名；
-- 不确定时返回空数组；
-- 只输出严格 JSON，不要输出多余文字。
-
-输出：
-{"suggested_route_names": ["路线名"], "reason": "简短理由"}
-"""
+def build_route_suggest_vars(candidate_name: str, routes: list) -> dict:
+    return {
+        "candidate_name": candidate_name,
+        "routes_json": json.dumps(routes, ensure_ascii=False, indent=2),
+    }
 
 
-def build_route_suggest_prompt(candidate_name: str, routes: list) -> str:
-    import json
+def build_route_suggest_prompt(
+    candidate_name: str, routes: list, registry: PromptRegistry | None = None
+) -> str:
+    return render_prompt(
+        "route_suggestion.user",
+        build_route_suggest_vars(candidate_name, routes),
+        registry,
+    )
 
-    return (
-        "技能候选：\n"
-        f"{candidate_name}\n\n"
-        "现有学习路线（只能从中选择 name）：\n"
-        + json.dumps(routes, ensure_ascii=False, indent=2)
-        + "\n\n请给出建议关联路线。"
+
+# ============================================================
+# JD 解析
+# ============================================================
+
+
+def build_jd_parse_vars(raw_text: str) -> dict:
+    return {"jd_text": raw_text, "output_format": JD_AI_FORMAT}
+
+
+def build_jd_parse_prompt(
+    raw_text: str, registry: PromptRegistry | None = None
+) -> str:
+    return render_prompt("jd_parse.user", build_jd_parse_vars(raw_text), registry)
+
+
+# ============================================================
+# 简历素材
+# ============================================================
+
+
+def build_resume_material_vars(outcomes: list[dict]) -> dict:
+    safe = []
+    for o in outcomes:
+        safe.append({
+            "title": o.get("title"),
+            "content": o.get("content"),
+            "kind": o.get("kind"),
+            "tech_stack": o.get("tech_stack"),
+            "dataset": o.get("dataset"),
+            "metrics": o.get("metrics"),
+            "github_url": o.get("github_url"),
+            "resume_keywords": o.get("resume_keywords"),
+        })
+    return {
+        "outcomes_json": json.dumps(safe, ensure_ascii=False, indent=2),
+        "output_format": RESUME_OUTPUT_FORMAT,
+    }
+
+
+def build_resume_material_prompt(
+    outcomes: list[dict], registry: PromptRegistry | None = None
+) -> str:
+    return render_prompt(
+        "resume_material.user", build_resume_material_vars(outcomes), registry
     )

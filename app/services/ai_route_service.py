@@ -10,11 +10,11 @@ AI 永远不直接写库：草稿与建议都必须经用户 Preview / 确认后
 from __future__ import annotations
 
 from ..ai.interface import AIClient, AIServiceError
+from ..ai.prompt_registry import PromptRegistry
 from ..ai.prompts import (
-    ROUTE_BUILDER_SYSTEM_PROMPT,
-    ROUTE_SUGGEST_SYSTEM_PROMPT,
-    build_route_builder_prompt,
-    build_route_suggest_prompt,
+    build_route_builder_vars,
+    build_route_suggest_vars,
+    render_prompt,
 )
 from ..ai.schemas import (
     AIRouteDraft,
@@ -25,8 +25,11 @@ from ..ai.schemas import (
 
 
 class AIRouteBuilderService:
-    def __init__(self, client: AIClient):
+    def __init__(
+        self, client: AIClient, prompt_registry: PromptRegistry | None = None
+    ):
         self.client = client
+        self.prompt_registry = prompt_registry
 
     def is_configured(self) -> bool:
         return self.client.is_configured()
@@ -40,12 +43,15 @@ class AIRouteBuilderService:
         """根据纯数据 context 生成路线草稿；失败抛 AIServiceError。"""
         if not self.client.is_configured():
             raise AIServiceError("AI 未配置，无法生成学习路线")
-        user_prompt = build_route_builder_prompt(
-            context, route_skills=route_skills, market=market
+        user_prompt = render_prompt(
+            "route_builder.user",
+            build_route_builder_vars(context, route_skills, market),
+            self.prompt_registry,
         )
         try:
             content = self.client.chat(
-                ROUTE_BUILDER_SYSTEM_PROMPT, user_prompt
+                render_prompt("route_builder.system", {}, self.prompt_registry),
+                user_prompt,
             )
         except AIServiceError:
             raise
@@ -59,10 +65,15 @@ class AIRouteBuilderService:
         """建议候选技能应关联的现有路线；只返回 routes 中真实存在的 name。"""
         if not self.client.is_configured():
             raise AIServiceError("AI 未配置，无法生成路线建议")
-        user_prompt = build_route_suggest_prompt(candidate_name, routes)
+        user_prompt = render_prompt(
+            "route_suggestion.user",
+            build_route_suggest_vars(candidate_name, routes),
+            self.prompt_registry,
+        )
         try:
             content = self.client.chat(
-                ROUTE_SUGGEST_SYSTEM_PROMPT, user_prompt
+                render_prompt("route_suggestion.system", {}, self.prompt_registry),
+                user_prompt,
             )
         except AIServiceError:
             raise

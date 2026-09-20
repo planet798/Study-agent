@@ -10,7 +10,12 @@ from __future__ import annotations
 from .interface import AIClient, AIServiceError
 from .long_term_context import LongTermContext
 from .planner_context import PlanningContext
-from .prompts import build_planner_system_prompt, build_planner_user_prompt
+from .prompt_registry import PromptRegistry
+from .prompts import (
+    build_planner_system_vars,
+    build_planner_user_vars,
+    render_prompt,
+)
 from .schemas import DailyPlan, parse_daily_plan_from_json
 
 
@@ -20,11 +25,14 @@ class AIPlanner:
         client: AIClient,
         daily_limit: int = 180,
         long_term_context: LongTermContext | None = None,
+        prompt_registry: PromptRegistry | None = None,
     ):
         self.client = client
         self.daily_limit = daily_limit
         # 长期学习上下文（职业目标/JD/技能路线/能力状态）；None 时不注入，保持旧行为
         self.long_term_context = long_term_context
+        # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
+        self.prompt_registry = prompt_registry
 
     def is_configured(self) -> bool:
         return self.client.is_configured()
@@ -34,9 +42,15 @@ class AIPlanner:
         if not self.client.is_configured():
             raise AIServiceError("AI 未配置，无法规划")
 
-        system_prompt = build_planner_system_prompt(self.daily_limit)
-        user_prompt = build_planner_user_prompt(
-            context, long_term=self.long_term_context
+        system_prompt = render_prompt(
+            "planner.system",
+            build_planner_system_vars(self.daily_limit),
+            self.prompt_registry,
+        )
+        user_prompt = render_prompt(
+            "planner.user",
+            build_planner_user_vars(context, self.long_term_context),
+            self.prompt_registry,
         )
         try:
             content = self.client.chat(system_prompt, user_prompt)

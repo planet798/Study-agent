@@ -112,6 +112,9 @@ class MainWindow(QMainWindow):
         ai_route_service=None,
         scheduler=None,
         db_path=None,
+        ai_config_service=None,
+        prompt_registry=None,
+        prompt_preview_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -154,6 +157,10 @@ class MainWindow(QMainWindow):
         self.ai_route_service = ai_route_service
         # Phase D：多路线全局调度（可选；未传则回退单路线 Planner）
         self.scheduler = scheduler
+        # AI 设置中心：可选；未传则隐藏“AI 设置”页
+        self.ai_config_service = ai_config_service
+        self.prompt_registry = prompt_registry
+        self.prompt_preview_service = prompt_preview_service
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -186,15 +193,18 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(12, 8, 12, 8)
         root.setSpacing(8)
 
-        # 顶部导航 [今日] [学习路线] [月总结]
+        # 顶部导航 [今日] [学习路线] [月总结] [AI 设置]
         nav = QHBoxLayout()
         self.nav_today_btn = QPushButton("今日")
         self.nav_routes_btn = QPushButton("学习路线")
         self.nav_monthly_btn = QPushButton("月总结")
+        self.nav_ai_btn = QPushButton("AI 设置")
         self.nav_today_btn.clicked.connect(lambda: self._switch_page(0))
         self.nav_routes_btn.clicked.connect(self._switch_to_routes)
         self.nav_monthly_btn.clicked.connect(lambda: self._switch_page(1))
-        for b in (self.nav_today_btn, self.nav_routes_btn, self.nav_monthly_btn):
+        self.nav_ai_btn.clicked.connect(self._switch_to_ai_settings)
+        for b in (self.nav_today_btn, self.nav_routes_btn, self.nav_monthly_btn,
+                  self.nav_ai_btn):
             b.setObjectName("PrimaryButton")
             nav.addWidget(b)
         nav.addStretch()
@@ -300,6 +310,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(today_page)
         self.monthly_page_index = None
         self.routes_page_index = None
+        self.ai_settings_page_index = None
 
         # ----- 月总结页（可选，索引 1） -----
         if self.summary_service is not None:
@@ -331,6 +342,21 @@ class MainWindow(QMainWindow):
         else:
             self.nav_routes_btn.setEnabled(False)
 
+        # ----- AI 设置页（可选） -----
+        if self.ai_config_service is not None and self.prompt_registry is not None:
+            from .ai_settings_page import AISettingsPage
+
+            self.ai_settings_page = AISettingsPage(
+                self.ai_config_service,
+                self.prompt_registry,
+                preview_service=self.prompt_preview_service,
+            )
+            self.stack.addWidget(self.ai_settings_page)
+            self.ai_settings_page_index = self.stack.count() - 1
+            self.nav_ai_btn.setEnabled(True)
+        else:
+            self.nav_ai_btn.setEnabled(False)
+
         self.setCentralWidget(central)
         self.statusBar().showMessage("")
 
@@ -354,6 +380,14 @@ class MainWindow(QMainWindow):
         if self.routes_page is not None:
             self.routes_page.refresh()
         self.stack.setCurrentIndex(self.routes_page_index)
+
+    def _switch_to_ai_settings(self) -> None:
+        if self.ai_settings_page_index is None:
+            self.statusBar().showMessage("AI 设置不可用", 3000)
+            return
+        if getattr(self, "ai_settings_page", None) is not None:
+            self.ai_settings_page.refresh()
+        self.stack.setCurrentIndex(self.ai_settings_page_index)
 
     def _build_tray(self) -> None:
         """托盘可用则创建，不可用（如部分 Linux）则跳过，不影响运行。"""
@@ -1681,6 +1715,13 @@ class MainWindow(QMainWindow):
         # 2) 安全停止 AI worker：请求中断并等待线程真正结束，
         #    避免 “QThread: Destroyed while thread is still running”。
         self._stop_ai_workers()
+        # 2b) 停止 AI 设置页的连接测试线程（如果仍在跑）
+        settings_page = getattr(self, "ai_settings_page", None)
+        if settings_page is not None:
+            try:
+                settings_page.profiles_panel.stop_test_worker()
+            except Exception:  # noqa: BLE001 - 清理失败不阻断退出
+                pass
 
         # 3) 关闭可能仍打开着的 AI 结果/验收对话框，避免残留顶级窗口
         #    （否则“最后一个窗口关闭”不会触发，QApplication 不退出）。

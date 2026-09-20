@@ -20,6 +20,13 @@ import json
 import re
 from pathlib import Path
 
+from ..ai.prompt_registry import PromptRegistry
+from ..ai.prompts import (
+    JD_AI_FORMAT,
+    JD_AI_SYSTEM,
+    build_jd_parse_vars,
+    render_prompt,
+)
 from ..database.skill_repository import JdRepository, SkillRepository
 from ..utils.date_utils import add_days
 from .skill_service import SkillService
@@ -80,31 +87,19 @@ DEFAULT_CAREER_CONTEXT_PATH = (
 
 # ---------------- AI 解析（optional enhancement） ----------------
 
-JD_AI_SYSTEM = (
-    "你是招聘 JD 结构化解析助手。"
-    "只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"
-)
+def build_default_parse_ai(ai_client, prompt_registry: PromptRegistry | None = None):
+    """用 ai_client.chat 构造默认 AI 解析函数（JD 原文 -> JSON 文本）。
 
-JD_AI_FORMAT = (
-    '{"direction": "...", "must": ["..."], "plus": ["..."], "intern": true/false}\n'
-    "字段说明：direction 为岗位方向；must 为必备技能；plus 为加分技能；"
-    "intern 是否实习岗位。must/plus 使用技能名称。"
-)
-
-
-def _ai_user_prompt(raw_text: str) -> str:
-    return (
-        "请解析以下招聘 JD，输出严格 JSON：\n\n"
-        f"【JD 原文】\n{raw_text}\n\n"
-        f"输出格式：\n{JD_AI_FORMAT}"
-    )
-
-
-def build_default_parse_ai(ai_client):
-    """用 ai_client.chat 构造默认 AI 解析函数（JD 原文 -> JSON 文本）。"""
+    Prompt 统一经 PromptRegistry（支持用户在 AI 设置中覆盖）。
+    """
 
     def _parse(raw_text: str) -> str:
-        return ai_client.chat(JD_AI_SYSTEM, _ai_user_prompt(raw_text))
+        return ai_client.chat(
+            render_prompt("jd_parse.system", {}, prompt_registry),
+            render_prompt(
+                "jd_parse.user", build_jd_parse_vars(raw_text), prompt_registry
+            ),
+        )
 
     return _parse
 

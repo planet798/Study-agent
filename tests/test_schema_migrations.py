@@ -504,3 +504,61 @@ def test_v11_migration_idempotent(tmp_path):
             assert cols.count(c) == 1
     finally:
         conn.close()
+
+
+# ============================================================
+# v14：AI 设置中心（ai_profiles / prompt_overrides）
+# ============================================================
+
+
+def test_v14_tables_exist_and_no_api_key_column(tmp_path):
+    conn = get_connection(tmp_path / "v14.db")
+    try:
+        assert get_schema_version(conn) == SCHEMA_VERSION
+        assert SCHEMA_VERSION >= 14
+        tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "ai_profiles" in tables
+        assert "prompt_overrides" in tables
+        # 硬要求：ai_profiles 绝不包含 api_key 列
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(ai_profiles)")]
+        assert "api_key" not in cols
+        assert "secret_ref" in cols
+        # prompt_overrides 的 prompt_key 唯一
+        override_cols = [
+            r[1] for r in conn.execute("PRAGMA table_info(prompt_overrides)")
+        ]
+        assert "prompt_key" in override_cols
+    finally:
+        conn.close()
+
+
+def test_v13_db_upgrades_to_v14_without_data_loss(tmp_path):
+    path = tmp_path / "v13.db"
+    # 先建一个 v13 数据库
+    conn = get_connection(path)
+    conn.execute(
+        "INSERT INTO tasks (title, description, category, estimated_minutes, "
+        "priority, status, scheduled_date, postpone_count, created_at, "
+        "updated_at, source) VALUES ('旧任务','','学习',1,1,'active',"
+        "'2026-09-06',0,'2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
+    )
+    conn.commit()
+    conn.execute("PRAGMA user_version = 13")
+    conn.commit()
+    conn.close()
+
+    conn = get_connection(path)
+    try:
+        assert get_schema_version(conn) == SCHEMA_VERSION
+        assert conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE title='旧任务'"
+        ).fetchone()[0] == 1
+        # 幂等
+        assert migrate(conn) == SCHEMA_VERSION
+        assert migrate(conn) == SCHEMA_VERSION
+    finally:
+        conn.close()

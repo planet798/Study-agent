@@ -77,3 +77,54 @@ def make_window(qtbot, repo, task_service, date_service, fixed_today):
         return window
 
     return _make
+
+
+# ============================================================
+# AI 设置中心测试 fixtures（fake keyring，绝不接触真实系统凭据）
+# ============================================================
+
+
+class FakeKeyring:
+    """内存版 keyring，用于测试；不写真实系统凭据存储。"""
+
+    def __init__(self):
+        self.store: dict[tuple[str, str], str] = {}
+        self.fail_on_set = False
+
+    def set_password(self, service, account, value):
+        if self.fail_on_set:
+            raise RuntimeError("fake keyring unavailable")
+        self.store[(service, account)] = value
+
+    def get_password(self, service, account):
+        return self.store.get((service, account))
+
+    def delete_password(self, service, account):
+        if (service, account) in self.store:
+            del self.store[(service, account)]
+
+
+@pytest.fixture()
+def fake_keyring():
+    return FakeKeyring()
+
+
+@pytest.fixture()
+def ai_config_service(conn, fake_keyring):
+    """绑定临时 DB + fake keyring 的 AIConfigService（env 清空）。"""
+    from app.ai.config_service import AIConfigService
+    from app.ai.secrets import SecretStore
+
+    return AIConfigService(
+        conn=conn,
+        secret_store=SecretStore(keyring_module=fake_keyring),
+        env={},
+    )
+
+
+@pytest.fixture()
+def prompt_registry(conn):
+    """DB 支持的 PromptRegistry（支持 override）。"""
+    from app.ai.prompt_registry import PromptOverrideRepository, PromptRegistry
+
+    return PromptRegistry(PromptOverrideRepository(conn))

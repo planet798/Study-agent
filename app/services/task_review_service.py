@@ -12,14 +12,22 @@
 from __future__ import annotations
 
 from ..ai.interface import AIClient, AIServiceError
-from ..ai.prompts import SYSTEM_PROMPT, build_user_prompt
+from ..ai.prompt_registry import PromptRegistry
+from ..ai.prompts import (
+    build_task_review_vars,
+    render_prompt,
+)
 from ..ai.schemas import TaskReview, parse_review_from_json
 from ..database.repository import Task
 
 
 class TaskReviewService:
-    def __init__(self, client: AIClient):
+    def __init__(
+        self, client: AIClient, prompt_registry: PromptRegistry | None = None
+    ):
         self.client = client
+        # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
+        self.prompt_registry = prompt_registry
 
     def is_configured(self) -> bool:
         """AI 是否已配置（未配置时 GUI 应显示"AI 未配置"而非报错）。"""
@@ -37,9 +45,14 @@ class TaskReviewService:
         if not reason or not reason.strip():
             raise AIServiceError("未完成原因不能为空")
 
-        user_prompt = build_user_prompt(task, reason, today)
+        user_prompt = render_prompt(
+            "task_review.user",
+            build_task_review_vars(task, reason, today),
+            self.prompt_registry,
+        )
+        system_prompt = render_prompt("task_review.system", {}, self.prompt_registry)
         try:
-            content = self.client.chat(SYSTEM_PROMPT, user_prompt)
+            content = self.client.chat(system_prompt, user_prompt)
         except AIServiceError:
             raise
         except Exception as e:  # noqa: BLE001

@@ -22,9 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtWidgets import QApplication
 
-from app.ai.client import DeepSeekClient
+from app.ai.client import AdaptiveAIClient, DeepSeekClient
+from app.ai.config_service import AIConfigService
 from app.ai.long_term_context import load_long_term_context
 from app.ai.planner import AIPlanner
+from app.ai.prompt_registry import PromptOverrideRepository, PromptRegistry
 from app.ai.summary import AISummaryGenerator
 from app.database.connection import get_connection, resolve_db_path
 from app.database.repository import TaskRepository
@@ -124,10 +126,12 @@ def _run_add_jd_cli(argv) -> int:
         assessment_repo = AssessmentRepository(conn)
         skill_service = SkillService(skill_repo, assessment_repo=assessment_repo)
 
-        ai_client = DeepSeekClient()
+        ai_config_service = AIConfigService(db_path=str(resolve_db_path(args.db)))
+        prompt_registry = PromptRegistry(PromptOverrideRepository(conn))
+        ai_client = AdaptiveAIClient(ai_config_service.get_runtime_config)
         parse_ai = None
         if not args.no_ai and ai_client.is_configured():
-            parse_ai = build_default_parse_ai(ai_client)
+            parse_ai = build_default_parse_ai(ai_client, prompt_registry)
         jd_svc = JdService(
             jd_repo, skill_repo, skill_service,
             ai_client=ai_client, parse_ai=parse_ai,
@@ -372,8 +376,11 @@ def _run_export_note_cli(argv) -> int:
         lo_repo = LearningOutcomeRepository(conn)
         outcome_service = LearningOutcomeService(lo_repo)
 
-        ai_client = DeepSeekClient()
+        ai_config_service = AIConfigService(db_path=str(resolve_db_path(args.db)))
+        prompt_registry = PromptRegistry(PromptOverrideRepository(conn))
+        ai_client = AdaptiveAIClient(ai_config_service.get_runtime_config)
         outcome_service.ai_client = ai_client
+        outcome_service.prompt_registry = prompt_registry
 
         # 技能/JD（供“明日建议”纯规则预览；可选，出错不影响导出）
         jd_service = None
@@ -616,8 +623,14 @@ def main() -> int:
     # 技能同步已在 ensure_default_plan 之后完成（见上）；此处不再按“空池”条件 seed。
 
     # AI 配置读取环境变量；未配置时 GUI 正常运行（本地功能不受影响）
-    ai_client = DeepSeekClient()
+    # AI 设置中心：Profile 存 SQLite（不含 Key），Key 存系统 keyring。
+    # AdaptiveAIClient 在每次请求解析当前配置 → 切换 / 修改后无需重启。
+    ai_config_service = AIConfigService(db_path=str(resolve_db_path()))
+    prompt_registry = PromptRegistry(PromptOverrideRepository(conn))
+    ai_client = AdaptiveAIClient(ai_config_service.get_runtime_config)
     outcome_service.ai_client = ai_client  # 简历素材的 AI 组织（可选）
+    # 学习成果服务支持 Prompt 覆盖
+    outcome_service.prompt_registry = prompt_registry
     from app.services.jd_service import JdService, build_default_parse_ai
 
     jd_service = JdService(
@@ -625,7 +638,8 @@ def main() -> int:
     )
     # UI 里“分析 / 预览”也支持 AI 结构化解析（可选增强；失败回退规则）
     jd_service.parse_ai = (
-        build_default_parse_ai(ai_client) if ai_client.is_configured() else None
+        build_default_parse_ai(ai_client, prompt_registry)
+        if ai_client.is_configured() else None
     )
     # Step 5/6：每日 JD 技术汇总（市场样本）已在上方构造
     # 长期学习上下文（职业目标/JD/技能路线/能力状态）：作为 AI 规划的长期依据；
@@ -637,6 +651,7 @@ def main() -> int:
         planner=AIPlanner(
             ai_client,
             long_term_context=long_term_context,
+            prompt_registry=prompt_registry,
         ),
         study_plan_service=study_plan_service,
         assessment_repo=assessment_repo,
@@ -661,7 +676,7 @@ def main() -> int:
         planner=daily_planner.planner,
     )
     date_service.scheduler = scheduler
-    review_service = TaskReviewService(ai_client)
+    review_service = TaskReviewService(ai_client, prompt_registry=prompt_registry)
 
     # Phase 3D~6：验收 / 复习调度
     from app.services.assessment_service import AssessmentService
@@ -675,6 +690,7 @@ def main() -> int:
         assessment_repo=assessment_repo,
         review_service=review_scheduler,
         outcome_service=outcome_service,
+        prompt_registry=prompt_registry,
     )
 
     # 验收后台线程专用：为 worker 的“独立连接”构造一套同配置依赖，
@@ -690,11 +706,13 @@ def main() -> int:
             LearningOutcomeRepository(fresh_conn)
         )
         fresh_outcome.ai_client = ai_client
+        fresh_outcome.prompt_registry = prompt_registry
         return AssessmentService(
             ai_client,
             assessment_repo=fresh_assessment_repo,
             review_service=fresh_review,
             outcome_service=fresh_outcome,
+            prompt_registry=prompt_registry,
         )
     # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
     from app.services.manual_task_service import ManualTaskService
@@ -709,14 +727,32 @@ def main() -> int:
     summary_service = SummaryService(
         stats_service=StatsService(repo),
         cache_repo=SummaryCacheRepository(conn),
-        ai_generator=AISummaryGenerator(ai_client),
+        ai_generator=AISummaryGenerator(ai_client, prompt_registry=prompt_registry),
         route_progress_service=route_progress_service,
     )
 
     # Phase F：AI 学习路线草稿（纯 AI，不碰 DB）
     from app.services.ai_route_service import AIRouteBuilderService
 
-    ai_route_service = AIRouteBuilderService(ai_client)
+    ai_route_service = AIRouteBuilderService(
+        ai_client, prompt_registry=prompt_registry
+    )
+
+    # AI 设置 · Prompt 最终预览（真实当前数据）
+    from app.services.prompt_preview_service import PromptPreviewService
+
+    prompt_preview_service = PromptPreviewService(
+        prompt_registry,
+        today_provider=today,
+        daily_planner_service=daily_planner,
+        scheduler=scheduler,
+        route_repo=route_repo,
+        summary_service=summary_service,
+        assessment_repo=assessment_repo,
+        outcome_service=outcome_service,
+        task_repo=repo,
+        jd_repo=JdRepository(conn),
+    )
 
     # 不显式传 today_provider：MainWindow 默认跟随 date_utils.today()，
     # 因此 --date 注入的日期会自动作用于整个应用（GUI 日期/阶段/任务/统计/AI）。
@@ -760,6 +796,9 @@ def main() -> int:
         # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
         assessment_service_factory=build_assessment_service,
         db_path=str(resolve_db_path()),
+        ai_config_service=ai_config_service,
+        prompt_registry=prompt_registry,
+        prompt_preview_service=prompt_preview_service,
     )
     # 新实例启动请求 → 恢复/前置已有唯一实例（从托盘恢复或直接激活）
     if hasattr(window, "_restore_from_tray"):

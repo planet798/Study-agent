@@ -23,6 +23,11 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..ai.prompt_registry import PromptRegistry
+from ..ai.prompts import (
+    build_resume_material_vars,
+    render_prompt,
+)
 from ..database.skill_repository import LearningOutcomeRepository
 
 # 允许的 kind
@@ -67,11 +72,14 @@ class LearningOutcomeService:
         outcome_repo: LearningOutcomeRepository,
         project_root: str | Path | None = None,
         ai_client=None,
+        prompt_registry: PromptRegistry | None = None,
     ):
         self.outcome_repo = outcome_repo
         self.project_root = Path(project_root) if project_root else PROJECT_ROOT
         # 可选：简历素材的 AI 语言组织；None / 失败 / 非法输出都走确定性模板
         self.ai_client = ai_client
+        # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
+        self.prompt_registry = prompt_registry
 
     # ================= Git 证据 =================
 
@@ -312,8 +320,14 @@ class LearningOutcomeService:
         if client is not None and client.is_configured() and (outcomes):
             try:
                 raw = client.chat(
-                    _RESUME_SYSTEM_PROMPT,
-                    _build_resume_user_prompt(outcomes),
+                    render_prompt(
+                        "resume_material.system", {}, self.prompt_registry
+                    ),
+                    render_prompt(
+                        "resume_material.user",
+                        build_resume_material_vars(outcomes),
+                        self.prompt_registry,
+                    ),
                 )
                 ai = self._validate_ai_resume(raw)
                 if ai is not None:
@@ -461,30 +475,3 @@ class LearningOutcomeService:
             "summary": data["summary"].strip(),
         }
 
-
-_RESUME_SYSTEM_PROMPT = (
-    "你是简历素材整理助手。只允许使用输入中已经存在的事实进行语言组织与压缩，"
-    "绝对禁止新增 dataset / metrics(数值) / benchmark / GitHub URL 等输入中没有的内容。"
-    "只输出严格 JSON，不要输出其他文字。"
-)
-
-
-def _build_resume_user_prompt(outcomes: list[dict]) -> str:
-    safe = []
-    for o in outcomes:
-        safe.append({
-            "title": o.get("title"),
-            "content": o.get("content"),
-            "kind": o.get("kind"),
-            "tech_stack": o.get("tech_stack"),
-            "dataset": o.get("dataset"),
-            "metrics": o.get("metrics"),
-            "github_url": o.get("github_url"),
-            "resume_keywords": o.get("resume_keywords"),
-        })
-    return (
-        "请基于以下学习成果输出简历素材（关键词 / bullet / 总结）：\n\n"
-        f"{json.dumps(safe, ensure_ascii=False, indent=2)}\n\n"
-        '输出严格 JSON：\n'
-        '{"keywords": ["..."], "bullets": ["..."], "summary": "..."}'
-    )

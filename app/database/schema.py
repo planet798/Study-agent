@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -876,6 +876,51 @@ def _migrate_v13(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[13] = _migrate_v13
+
+
+# ============================================================
+# v14：AI 设置中心（Phase AI Settings）
+# ============================================================
+#
+# ai_profiles：用户在 UI 中维护的 API 配置（Provider Profile）。
+#   **绝不存 API Key**：只保存 secret_ref（指向 keyring 中的条目）。
+#   is_active 全局最多只有一个为 1（由 AIConfigService.set_active 保证）。
+# prompt_overrides：用户对内置 Prompt 的自定义覆盖。
+#   代码中的 default_template 始终是系统默认；用户修改只写 override；
+#   “恢复默认” = DELETE 该行。
+#   prompt_key UNIQUE 保证每个 Prompt 只有一份覆盖。
+
+_V14_SQL = """
+CREATE TABLE IF NOT EXISTS ai_profiles (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    display_name  TEXT    NOT NULL,
+    provider_type TEXT    NOT NULL DEFAULT 'openai_compatible',
+    base_url      TEXT    NOT NULL DEFAULT '',
+    model         TEXT    NOT NULL DEFAULT '',
+    secret_ref    TEXT    NOT NULL DEFAULT '',
+    is_active     INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT '',
+    updated_at    TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_profiles_active
+    ON ai_profiles(is_active);
+
+CREATE TABLE IF NOT EXISTS prompt_overrides (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    prompt_key TEXT    NOT NULL UNIQUE,
+    content    TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL DEFAULT ''
+);
+"""
+
+
+def _migrate_v14(conn: sqlite3.Connection) -> None:
+    """v14：创建 AI Profile / Prompt Override 两张表（幂等，不含任何 Key）。"""
+    conn.executescript(_V14_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[14] = _migrate_v14
 
 
 def get_schema_version(conn) -> int:

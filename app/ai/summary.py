@@ -8,9 +8,10 @@
 from __future__ import annotations
 
 from .interface import AIClient, AIServiceError
+from .prompt_registry import PromptRegistry
 from .prompts import (
-    SUMMARY_SYSTEM_PROMPT,
-    build_monthly_summary_prompt,
+    build_monthly_summary_vars,
+    render_prompt,
 )
 from .schemas import (
     MonthlySummary,
@@ -19,8 +20,11 @@ from .schemas import (
 
 
 class AISummaryGenerator:
-    def __init__(self, client: AIClient):
+    def __init__(
+        self, client: AIClient, prompt_registry: PromptRegistry | None = None
+    ):
         self.client = client
+        self.prompt_registry = prompt_registry
 
     def is_configured(self) -> bool:
         return self.client.is_configured()
@@ -30,7 +34,12 @@ class AISummaryGenerator:
             raise AIServiceError("AI 未配置")
         try:
             content = self.client.chat(
-                SUMMARY_SYSTEM_PROMPT, build_monthly_summary_prompt(stats)
+                render_prompt("summary.monthly.system", {}, self.prompt_registry),
+                render_prompt(
+                    "summary.monthly.user",
+                    build_monthly_summary_vars(stats),
+                    self.prompt_registry,
+                ),
             )
             return parse_monthly_from_json(content)
         except AIServiceError:

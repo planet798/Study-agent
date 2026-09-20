@@ -19,11 +19,11 @@ from __future__ import annotations
 import json
 
 from ..ai.interface import AIClient, AIServiceError
+from ..ai.prompt_registry import PromptRegistry
 from ..ai.prompts import (
-    ASSESSMENT_JUDGE_SYSTEM_PROMPT,
-    ASSESSMENT_SYSTEM_PROMPT,
-    build_assessment_judge_prompt,
-    build_assessment_prompt,
+    build_assessment_generate_vars,
+    build_assessment_judge_vars,
+    render_prompt,
 )
 from ..ai.schemas import (
     MAX_ASSESSMENT_QUESTIONS,
@@ -64,6 +64,7 @@ class AssessmentService:
         assessment_repo: AssessmentRepository | None = None,
         review_service: ReviewService | None = None,
         outcome_service=None,
+        prompt_registry: PromptRegistry | None = None,
     ):
         self.client = client
         self.assessment_repo = assessment_repo
@@ -71,6 +72,8 @@ class AssessmentService:
         self.review_service = review_service
         # 可选注入：验收后沉淀学习成果（Phase D hook；不注入行为不变）
         self.outcome_service = outcome_service
+        # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
+        self.prompt_registry = prompt_registry
 
     def is_configured(self) -> bool:
         """AI 是否已配置（未配置时上层应给出明确提示而非崩溃）。"""
@@ -99,10 +102,17 @@ class AssessmentService:
 
         target = max(1, min(int(num_questions), MAX_ASSESSMENT_QUESTIONS))
         description = str(data.get("description") or "").strip()
-        user_prompt = build_assessment_prompt(name, description, target)
+        system_prompt = render_prompt(
+            "assessment.generate.system", {}, self.prompt_registry
+        )
+        user_prompt = render_prompt(
+            "assessment.generate.user",
+            build_assessment_generate_vars(name, description, target),
+            self.prompt_registry,
+        )
 
         try:
-            content = self.client.chat(ASSESSMENT_SYSTEM_PROMPT, user_prompt)
+            content = self.client.chat(system_prompt, user_prompt)
         except AIServiceError:
             raise
         except Exception as e:  # noqa: BLE001 - 不泄漏底层异常
@@ -238,11 +248,16 @@ class AssessmentService:
         self, questions: list[dict], answers: list[str]
     ) -> AssessmentJudgment:
         """调用 AI 判题并校验结果；任何失败抛 AIServiceError。"""
-        user_prompt = build_assessment_judge_prompt(questions, answers)
+        user_prompt = render_prompt(
+            "assessment.judge.user",
+            build_assessment_judge_vars(questions, answers),
+            self.prompt_registry,
+        )
+        system_prompt = render_prompt(
+            "assessment.judge.system", {}, self.prompt_registry
+        )
         try:
-            content = self.client.chat(
-                ASSESSMENT_JUDGE_SYSTEM_PROMPT, user_prompt
-            )
+            content = self.client.chat(system_prompt, user_prompt)
         except AIServiceError:
             raise
         except Exception as e:  # noqa: BLE001
