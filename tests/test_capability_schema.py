@@ -19,7 +19,7 @@ from app.services.capability import (
 
 class TestSchemaV17:
     def test_version_and_table(self, conn):
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 17
         tables = {
             r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"

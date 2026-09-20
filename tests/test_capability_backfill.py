@@ -186,7 +186,7 @@ class TestSequentialMigration:
         )
         conn.commit()
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 17
         skill_repo = SkillRepository(conn)
         tl = TopicLearningProfileService(
             conn, TopicLearningComponentRepository(conn)

@@ -233,3 +233,54 @@ def assessment_repo(conn):
     from app.database.assessment_repository import AssessmentRepository
 
     return AssessmentRepository(conn)
+
+
+# ============================================================
+# Phase 4：Practice / Project fixtures
+# ============================================================
+
+
+@pytest.fixture()
+def practice_env(conn):
+    """Canonical 六路线 + PracticeProjectService 环境。"""
+    from types import SimpleNamespace
+
+    from app.database.learning_route_repository import LearningRouteRepository
+    from app.database.practice_repository import (
+        PracticeMilestoneRepository,
+        PracticeOutputRepository,
+        PracticeProjectRepository,
+    )
+    from app.database.repository import TaskRepository
+    from app.database.skill_repository import SkillRepository
+    from app.database.study_plan_repository import StudyPlanRepository
+    from app.services.canonical_route_service import CanonicalRouteService
+    from app.services.practice_project_service import PracticeProjectService
+    from app.services.study_plan_service import StudyPlanService
+
+    repo = TaskRepository(conn)
+    plan_repo = StudyPlanRepository(conn)
+    StudyPlanService(repo, plan_repo).ensure_default_plan()
+    route_repo = LearningRouteRepository(conn)
+    skill_repo = SkillRepository(conn)
+    CanonicalRouteService(conn, route_repo, plan_repo, skill_repo).ensure_all()
+    service = PracticeProjectService(
+        conn,
+        project_repo=PracticeProjectRepository(conn),
+        milestone_repo=PracticeMilestoneRepository(conn),
+        output_repo=PracticeOutputRepository(conn),
+        route_repo=route_repo,
+        plan_repo=plan_repo,
+        skill_repo=skill_repo,
+    )
+    return SimpleNamespace(
+        conn=conn, repo=repo, plan_repo=plan_repo, route_repo=route_repo,
+        skill_repo=skill_repo, service=service,
+        r1=route_repo.get_by_key("R1_LLM_FUNDAMENTALS"),
+        r2=route_repo.get_by_key("R2_LLM_POST_TRAINING"),
+        r3=route_repo.get_by_key("R3_LLM_INFRA"),
+        r4=route_repo.get_by_key("R4_AI_AGENT"),
+        r5=route_repo.get_by_key("R5_RECOMMENDATION_SEARCH"),
+        r6=route_repo.get_by_key("R6_CS_FUNDAMENTALS"),
+        group=route_repo.get_by_key("JOB_PREP"),
+    )

@@ -760,6 +760,23 @@ def main() -> int:
         topic_learning_service=topic_learning_service,
         capability_service=capability_service,
     )
+    # Phase 4：Practice / Project Layer（独立于 LearningRoute）
+    from app.database.practice_repository import (
+        PracticeMilestoneRepository,
+        PracticeOutputRepository,
+        PracticeProjectRepository,
+    )
+    from app.services.practice_project_service import PracticeProjectService
+
+    practice_service = PracticeProjectService(
+        conn,
+        project_repo=PracticeProjectRepository(conn),
+        milestone_repo=PracticeMilestoneRepository(conn),
+        output_repo=PracticeOutputRepository(conn),
+        route_repo=route_repo,
+        plan_repo=plan_repo,
+        skill_repo=skill_repo,
+    )
     # 幂等修复历史 route 归属（绝不猜 manual NULL / ordinary todo）
     try:
         repaired = repair_route_assignments(conn, assessment_repo)
@@ -1065,6 +1082,7 @@ def main() -> int:
         prompt_registry=prompt_registry,
         prompt_preview_service=prompt_preview_service,
         topic_learning_service=topic_learning_service,
+        practice_service=practice_service,
     )
     # 新实例启动请求 → 恢复/前置已有唯一实例（从托盘恢复或直接激活）
     if hasattr(window, "_restore_from_tray"):

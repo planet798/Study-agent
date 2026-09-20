@@ -117,6 +117,7 @@ class MainWindow(QMainWindow):
         prompt_preview_service=None,
         topic_learning_service=None,
         capability_service=None,
+        practice_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -167,6 +168,8 @@ class MainWindow(QMainWindow):
         self.topic_learning_service = topic_learning_service
         # Phase 3：Capability Evidence（可选）
         self.capability_service = capability_service
+        # Phase 4：Practice / Project Layer（可选）
+        self.practice_service = practice_service
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -204,17 +207,20 @@ class MainWindow(QMainWindow):
         self.nav_today_btn = QPushButton("今日")
         self.nav_routes_btn = QPushButton("学习路线")
         self.nav_monthly_btn = QPushButton("月总结")
+        self.nav_practice_btn = QPushButton("实践项目")
         self.nav_ai_btn = QPushButton("AI 设置")
         self.nav_today_btn.clicked.connect(lambda: self._switch_page(0))
         self.nav_routes_btn.clicked.connect(self._switch_to_routes)
+        self.nav_practice_btn.clicked.connect(self._switch_to_practice)
         self.nav_monthly_btn.clicked.connect(lambda: self._switch_page(1))
         self.nav_ai_btn.clicked.connect(self._switch_to_ai_settings)
-        for b in (self.nav_today_btn, self.nav_routes_btn, self.nav_monthly_btn,
-                  self.nav_ai_btn):
+        for b in (self.nav_today_btn, self.nav_routes_btn, self.nav_practice_btn,
+                  self.nav_monthly_btn, self.nav_ai_btn):
             b.setObjectName("PrimaryButton")
             nav.addWidget(b)
         nav.addStretch()
         root.addLayout(nav)
+        self.nav_layout = nav
 
         # 页面栈：0=今日 1=月总结
         self.stack = QStackedWidget()
@@ -344,12 +350,30 @@ class MainWindow(QMainWindow):
                 topic_learning_service=self.topic_learning_service,
                 capability_service=self.capability_service,
                 outcome_service=self.outcome_service,
+                practice_service=self.practice_service,
             )
             self.stack.addWidget(self.routes_page)
             self.routes_page_index = self.stack.count() - 1
             self.nav_routes_btn.setEnabled(True)
         else:
             self.nav_routes_btn.setEnabled(False)
+
+        # ----- 实践项目页（可选，独立一级页面） -----
+        self.practice_page_index = None
+        if self.practice_service is not None:
+            from .practice_page import PracticeProjectsPage
+
+            self.practice_page = PracticeProjectsPage(
+                self.practice_service,
+                getattr(self.route_service, "route_repo", None),
+                self.skill_service.skill_repo if self.skill_service else None,
+                self.practice_service.plan_repo,
+            )
+            self.stack.addWidget(self.practice_page)
+            self.practice_page_index = self.stack.count() - 1
+            self.nav_practice_btn.setEnabled(True)
+        else:
+            self.nav_practice_btn.setEnabled(False)
 
         # ----- AI 设置页（可选） -----
         if self.ai_config_service is not None and self.prompt_registry is not None:
@@ -397,6 +421,14 @@ class MainWindow(QMainWindow):
         if getattr(self, "ai_settings_page", None) is not None:
             self.ai_settings_page.refresh()
         self.stack.setCurrentIndex(self.ai_settings_page_index)
+
+    def _switch_to_practice(self) -> None:
+        if getattr(self, "practice_page_index", None) is None:
+            self.statusBar().showMessage("实践项目不可用", 3000)
+            return
+        if getattr(self, "practice_page", None) is not None:
+            self.practice_page.refresh()
+        self.stack.setCurrentIndex(self.practice_page_index)
 
     def _build_tray(self) -> None:
         """托盘可用则创建，不可用（如部分 Linux）则跳过，不影响运行。"""

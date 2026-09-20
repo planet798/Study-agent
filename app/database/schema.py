@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1110,6 +1110,129 @@ def _migrate_v17(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[17] = _migrate_v17
+
+
+# ============================================================
+# v18：Practice / Project Layer（Phase 4）
+# ============================================================
+#
+# 独立于 LearningRoute 的实践/项目层：
+#   practice_projects N:N learning_routes / skills / study_topics
+#   practice_milestones（项目里程碑）
+#   practice_outputs（真实项目产物）
+#
+# 不修改 capability_evidence / mastery / review / task activity。
+# 不自动创建任何用户 Project。
+
+_V18_SQL = """
+CREATE TABLE IF NOT EXISTS practice_projects (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT    NOT NULL,
+    description         TEXT    NOT NULL DEFAULT '',
+    goal                TEXT    NOT NULL DEFAULT '',
+    project_type        TEXT    NOT NULL DEFAULT 'other'
+                        CHECK (project_type IN (
+                          'kaggle','github','paper_reproduction','study_agent',
+                          'llm_training','agent','recommendation_search',
+                          'benchmark_evaluation','other')),
+    status              TEXT    NOT NULL DEFAULT 'planned'
+                        CHECK (status IN
+                          ('planned','in_progress','completed','archived')),
+    source              TEXT    NOT NULL DEFAULT 'manual'
+                        CHECK (source IN ('manual','imported','ai')),
+    archived_from_status TEXT,
+    started_at          TEXT,
+    target_date         TEXT,
+    completed_at        TEXT,
+    created_at          TEXT    NOT NULL DEFAULT '',
+    updated_at          TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_practice_projects_status
+    ON practice_projects(status);
+
+CREATE TABLE IF NOT EXISTS practice_project_routes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL
+               REFERENCES practice_projects(id) ON DELETE CASCADE,
+    route_id   INTEGER NOT NULL REFERENCES learning_routes(id),
+    created_at TEXT    NOT NULL DEFAULT '',
+    UNIQUE(project_id, route_id)
+);
+CREATE INDEX IF NOT EXISTS idx_practice_project_routes_project
+    ON practice_project_routes(project_id);
+CREATE INDEX IF NOT EXISTS idx_practice_project_routes_route
+    ON practice_project_routes(route_id);
+
+CREATE TABLE IF NOT EXISTS practice_project_skills (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL
+               REFERENCES practice_projects(id) ON DELETE CASCADE,
+    skill_id   INTEGER NOT NULL REFERENCES skills(id),
+    created_at TEXT    NOT NULL DEFAULT '',
+    UNIQUE(project_id, skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_practice_project_skills_project
+    ON practice_project_skills(project_id);
+CREATE INDEX IF NOT EXISTS idx_practice_project_skills_skill
+    ON practice_project_skills(skill_id);
+
+CREATE TABLE IF NOT EXISTS practice_project_topics (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL
+               REFERENCES practice_projects(id) ON DELETE CASCADE,
+    topic_id   INTEGER NOT NULL REFERENCES study_topics(id),
+    created_at TEXT    NOT NULL DEFAULT '',
+    UNIQUE(project_id, topic_id)
+);
+CREATE INDEX IF NOT EXISTS idx_practice_project_topics_project
+    ON practice_project_topics(project_id);
+CREATE INDEX IF NOT EXISTS idx_practice_project_topics_topic
+    ON practice_project_topics(topic_id);
+
+CREATE TABLE IF NOT EXISTS practice_milestones (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id   INTEGER NOT NULL
+                 REFERENCES practice_projects(id) ON DELETE CASCADE,
+    title        TEXT    NOT NULL,
+    description  TEXT    NOT NULL DEFAULT '',
+    status       TEXT    NOT NULL DEFAULT 'todo'
+                 CHECK (status IN ('todo','in_progress','done')),
+    order_index  INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT,
+    created_at   TEXT    NOT NULL DEFAULT '',
+    updated_at   TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_practice_milestones_project
+    ON practice_milestones(project_id);
+
+CREATE TABLE IF NOT EXISTS practice_outputs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id   INTEGER NOT NULL
+                 REFERENCES practice_projects(id) ON DELETE CASCADE,
+    output_type  TEXT    NOT NULL
+                 CHECK (output_type IN (
+                   'repository','code','result','benchmark','checkpoint',
+                   'report','readme','demo','paper_reproduction','dataset',
+                   'other')),
+    title        TEXT    NOT NULL,
+    description  TEXT    NOT NULL DEFAULT '',
+    uri          TEXT,
+    details_json TEXT    NOT NULL DEFAULT '{}',
+    created_at   TEXT    NOT NULL DEFAULT '',
+    updated_at   TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_practice_outputs_project
+    ON practice_outputs(project_id);
+"""
+
+
+def _migrate_v18(conn: sqlite3.Connection) -> None:
+    """v18：Practice / Project 六张表（幂等，仅新增）。"""
+    conn.executescript(_V18_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[18] = _migrate_v18
 
 
 def get_schema_version(conn) -> int:

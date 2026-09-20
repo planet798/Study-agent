@@ -62,7 +62,7 @@ class RouteDetailDialog(QDialog):
                  progress_service=None, today_provider=None,
                  ai_route_service=None, skill_service=None,
                  topic_learning_service=None, capability_service=None,
-                 outcome_service=None):
+                 outcome_service=None, practice_service=None):
         super().__init__(parent)
         self.route = route
         self.route_service = route_service
@@ -74,6 +74,7 @@ class RouteDetailDialog(QDialog):
         self.topic_learning_service = topic_learning_service
         self.capability_service = capability_service
         self.outcome_service = outcome_service
+        self.practice_service = practice_service
         self._ai_worker = None
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
@@ -285,12 +286,32 @@ class RouteDetailDialog(QDialog):
             self.body_layout.addWidget(self._phase_card(phase, done_ids))
         self._add_skills_section()
         self._add_curriculum_gap_section()
+        self._add_linked_projects_section()
         self.body_layout.addStretch()
 
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setObjectName("SectionTitle")
         return lbl
+
+    def _add_linked_projects_section(self) -> None:
+        """Phase 4：轻量展示关联实践项目（不把完整项目管理塞进 RouteDetail）。"""
+        if self.practice_service is None:
+            return
+        try:
+            projects = self.practice_service.list_by_route(self.route.id)
+        except Exception:  # noqa: BLE001
+            return
+        self.body_layout.addWidget(self._section_label("关联实践项目"))
+        if not projects:
+            empty = QLabel("关联实践项目：0")
+            empty.setObjectName("TaskMeta")
+            self.body_layout.addWidget(empty)
+            return
+        for p in projects:
+            lbl = QLabel(f"关联实践项目：{p['name']}")
+            lbl.setObjectName("TaskMeta")
+            self.body_layout.addWidget(lbl)
 
     # ---------- Phase 3：Capability ----------
 
@@ -769,7 +790,7 @@ class LearningRoutesPage(QWidget):
                  progress_service=None, today_provider=None,
                  ai_route_service=None, skill_service=None,
                  topic_learning_service=None, capability_service=None,
-                 outcome_service=None):
+                 outcome_service=None, practice_service=None):
         super().__init__(parent)
         self.route_service = route_service
         self.route_plan_service = route_plan_service
@@ -780,6 +801,7 @@ class LearningRoutesPage(QWidget):
         self.topic_learning_service = topic_learning_service
         self.capability_service = capability_service
         self.outcome_service = outcome_service
+        self.practice_service = practice_service
         self.show_archived = False
         self._build_ui()
         self.refresh()
@@ -1036,6 +1058,7 @@ class LearningRoutesPage(QWidget):
             topic_learning_service=self.topic_learning_service,
             capability_service=self.capability_service,
             outcome_service=self.outcome_service,
+            practice_service=self.practice_service,
         )
         dlg.exec()
         self.refresh()
