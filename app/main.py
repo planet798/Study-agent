@@ -614,6 +614,48 @@ def _run_six_routes_cli(argv) -> int:
         conn.close()
 
 
+def _run_capability_cli(argv) -> int:
+    """capability-backfill 子命令：从已有真实证据提取 capability（preview/apply）。
+
+    用法：
+      study-agent capability-backfill preview [--db PATH] [--json]
+      study-agent capability-backfill apply   [--db PATH] [--json]
+    绝不从 mastery 反推 capability；PROJECT(5) 不会生成。
+    """
+    import json as _json
+
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.services.capability_service import CapabilityService
+
+    parser = argparse.ArgumentParser(
+        prog="study-agent capability-backfill",
+        description="从 Task / Assessment / experiment Outcome 提取 capability。",
+    )
+    parser.add_argument("action", choices=["preview", "apply"])
+    parser.add_argument("--db", default=None)
+    parser.add_argument("--json", action="store_true")
+    args, _ = parser.parse_known_args(argv)
+
+    conn = get_connection(args.db)
+    try:
+        svc = CapabilityService(conn, CapabilityEvidenceRepository(conn))
+        if args.action == "preview":
+            data = svc.preview()
+        else:
+            data = svc.backfill()
+        if args.json:
+            print(_json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(f"capability {args.action}:")
+            for k, v in data.items():
+                if k == "entries":
+                    continue
+                print(f"  {k}: {v}")
+        return 0
+    finally:
+        conn.close()
+
+
 def main() -> int:
     # 0) 子命令：不进 GUI
     if "add-jd-summary" in sys.argv[1:]:
@@ -626,6 +668,8 @@ def main() -> int:
         return _run_export_note_cli(sys.argv[2:])
     if "six-routes" in sys.argv[1:]:
         return _run_six_routes_cli(sys.argv[2:])
+    if "capability-backfill" in sys.argv[1:]:
+        return _run_capability_cli(sys.argv[2:])
     # 1) 解析 --date（仅开发/测试）：注入“今天”。
     #    只在内存层面覆盖 date_utils.today()，不写数据库、不改系统时间；
     #    不传 --date 时保持默认（系统真实日期）。
@@ -655,7 +699,18 @@ def main() -> int:
     from app.services.learning_outcome_service import LearningOutcomeService
 
     outcome_service = LearningOutcomeService(LearningOutcomeRepository(conn))
-    task_service = TaskService(repo, outcome_service=outcome_service)
+    # Phase 3：Capability Evidence（从已有真实证据确定性提取，不调 LLM）
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.services.capability_service import CapabilityService
+
+    capability_service = CapabilityService(
+        conn, CapabilityEvidenceRepository(conn)
+    )
+    outcome_service.capability_service = capability_service
+    task_service = TaskService(
+        repo, outcome_service=outcome_service,
+        capability_service=capability_service,
+    )
 
     # 学习计划：确保默认研一计划已创建，供每日任务生成与阶段显示；
     # 注入 assessment_repo（Phase 8）让规则生成能读取掌握证据（薄弱优先/不重复）。
@@ -703,6 +758,7 @@ def main() -> int:
     route_progress_service = RouteProgressService(
         repo, assessment_repo, plan_repo, route_repo,
         topic_learning_service=topic_learning_service,
+        capability_service=capability_service,
     )
     # 幂等修复历史 route 归属（绝不猜 manual NULL / ordinary todo）
     try:
@@ -772,6 +828,13 @@ def main() -> int:
         )
     except Exception as e:  # noqa: BLE001 - seed/迁移失败不阻止启动
         print(f"[startup] canonical routes seed 失败：{e}")
+
+    # Phase 3：capability evidence 幂等 backfill（只读已有真实证据，不碰 mastery）
+    try:
+        cap_stats = capability_service.backfill()
+        print(f"[startup] capability backfill: {cap_stats}")
+    except Exception as e:  # noqa: BLE001 - backfill 失败不阻止启动
+        print(f"[startup] capability backfill 失败：{e}")
 
     try:
         skill_service.refresh_market()
@@ -880,6 +943,7 @@ def main() -> int:
         review_service=review_scheduler,
         outcome_service=outcome_service,
         prompt_registry=prompt_registry,
+        capability_service=capability_service,
     )
 
     # 验收后台线程专用：为 worker 的“独立连接”构造一套同配置依赖，
@@ -896,12 +960,22 @@ def main() -> int:
         )
         fresh_outcome.ai_client = ai_client
         fresh_outcome.prompt_registry = prompt_registry
+        from app.database.capability_repository import (
+            CapabilityEvidenceRepository,
+        )
+        from app.services.capability_service import CapabilityService
+
+        fresh_capability = CapabilityService(
+            fresh_conn, CapabilityEvidenceRepository(fresh_conn)
+        )
+        fresh_outcome.capability_service = fresh_capability
         return AssessmentService(
             ai_client,
             assessment_repo=fresh_assessment_repo,
             review_service=fresh_review,
             outcome_service=fresh_outcome,
             prompt_registry=prompt_registry,
+            capability_service=fresh_capability,
         )
     # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
     from app.services.manual_task_service import ManualTaskService
@@ -983,6 +1057,7 @@ def main() -> int:
         route_progress_service=route_progress_service,
         ai_route_service=ai_route_service,
         scheduler=scheduler,
+        capability_service=capability_service,
         # 验收后台线程：只传 db_path + 工厂（worker 内自建连接）
         assessment_service_factory=build_assessment_service,
         db_path=str(resolve_db_path()),

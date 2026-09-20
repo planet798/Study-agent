@@ -52,7 +52,7 @@ class TestSequentialMigration:
         path = tmp_path / "legacy.db"
         info = _build_legacy(path)
         conn = get_connection(path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 16
 
         route_repo = LearningRouteRepository(conn)
         plan_repo = StudyPlanRepository(conn)

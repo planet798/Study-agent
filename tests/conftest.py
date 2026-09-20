@@ -213,3 +213,23 @@ def activity_env(six_route_env, topic_learning):
         route_ids=result["route_ids"],
         result=result,
     )
+
+
+# ============================================================
+# Phase 3：Capability fixtures
+# ============================================================
+
+
+@pytest.fixture()
+def capability_service(conn):
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.services.capability_service import CapabilityService
+
+    return CapabilityService(conn, CapabilityEvidenceRepository(conn))
+
+
+@pytest.fixture()
+def assessment_repo(conn):
+    from app.database.assessment_repository import AssessmentRepository
+
+    return AssessmentRepository(conn)

@@ -116,6 +116,7 @@ class MainWindow(QMainWindow):
         prompt_registry=None,
         prompt_preview_service=None,
         topic_learning_service=None,
+        capability_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -164,6 +165,8 @@ class MainWindow(QMainWindow):
         self.prompt_preview_service = prompt_preview_service
         # Phase 2：Topic Learning Activity（可选）
         self.topic_learning_service = topic_learning_service
+        # Phase 3：Capability Evidence（可选）
+        self.capability_service = capability_service
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -339,6 +342,8 @@ class MainWindow(QMainWindow):
                 ai_route_service=self.ai_route_service,
                 skill_service=self.skill_service,
                 topic_learning_service=self.topic_learning_service,
+                capability_service=self.capability_service,
+                outcome_service=self.outcome_service,
             )
             self.stack.addWidget(self.routes_page)
             self.routes_page_index = self.stack.count() - 1

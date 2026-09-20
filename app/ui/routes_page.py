@@ -61,7 +61,8 @@ class RouteDetailDialog(QDialog):
     def __init__(self, route, route_service, route_plan_service, parent=None,
                  progress_service=None, today_provider=None,
                  ai_route_service=None, skill_service=None,
-                 topic_learning_service=None):
+                 topic_learning_service=None, capability_service=None,
+                 outcome_service=None):
         super().__init__(parent)
         self.route = route
         self.route_service = route_service
@@ -71,6 +72,8 @@ class RouteDetailDialog(QDialog):
         self.ai_route_service = ai_route_service
         self.skill_service = skill_service
         self.topic_learning_service = topic_learning_service
+        self.capability_service = capability_service
+        self.outcome_service = outcome_service
         self._ai_worker = None
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
@@ -220,7 +223,7 @@ class RouteDetailDialog(QDialog):
             self.body_layout.addWidget(act)
 
         if rp is not None and rp.knowledge:
-            self.body_layout.addWidget(self._section_label("知识掌握"))
+            self.body_layout.addWidget(self._section_label("知识掌握 / 能力"))
             for ks in rp.knowledge:
                 if ks.status == "已掌握":
                     extra = f"　{ks.mastery_percent}%"
@@ -232,10 +235,33 @@ class RouteDetailDialog(QDialog):
                     extra = f"　{ks.mastery_percent}%" if ks.mastery_percent is not None else ""
                 else:
                     extra = ""
-                lbl = QLabel(f"{ks.name}　{ks.status}{extra}")
+                row = QHBoxLayout()
+                mastery_txt = (
+                    "暂无验收" if ks.mastery is None
+                    else f"{ks.mastery_percent}%"
+                )
+                cap_txt = (
+                    ks.capability_label if ks.has_capability_evidence
+                    else "暂无能力证据"
+                )
+                lbl = QLabel(
+                    f"{ks.name}　{ks.status}{extra}　Mastery：{mastery_txt}"
+                    f"　Capability：{cap_txt}"
+                )
                 lbl.setObjectName("TaskMeta")
                 lbl.setWordWrap(True)
-                self.body_layout.addWidget(lbl)
+                row.addWidget(lbl, stretch=1)
+                if self.capability_service is not None and ks.knowledge_point_id:
+                    row.addWidget(_secondary(
+                        "查看证据",
+                        lambda _=False, k=ks: self._on_view_evidence(k),
+                    ))
+                    if self._needs_experiment_record(ks):
+                        row.addWidget(_secondary(
+                            "记录实验成果",
+                            lambda _=False, k=ks: self._on_record_experiment(k),
+                        ))
+                self.body_layout.addLayout(row)
             self.body_layout.addWidget(self._section_label("复习状态"))
             last_assessed = max(
                 (k.last_assessed_at for k in rp.knowledge if k.last_assessed_at),
@@ -265,6 +291,45 @@ class RouteDetailDialog(QDialog):
         lbl = QLabel(text)
         lbl.setObjectName("SectionTitle")
         return lbl
+
+    # ---------- Phase 3：Capability ----------
+
+    def _needs_experiment_record(self, ks) -> bool:
+        """该 kp 是否已有 done experiment task 但尚无 EXPERIMENT evidence。"""
+        if self.capability_service is None or ks.knowledge_point_id is None:
+            return False
+        if self.capability_service.get_current_level(
+            ks.knowledge_point_id
+        ) >= 4:
+            return False
+        conn = getattr(self.route_plan_service.task_repo, "conn", None)
+        if conn is None:
+            return False
+        row = conn.execute(
+            "SELECT 1 FROM tasks WHERE knowledge_point_id = ? "
+            "AND status='done' AND learning_activity_kind='experiment' LIMIT 1",
+            (int(ks.knowledge_point_id),),
+        ).fetchone()
+        return row is not None
+
+    def _on_view_evidence(self, ks) -> None:
+        from .capability_dialog import CapabilityEvidenceDialog
+
+        CapabilityEvidenceDialog(
+            ks.name, ks.knowledge_point_id, self.capability_service,
+            parent=self,
+        ).exec()
+
+    def _on_record_experiment(self, ks) -> None:
+        from .capability_dialog import ExperimentOutcomeDialog
+
+        dlg = ExperimentOutcomeDialog(
+            ks.name, ks.knowledge_point_id,
+            self.outcome_service, self.route_plan_service.task_repo,
+            parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.refresh()
 
     def _phase_card(self, phase, done_ids) -> QWidget:
         card = QFrame()
@@ -703,7 +768,8 @@ class LearningRoutesPage(QWidget):
     def __init__(self, route_service, route_plan_service=None, parent=None,
                  progress_service=None, today_provider=None,
                  ai_route_service=None, skill_service=None,
-                 topic_learning_service=None):
+                 topic_learning_service=None, capability_service=None,
+                 outcome_service=None):
         super().__init__(parent)
         self.route_service = route_service
         self.route_plan_service = route_plan_service
@@ -712,6 +778,8 @@ class LearningRoutesPage(QWidget):
         self.ai_route_service = ai_route_service
         self.skill_service = skill_service
         self.topic_learning_service = topic_learning_service
+        self.capability_service = capability_service
+        self.outcome_service = outcome_service
         self.show_archived = False
         self._build_ui()
         self.refresh()
@@ -966,6 +1034,8 @@ class LearningRoutesPage(QWidget):
             ai_route_service=self.ai_route_service,
             skill_service=self.skill_service,
             topic_learning_service=self.topic_learning_service,
+            capability_service=self.capability_service,
+            outcome_service=self.outcome_service,
         )
         dlg.exec()
         self.refresh()

@@ -73,6 +73,7 @@ class LearningOutcomeService:
         project_root: str | Path | None = None,
         ai_client=None,
         prompt_registry: PromptRegistry | None = None,
+        capability_service=None,
     ):
         self.outcome_repo = outcome_repo
         self.project_root = Path(project_root) if project_root else PROJECT_ROOT
@@ -80,6 +81,8 @@ class LearningOutcomeService:
         self.ai_client = ai_client
         # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
         self.prompt_registry = prompt_registry
+        # Phase 3：experiment outcome 保存后提取 EXPERIMENT evidence
+        self.capability_service = capability_service
 
     # ================= Git 证据 =================
 
@@ -139,7 +142,7 @@ class LearningOutcomeService:
             if git_commit is not None else
             (self.current_git_commit() if derive_git else "")
         )
-        return self.outcome_repo.create(
+        outcome = self.outcome_repo.create(
             date=date,
             kind=kind,
             title=title,
@@ -155,6 +158,19 @@ class LearningOutcomeService:
             task_id=task_id,
             source_attempt_id=source_attempt_id,
         )
+        # Phase 3：experiment 成果满足严格证据规则时提取 EXPERIMENT
+        if (
+            self.capability_service is not None
+            and outcome is not None
+            and outcome.get("kind") == "experiment"
+        ):
+            try:
+                self.capability_service.sync_from_experiment_outcome(
+                    outcome["id"]
+                )
+            except Exception:  # noqa: BLE001 - evidence 失败不影响成果保存
+                pass
+        return outcome
 
     def create_manual_outcome(
         self,
@@ -171,15 +187,23 @@ class LearningOutcomeService:
         resume_keywords: list[str] | None = None,
         linked_kp_id: int | None = None,
         linked_topic_id: int | None = None,
+        task_id: int | None = None,
         derive_git: bool = True,
     ) -> dict:
-        """用户主动登记（字段为用户提供，做基本校验，不补齐）。"""
+        """用户主动登记（字段为用户提供，做基本校验，不补齐）。
+
+        experiment 类型**不做 git 自动推导**：实验产物必须是用户显式提供的
+        真实产物（metrics/git/url/dataset），不能拿 Study Agent 仓库 commit 充数。
+        """
+        if kind == "experiment":
+            derive_git = False
         return self.create_outcome(
             date=date, kind=kind, title=title, content=content,
             tech_stack=tech_stack, dataset=dataset, metrics=metrics,
             git_commit=git_commit, github_url=github_url,
             resume_keywords=resume_keywords, linked_kp_id=linked_kp_id,
-            linked_topic_id=linked_topic_id, derive_git=derive_git,
+            linked_topic_id=linked_topic_id, task_id=task_id,
+            derive_git=derive_git,
         )
 
     # ================= Task 完成 Hook =================

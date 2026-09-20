@@ -21,7 +21,7 @@ def sample_topic(plan_repo):
 
 class TestSchemaV16:
     def test_v16_schema_version_and_tables(self, conn):
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 16
         tables = {
             r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"

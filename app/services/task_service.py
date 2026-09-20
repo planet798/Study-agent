@@ -43,10 +43,13 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 class TaskService:
     """对 Task 的业务操作入口。"""
 
-    def __init__(self, repo: TaskRepository, outcome_service=None):
+    def __init__(self, repo: TaskRepository, outcome_service=None,
+                 capability_service=None):
         self.repo = repo
         # 可选：学习成果沉淀服务（Phase D hook；不注入则完成流程与旧版完全一致）
         self.outcome_service = outcome_service
+        # 可选：Capability evidence（Phase 3；统一在业务层同步，不写 UI handler）
+        self.capability_service = capability_service
 
     # ---------- 查询 ----------
 
@@ -181,6 +184,11 @@ class TaskService:
         self._transition(task_id, STATUS_DONE)
         self.repo.mark_done(task_id)
         task = self.get_task(task_id)
+        if self.capability_service is not None:
+            try:
+                self.capability_service.sync_from_task_obj(task)
+            except Exception:  # noqa: BLE001 - evidence 失败不影响任务完成
+                pass
         if self.outcome_service is not None:
             try:
                 self.outcome_service.generate_from_task(task)

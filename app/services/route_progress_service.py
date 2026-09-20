@@ -43,6 +43,10 @@ class KnowledgeStatus:
     weak_points: list[str] = field(default_factory=list)
     last_assessed_at: str | None = None
     next_review_date: str | None = None
+    # Phase 3：capability（与 mastery 独立）
+    capability_level: int = 0
+    capability_label: str = ""
+    has_capability_evidence: bool = False
 
     @property
     def mastery_percent(self) -> int | None:
@@ -67,6 +71,11 @@ class RouteProgress:
     activity_required_done: int = 0
     activity_optional_total: int = 0
     activity_optional_done: int = 0
+    # Phase 3：capability 证据统计（不计算平均 capability）
+    capability_evidence_count: int = 0
+    capability_level_counts: dict = field(
+        default_factory=lambda: {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    )
     knowledge: list[KnowledgeStatus] = field(default_factory=list)
 
     @property
@@ -95,12 +104,13 @@ class RouteProgress:
 class RouteProgressService:
     def __init__(self, repo, assessment_repo, plan_repo,
                  route_repo: LearningRouteRepository | None = None,
-                 topic_learning_service=None):
+                 topic_learning_service=None, capability_service=None):
         self.repo = repo
         self.assessment_repo = assessment_repo
         self.plan_repo = plan_repo
         self.route_repo = route_repo
         self.topic_learning_service = topic_learning_service
+        self.capability_service = capability_service
 
     # ================= 基础 =================
 
@@ -137,6 +147,11 @@ class RouteProgressService:
             progress.activity_required_done = act["required_done"]
             progress.activity_optional_total = act["optional_total"]
             progress.activity_optional_done = act["optional_done"]
+        if self.capability_service is not None:
+            summary = self.capability_service.get_route_capability_summary(
+                route_id
+            )
+            progress.capability_evidence_count = summary["total"]
 
         kps = self.assessment_repo.list_knowledge_points_by_route(route_id)
         topic_names = {t.id: t.name for t in topics}
@@ -184,6 +199,22 @@ class RouteProgressService:
                 name=kp["name"], topic_id=kp.get("topic_id"), kp=kp,
                 covered=kp["name"] in done_names,
             ))
+        # Phase 3：附加 capability（与 mastery 独立展示）
+        if self.capability_service is not None:
+            from .capability import capability_label
+
+            for ks in progress.knowledge:
+                if ks.knowledge_point_id is None:
+                    continue
+                level = self.capability_service.get_current_level(
+                    ks.knowledge_point_id
+                )
+                ks.capability_level = level
+                ks.capability_label = capability_label(level) if level else ""
+                ks.has_capability_evidence = level > 0
+                if level > 0:
+                    progress.capability_level_counts[level] = \
+                        progress.capability_level_counts.get(level, 0) + 1
         return progress
 
     def _is_weak(self, kp: dict) -> bool:

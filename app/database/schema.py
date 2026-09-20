@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1062,6 +1062,54 @@ def _migrate_v16(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[16] = _migrate_v16
+
+
+# ============================================================
+# v17：Capability Evidence（Phase 3）
+# ============================================================
+#
+# capability_evidence：从已有真实证据（Task / Assessment / experiment Outcome）
+# 提取的“能力等级”账本。与 mastery 彻底分开：
+#   - Level 0（UNLEARNED）不写库；current = MAX(active level) 或 0；
+#   - 不存 route_id（evidence → knowledge_point → route_id）；
+#   - 不存 practice_project_id（Phase 4 再 migration）；
+#   - evidence_key UNIQUE 保证幂等；
+#   - 保留 is_active/revoked_at/revocation_reason，禁止物理 DELETE。
+
+_V17_SQL = """
+CREATE TABLE IF NOT EXISTS capability_evidence (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    knowledge_point_id   INTEGER NOT NULL,
+    capability_level     INTEGER NOT NULL
+                         CHECK (capability_level BETWEEN 1 AND 5),
+    evidence_type        TEXT    NOT NULL,
+    evidence_key         TEXT    NOT NULL UNIQUE,
+    source_task_id       INTEGER,
+    assessment_attempt_id INTEGER,
+    learning_outcome_id  INTEGER,
+    description          TEXT    NOT NULL DEFAULT '',
+    details_json         TEXT    NOT NULL DEFAULT '{}',
+    is_active            INTEGER NOT NULL DEFAULT 1,
+    created_at           TEXT    NOT NULL DEFAULT '',
+    revoked_at           TEXT,
+    revocation_reason    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_capability_evidence_kp
+    ON capability_evidence(knowledge_point_id);
+CREATE INDEX IF NOT EXISTS idx_capability_evidence_level
+    ON capability_evidence(capability_level);
+CREATE INDEX IF NOT EXISTS idx_capability_evidence_active
+    ON capability_evidence(is_active);
+"""
+
+
+def _migrate_v17(conn: sqlite3.Connection) -> None:
+    """v17：capability_evidence 表（幂等）。"""
+    conn.executescript(_V17_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[17] = _migrate_v17
 
 
 def get_schema_version(conn) -> int:

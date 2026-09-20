@@ -65,6 +65,7 @@ class AssessmentService:
         review_service: ReviewService | None = None,
         outcome_service=None,
         prompt_registry: PromptRegistry | None = None,
+        capability_service=None,
     ):
         self.client = client
         self.assessment_repo = assessment_repo
@@ -74,6 +75,8 @@ class AssessmentService:
         self.outcome_service = outcome_service
         # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
         self.prompt_registry = prompt_registry
+        # Phase 3：判题成功后提取 capability evidence（确定性，不调 LLM）
+        self.capability_service = capability_service
 
     def is_configured(self) -> bool:
         """AI 是否已配置（未配置时上层应给出明确提示而非崩溃）。"""
@@ -233,6 +236,12 @@ class AssessmentService:
         self._update_knowledge_point_mastery(
             attempt["knowledge_point_id"], judgment.mastery_estimate
         )
+        # Phase 3：从已判题 evidence 提取 capability（不影响 mastery）
+        if self.capability_service is not None:
+            try:
+                self.capability_service.sync_from_assessment(attempt_id)
+            except Exception:  # noqa: BLE001 - evidence 失败不影响验收
+                pass
         # 判题成功后联动复习调度（若注入了 ReviewService）
         if self.review_service is not None:
             self.review_service.record_assessment_result(
