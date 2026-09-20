@@ -102,6 +102,22 @@ class StudyPlanRepository:
             ).fetchall()
         return [self._plan_from_row(r) for r in rows]
 
+    _PLAN_UPDATABLE = ("name", "description", "start_date", "end_date",
+                       "status", "route_id")
+
+    def update_plan(self, plan_id: int, **fields) -> StudyPlan | None:
+        """就地更新计划（幂等 seed / 修复用）。"""
+        allowed = {k: v for k, v in fields.items() if k in self._PLAN_UPDATABLE}
+        if not allowed:
+            return self.get_plan(plan_id)
+        set_clause = ", ".join(f"{k} = ?" for k in allowed)
+        self.conn.execute(
+            f"UPDATE study_plans SET {set_clause} WHERE id = ?",
+            (*allowed.values(), int(plan_id)),
+        )
+        self.conn.commit()
+        return self.get_plan(plan_id)
+
     def get_active_plan(self, route_id: int | None = None) -> StudyPlan | None:
         """返回 active 计划。
 
@@ -289,6 +305,53 @@ class StudyPlanRepository:
         self.conn.commit()
         row = self.conn.execute(
             "SELECT * FROM study_topics WHERE id = ?", (topic_id,)
+        ).fetchone()
+        return self._topic_from_row(row) if row else None
+
+    def reparent_topic(
+        self, topic_id: int, phase_id: int, order_index: int | None = None
+    ) -> StudyTopic | None:
+        """把一个 topic 改挂到另一个 phase（保留 topic id / 历史关联）。
+
+        只改 phase_id（以及可选 order_index），**不动** name/description/
+        时长/优先级；MOVE 迁移依赖此保证“保留身份”。
+        """
+        if order_index is None:
+            self.conn.execute(
+                "UPDATE study_topics SET phase_id = ? WHERE id = ?",
+                (int(phase_id), int(topic_id)),
+            )
+        else:
+            self.conn.execute(
+                "UPDATE study_topics SET phase_id = ?, order_index = ? WHERE id = ?",
+                (int(phase_id), int(order_index), int(topic_id)),
+            )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT * FROM study_topics WHERE id = ?", (int(topic_id),)
+        ).fetchone()
+        return self._topic_from_row(row) if row else None
+
+    def find_topic_by_name_in_phase(
+        self, phase_id: int, name: str
+    ) -> StudyTopic | None:
+        row = self.conn.execute(
+            "SELECT * FROM study_topics WHERE phase_id = ? AND name = ? "
+            "ORDER BY id ASC LIMIT 1",
+            (int(phase_id), name),
+        ).fetchone()
+        return self._topic_from_row(row) if row else None
+
+    def find_topic_by_name_in_route(
+        self, route_id: int, name: str
+    ) -> StudyTopic | None:
+        row = self.conn.execute(
+            "SELECT t.* FROM study_topics t "
+            "JOIN study_phases ph ON ph.id = t.phase_id "
+            "JOIN study_plans p ON p.id = ph.plan_id "
+            "WHERE p.route_id = ? AND t.name = ? "
+            "ORDER BY t.id ASC LIMIT 1",
+            (int(route_id), name),
         ).fetchone()
         return self._topic_from_row(row) if row else None
 

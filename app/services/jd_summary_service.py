@@ -134,6 +134,13 @@ _EXPLICIT_ALIASES: dict[str, str] = {
     "ddp": "分布式训练底层",
     "zero": "分布式训练底层",
     "zero-1/2/3": "分布式训练底层",
+    # 后训练 / 对齐（Phase 1：补齐正式 skill 的明确 alias，避免指向不存在目标）
+    "rlhf": "后训练 / 对齐",
+    "dpo": "后训练 / 对齐",
+    "ppo": "后训练 / 对齐",
+    "grpo": "后训练 / 对齐",
+    "蒸馏": "模型蒸馏",
+    "知识蒸馏": "模型蒸馏",
 }
 
 _MUST_RE = re.compile(r"(?i)\bmust\s*=\s*(\d+)\b")

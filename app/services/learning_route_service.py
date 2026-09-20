@@ -116,7 +116,29 @@ class LearningRouteService:
         return self.route_repo.get(route_id)
 
     def get_default_learning_route(self) -> LearningRoute | None:
+        """[DEPRECATED / legacy] 旧默认路线（搜广推 + LLM）。
+
+        新体系是 Multi-Route，请改用 :meth:`get_route_by_key` /
+        :meth:`get_canonical_routes`；本方法仅供 legacy 兼容。
+        """
         return self.route_repo.get_default_learning_route()
+
+    # ================= canonical route（Phase 1） =================
+
+    def get_route_by_key(self, route_key: str) -> LearningRoute | None:
+        """按稳定 route_key 获取系统路线（canonical / legacy）。"""
+        return self.route_repo.get_by_key(route_key)
+
+    def get_canonical_routes(self) -> list[LearningRoute]:
+        """按 R1–R6 固定顺序返回 canonical learning routes（缺失的跳过）。"""
+        from .canonical_routes import CANONICAL_LEARNING_KEYS
+
+        return self.route_repo.list_by_keys(list(CANONICAL_LEARNING_KEYS))
+
+    def get_job_prep_group(self) -> LearningRoute | None:
+        from .canonical_routes import ROUTE_KEY_JOB_PREP
+
+        return self.route_repo.get_by_key(ROUTE_KEY_JOB_PREP)
 
     # ================= 父子关系 =================
 

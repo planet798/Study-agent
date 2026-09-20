@@ -232,3 +232,44 @@ study-agent/
 ├── requirements.txt
 └── README.md
 ```
+
+## 六技术路线（R1–R6）与历史迁移
+
+正式技术学习体系固定为六条 canonical learning route：
+
+```
+求职准备 (JOB_PREP)
+├─ R1 LLM Fundamentals          (R1_LLM_FUNDAMENTALS)
+├─ R2 LLM Post-Training         (R2_LLM_POST_TRAINING)
+├─ R3 LLM Infra                 (R3_LLM_INFRA)
+├─ R4 AI Agent                  (R4_AI_AGENT)
+├─ R5 Recommendation & Search   (R5_RECOMMENDATION_SEARCH)
+└─ R6 CS Fundamentals           (R6_CS_FUNDAMENTALS)
+```
+
+- 系统身份使用稳定的 `learning_routes.route_key`（不依赖显示名称）。
+- 旧 `搜广推 + LLM` 被标记为 `LEGACY_SEARCH_LLM` 并 **archive 保留**，不删除、不复用。
+- 历史 Topic 采用三种策略迁移：
+  - **MOVE**：保留原 topic id，reparent 到新路线对应的 phase；
+    topic-linked `tasks.route_id` / `knowledge_points.route_id` 同步更新。
+    assessment / review / mastery 不复制、不删除、不改分。
+  - **SPLIT_NEW**：跨路线语义的旧 Topic 保留在 LEGACY；新的 route-specific
+    Topic 由 canonical seed 创建，**不继承**旧 mastery。
+  - **KEEP_LEGACY / MANUAL_REVIEW**：保留在旧路线，不迁移。
+- 同一 route 只允许一个 active plan（v15 partial unique index）。
+
+### CLI（真机迁移前先备份）
+
+```bash
+# 1) 只读盘点（不写库）
+python -m app.main six-routes inventory --db "D:\\Projects\\study-agent\\data\\study_agent.db"
+
+# 2) 迁移预览（无 conflict 才 apply）
+python -m app.main six-routes preview --db "...\\study_agent.db"
+
+# 3) 执行迁移（默认跳过有冲突的 Topic；--strict 则遇到 conflict 整体拒绝）
+python -m app.main six-routes apply --db "...\\study_agent.db"
+```
+
+正常启动时，应用会自动执行 `seed + apply_if_safe`（无 conflict 才迁移），
+因此通常无需手动运行 CLI。迁移是幂等的：重复运行不会重复 seed / 迁移。

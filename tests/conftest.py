@@ -128,3 +128,38 @@ def prompt_registry(conn):
     from app.ai.prompt_registry import PromptOverrideRepository, PromptRegistry
 
     return PromptRegistry(PromptOverrideRepository(conn))
+
+
+# ============================================================
+# Phase 1：六技术路线 fixtures
+# ============================================================
+
+
+@pytest.fixture()
+def six_route_env(conn):
+    """建好旧“搜广推 + LLM”默认 plan 的测试环境（含 repo 集合）。
+
+    返回 SimpleNamespace：conn / repo / plan_repo / route_repo / skill_repo /
+    legacy_route。
+    """
+    from types import SimpleNamespace
+
+    from app.database.learning_route_repository import LearningRouteRepository
+    from app.database.repository import TaskRepository
+    from app.database.skill_repository import SkillRepository
+    from app.database.study_plan_repository import StudyPlanRepository
+    from app.services.study_plan_service import StudyPlanService
+
+    repo = TaskRepository(conn)
+    plan_repo = StudyPlanRepository(conn)
+    StudyPlanService(repo, plan_repo).ensure_default_plan()
+    route_repo = LearningRouteRepository(conn)
+    skill_repo = SkillRepository(conn)
+    return SimpleNamespace(
+        conn=conn,
+        repo=repo,
+        plan_repo=plan_repo,
+        route_repo=route_repo,
+        skill_repo=skill_repo,
+        legacy_route=route_repo.get_default_learning_route(),
+    )

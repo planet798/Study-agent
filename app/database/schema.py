@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -921,6 +921,96 @@ def _migrate_v14(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[14] = _migrate_v14
+
+
+# ============================================================
+# v15：六技术路线 canonical route_key + active plan 唯一性
+# ============================================================
+#
+# 1) learning_routes.route_key：系统路线的稳定身份（不依赖 display name）。
+#    用户手路线 route_key 可为 NULL，因此用 partial unique index。
+# 2) study_plans 同一 route 只能有一个 active plan：先检测重复并确定性收敛，
+#    再加 partial unique index（route_id IS NOT NULL AND status='active'）。
+#    历史 route_id IS NULL 的旧计划不在此约束内（保留兼容）。
+
+
+def _dedupe_active_plans(conn: sqlite3.Connection) -> int:
+    """同一 route 存在多个 active plan 时，确定性保留一个，其余置 archived。
+
+    保留规则（可解释、确定）：
+      1. 被更多 tasks 引用的 plan（通过其 topic 引用）；
+      2. 否则 topic 更多的 plan；
+      3. 否则 id 更大（更新）的 plan。
+
+    :return: 被置为 archived 的 plan 数量。
+    """
+    if not _table_exists(conn, "study_plans"):
+        return 0
+    rows = conn.execute(
+        "SELECT route_id, id FROM study_plans "
+        "WHERE status = 'active' AND route_id IS NOT NULL "
+        "ORDER BY route_id, id"
+    ).fetchall()
+    by_route: dict[int, list[int]] = {}
+    for route_id, plan_id in rows:
+        by_route.setdefault(int(route_id), []).append(int(plan_id))
+
+    archived = 0
+    for route_id, plan_ids in by_route.items():
+        if len(plan_ids) <= 1:
+            continue
+        scored = []
+        for plan_id in plan_ids:
+            task_count = conn.execute(
+                "SELECT COUNT(*) FROM tasks t "
+                "JOIN study_topics tp ON tp.id = t.topic_id "
+                "JOIN study_phases ph ON ph.id = tp.phase_id "
+                "WHERE ph.plan_id = ?",
+                (plan_id,),
+            ).fetchone()[0]
+            topic_count = conn.execute(
+                "SELECT COUNT(*) FROM study_topics tp "
+                "JOIN study_phases ph ON ph.id = tp.phase_id "
+                "WHERE ph.plan_id = ?",
+                (plan_id,),
+            ).fetchone()[0]
+            scored.append((int(task_count), int(topic_count), plan_id))
+        # 分数高者胜；tie → id 大者胜
+        scored.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        keep = scored[0][2]
+        for _, _, plan_id in scored[1:]:
+            if plan_id == keep:
+                continue
+            conn.execute(
+                "UPDATE study_plans SET status = 'archived' WHERE id = ?",
+                (plan_id,),
+            )
+            archived += 1
+    if archived:
+        conn.commit()
+    return archived
+
+
+def _migrate_v15(conn: sqlite3.Connection) -> None:
+    """v15：route_key 稳定标识 + 同 route 唯一 active plan（幂等）。"""
+    add_column_if_not_exists(conn, "learning_routes", "route_key", "TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_routes_route_key "
+        "ON learning_routes(route_key) WHERE route_key IS NOT NULL"
+    )
+    conn.commit()
+
+    _dedupe_active_plans(conn)
+    if _table_exists(conn, "study_plans"):
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_study_plans_active_route "
+            "ON study_plans(route_id) "
+            "WHERE status = 'active' AND route_id IS NOT NULL"
+        )
+    conn.commit()
+
+
+_MIGRATIONS[15] = _migrate_v15
 
 
 def get_schema_version(conn) -> int:

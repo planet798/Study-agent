@@ -43,6 +43,10 @@ PRIORITY_MAX = 5
 DEFAULT_ROUTE_PARENT_NAME = "求职准备"
 DEFAULT_ROUTE_LEARNING_NAME = "搜广推 + LLM"
 
+# 系统 canonical route_key（v15）
+ROUTE_KEY_JOB_PREP = "JOB_PREP"
+ROUTE_KEY_LEGACY_SEARCH_LLM = "LEGACY_SEARCH_LLM"
+
 _UPDATABLE = (
     "parent_id",
     "name",
@@ -53,6 +57,7 @@ _UPDATABLE = (
     "priority",
     "planning_enabled",
     "source",
+    "route_key",
     "archived_at",
 )
 
@@ -69,6 +74,7 @@ class LearningRoute:
     priority: int = 3
     planning_enabled: bool = True
     source: str = ROUTE_SOURCE_MANUAL
+    route_key: str | None = None
     created_at: str = ""
     updated_at: str = ""
     archived_at: str | None = None
@@ -106,6 +112,7 @@ class LearningRouteRepository:
         priority: int = 3,
         planning_enabled: bool = True,
         source: str = ROUTE_SOURCE_MANUAL,
+        route_key: str | None = None,
     ) -> LearningRoute:
         name = (name or "").strip()
         if not name:
@@ -114,12 +121,12 @@ class LearningRouteRepository:
         cur = self.conn.execute(
             "INSERT INTO learning_routes "
             "(parent_id, name, description, goal, route_type, status, priority,"
-            " planning_enabled, source, created_at, updated_at, archived_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            " planning_enabled, source, route_key, created_at, updated_at, archived_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
             (
                 parent_id, name, description or "", goal or "",
                 route_type, status, int(priority), int(bool(planning_enabled)),
-                source, ts, ts,
+                source, route_key, ts, ts,
             ),
         )
         self.conn.commit()
@@ -183,6 +190,25 @@ class LearningRouteRepository:
         d = dict(row)
         d["planning_enabled"] = bool(d.get("planning_enabled"))
         return LearningRoute(**d)
+
+    def get_by_key(self, route_key: str) -> LearningRoute | None:
+        """按稳定 route_key 查找系统路线（canonical / legacy）。"""
+        if not route_key:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM learning_routes WHERE route_key = ? LIMIT 1",
+            (str(route_key),),
+        ).fetchone()
+        return self._from_row(row) if row else None
+
+    def list_by_keys(self, route_keys: list[str]) -> list[LearningRoute]:
+        """按给定顺序返回 route_key 对应的路线（缺失的跳过）。"""
+        out: list[LearningRoute] = []
+        for key in route_keys:
+            route = self.get_by_key(key)
+            if route is not None:
+                out.append(route)
+        return out
 
     def get(self, route_id: int) -> LearningRoute | None:
         row = self.conn.execute(
@@ -248,7 +274,13 @@ class LearningRouteRepository:
         return [self._from_row(r) for r in rows]
 
     def get_default_learning_route(self) -> LearningRoute | None:
-        """系统默认 learning route（搜广推 + LLM）。"""
+        """[DEPRECATED / legacy] 系统默认 learning route（搜广推 + LLM）。
+
+        新体系是 Multi-Route，没有业务意义上的“唯一默认路线”。
+        本方法**仅用于** legacy compatibility / 历史 migration /
+        尚未升级的旧调用；新 production code 必须使用 :meth:`get_by_key` /
+        canonical route 集合，不得依赖“默认路线”。
+        """
         row = self.conn.execute(
             "SELECT * FROM learning_routes WHERE name = ? "
             "AND route_type = 'learning' AND source = 'system' "
@@ -256,6 +288,14 @@ class LearningRouteRepository:
             (DEFAULT_ROUTE_LEARNING_NAME,),
         ).fetchone()
         return self._from_row(row) if row else None
+
+    def count_active_plans_by_route(self, route_id: int) -> int:
+        """某 route 的 active plan 数量（用于唯一性诊断）。"""
+        return int(self.conn.execute(
+            "SELECT COUNT(*) FROM study_plans "
+            "WHERE route_id = ? AND status = 'active'",
+            (int(route_id),),
+        ).fetchone()[0])
 
     # ---------- route_skills ----------
 

@@ -36,6 +36,7 @@ from app.database.study_plan_repository import (
 )
 from app.services.daily_planner_service import DailyPlannerService
 from app.services.date_service import DateService
+from app.services.canonical_route_service import CanonicalRouteService
 from app.services.stats_service import StatsService
 from app.services.study_plan_service import StudyPlanService
 from app.services.summary_service import SummaryService
@@ -465,6 +466,154 @@ def _run_past_task_preflight(repo, task_service, today_str: str) -> bool:
     return True
 
 
+def _run_six_routes_cli(argv) -> int:
+    """six-routes 子命令：canonical 六路线 seed + 历史迁移 inventory/preview/apply。
+
+    用法：
+      study-agent six-routes inventory [--db PATH] [--json]
+      study-agent six-routes preview   [--db PATH] [--json]
+      study-agent six-routes apply     [--db PATH] [--strict] [--json]
+      study-agent six-routes seed      [--db PATH]
+    """
+    import json as _json
+
+    from app.database.learning_route_repository import LearningRouteRepository
+    from app.database.skill_repository import SkillRepository
+    from app.database.study_plan_repository import StudyPlanRepository
+    from app.services.canonical_route_service import CanonicalRouteService
+    from app.services.route_migration_service import RouteMigrationService
+
+    parser = argparse.ArgumentParser(
+        prog="study-agent six-routes",
+        description="canonical 六技术路线 seed 与历史 Topic 安全迁移。",
+    )
+    parser.add_argument("action", choices=["inventory", "preview", "apply", "seed"])
+    parser.add_argument("--db", default=None)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="apply 时若存在 conflict 则整体拒绝（默认仅跳过冲突项）",
+    )
+    args, _ = parser.parse_known_args(argv)
+
+    conn = get_connection(args.db)
+    try:
+        route_repo = LearningRouteRepository(conn)
+        plan_repo = StudyPlanRepository(conn)
+        skill_repo = SkillRepository(conn)
+        svc = CanonicalRouteService(conn, route_repo, plan_repo, skill_repo)
+        mig = RouteMigrationService(conn, route_repo, plan_repo)
+
+        if args.action == "inventory":
+            inv = mig.inventory()
+            if args.json:
+                print(_json.dumps(inv, ensure_ascii=False, indent=2))
+            else:
+                print(f"schema_version: {inv['schema_version']}")
+                print(f"legacy_route_id: {inv['legacy_route_id']}")
+                for r in inv["routes"]:
+                    print(f"  route[{r['id']}] key={r.get('route_key')} "
+                          f"{r['name']} ({r['status']}, p={r['priority']}, "
+                          f"planning={r['planning_enabled']})")
+                print(f"counts: plans={inv['plans'].__len__()} "
+                      f"topics={inv['study_topics']} tasks={inv['tasks']} "
+                      f"kp={inv['knowledge_points']} "
+                      f"assessments={inv['assessment_attempts']} "
+                      f"reviews={inv['review_schedule']} "
+                      f"planner_decisions={inv['planner_decisions']} "
+                      f"skills={inv['skills']} "
+                      f"outcomes={inv['learning_outcomes']}")
+                if inv.get("duplicate_active_plans"):
+                    print("  !! duplicate active plans:",
+                          inv["duplicate_active_plans"])
+            return 0
+
+        # preview / apply / seed 需要先置备 migration 目标（routes+plans+phases）
+        svc.ensure_pre_migration()
+
+        if args.action == "preview":
+            preview = mig.preview()
+            if args.json:
+                payload = {
+                    "summary": preview.summary(),
+                    "entries": [
+                        {
+                            "old_topic_id": e.old_topic_id,
+                            "old_name": e.old_name,
+                            "action": e.action,
+                            "target_route": e.target_route_name,
+                            "target_phase": e.target_phase,
+                            "tasks": e.task_count,
+                            "kp": e.kp_count,
+                            "assessments": e.assessment_count,
+                            "reviews": e.review_count,
+                            "conflicts": e.conflicts,
+                        }
+                        for e in preview.entries
+                    ],
+                }
+                print(_json.dumps(payload, ensure_ascii=False, indent=2))
+            else:
+                s = preview.summary()
+                print(f"preview: MOVE={s['move']} "
+                      f"(migratable={s['move_migratable']}) "
+                      f"SPLIT_NEW={s['split_new']} "
+                      f"KEEP_LEGACY={s['keep_legacy']} "
+                      f"MANUAL_REVIEW={s['manual_review']} "
+                      f"conflicts={s['conflicts']}")
+                for e in preview.entries:
+                    tag = e.action
+                    extra = (f" conflicts={e.conflicts}" if e.conflicts else "")
+                    target = f" -> {e.target_route_name}/{e.target_phase}" \
+                        if e.target_route_name else ""
+                    print(f"  [{tag}] topic#{e.old_topic_id} {e.old_name}"
+                          f"{target} (tasks={e.task_count}, kp={e.kp_count}, "
+                          f"assess={e.assessment_count}, "
+                          f"reviews={e.review_count}){extra}")
+            return 1 if preview.has_conflicts else 0
+
+        if args.action == "apply":
+            result = mig.apply(allow_partial=not args.strict)
+            if args.json:
+                print(_json.dumps({
+                    "applied": result.get("applied"),
+                    "reason": result.get("reason"),
+                    "moved": result.get("moved"),
+                    "skipped": result.get("skipped"),
+                    "summary": result.get("summary"),
+                }, ensure_ascii=False, indent=2))
+            else:
+                print(f"apply: applied={result.get('applied')} "
+                      f"reason={result.get('reason')} "
+                      f"summary={result.get('summary')}")
+                for m in result.get("moved", []):
+                    print(f"  moved topic#{m.get('old_topic_id')} "
+                          f"{m.get('old_name')} -> "
+                          f"{m.get('target_route_key')}/{m.get('target_phase')}")
+                for sk in result.get("skipped", []):
+                    print(f"  skipped topic#{sk.get('old_topic_id')} "
+                          f"conflicts={sk.get('conflicts')}")
+            # 迁移后补齐 topics/skills/links
+            svc.ensure_topics(svc.ensure_pre_migration()["routes"])
+            svc.ensure_extra_skills()
+            svc.ensure_route_skills(svc.ensure_pre_migration()["routes"])
+            svc.ensure_topic_skill_links()
+            if result.get("applied") is False and \
+                    result.get("reason") == "conflicts_present":
+                return 1
+            return 0
+
+        # seed：完整 ensure_all（含 apply_if_safe）
+        res = svc.ensure_all()
+        print(f"seed: routes={res['route_ids']} "
+              f"route_skills=+{res['route_skill_links']} "
+              f"topic_links=+{res['topic_skill_links']} "
+              f"migration={res['migration']}")
+        return 0
+    finally:
+        conn.close()
+
+
 def main() -> int:
     # 0) 子命令：不进 GUI
     if "add-jd-summary" in sys.argv[1:]:
@@ -475,6 +624,8 @@ def main() -> int:
         return _run_add_jd_cli(sys.argv[2:])
     if "export-note" in sys.argv[1:]:
         return _run_export_note_cli(sys.argv[2:])
+    if "six-routes" in sys.argv[1:]:
+        return _run_six_routes_cli(sys.argv[2:])
     # 1) 解析 --date（仅开发/测试）：注入“今天”。
     #    只在内存层面覆盖 date_utils.today()，不写数据库、不改系统时间；
     #    不传 --date 时保持默认（系统真实日期）。
@@ -585,6 +736,25 @@ def main() -> int:
             print(f"[startup] 已补齐 {sync['added_count']} 条技能-主题映射")
     except Exception:  # noqa: BLE001
         pass
+
+    # Phase 1：canonical 六技术路线 seed + 安全历史迁移 + skill→route 映射
+    try:
+        canonical_result = CanonicalRouteService(
+            conn, route_repo, plan_repo, skill_repo
+        ).ensure_all()
+        mig = canonical_result.get("migration") or {}
+        print(
+            "[startup] canonical routes seeded: "
+            f"routes={len(canonical_result.get('route_ids') or {})} "
+            f"route_skills=+{canonical_result.get('route_skill_links')} "
+            f"topic_links=+{canonical_result.get('topic_skill_links')} "
+            f"migration_applied={mig.get('applied')} "
+            f"reason={mig.get('reason')} "
+            f"summary={mig.get('summary')}"
+        )
+    except Exception as e:  # noqa: BLE001 - seed/迁移失败不阻止启动
+        print(f"[startup] canonical routes seed 失败：{e}")
+
     try:
         skill_service.refresh_market()
         skill_service.recompute_all_priority_scores()
