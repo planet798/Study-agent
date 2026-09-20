@@ -93,12 +93,15 @@ class SkillService:
         market_signal=None,
         current_phase_provider=None,
         route_repo=None,
+        topic_learning_service=None,
     ):
         self.skill_repo = skill_repo
         self.plan_repo = plan_repo
         self.assessment_repo = assessment_repo
         # Phase F：route-specific curriculum gap 需要 route_skills / route topics
         self.route_repo = route_repo
+        # Phase 2：Topic Learning Activity（component-aware coverage）
+        self.topic_learning_service = topic_learning_service
         # Step 6：近期市场需求（Daily Summary 优先，individual JD fallback）
         self.market_signal = market_signal
         # 可选：
@@ -120,7 +123,13 @@ class SkillService:
         已掌握跳过逻辑。前置主题尚未完成时仍为 blocked（硬约束不变）。
         """
         done_topics: set[int] = set()
-        if self.plan_repo is not None:
+        if self.topic_learning_service is not None:
+            try:
+                done_topics = self.topic_learning_service.\
+                    curriculum_complete_topic_ids()
+            except Exception:  # noqa: BLE001
+                done_topics = set()
+        elif self.plan_repo is not None:
             try:
                 done_topics = {
                     int(r[0]) for r in self.plan_repo.conn.execute(

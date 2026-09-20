@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1011,6 +1011,57 @@ def _migrate_v15(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[15] = _migrate_v15
+
+
+# ============================================================
+# v16：Topic Learning Activity Model（Phase 2）
+# ============================================================
+#
+# topic_learning_components：一个 Topic 计划采用哪些学习方式（activity）。
+#   activity_kind ∈ theory/code_reading/experiment/interview/practice
+#   UNIQUE(topic_id, activity_kind)
+#   enabled=0 表示当前计划不再要求，但保留历史 task 关系（不物理删除）。
+#   required=1 表示课程完成的必要条件。
+#
+# tasks 增加：
+#   component_id          FK → topic_learning_components.id（可为 NULL）
+#   learning_activity_kind 本次活动实际采用的方式（可为 NULL）
+#
+# 不修改 task_type / source / status 既有语义。
+
+_V16_SQL = """
+CREATE TABLE IF NOT EXISTS topic_learning_components (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id      INTEGER NOT NULL,
+    activity_kind TEXT    NOT NULL
+                  CHECK (activity_kind IN
+                         ('theory','code_reading','experiment','interview','practice')),
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    required      INTEGER NOT NULL DEFAULT 1,
+    order_index   INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT '',
+    updated_at    TEXT    NOT NULL DEFAULT '',
+    UNIQUE(topic_id, activity_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_topic_components_topic
+    ON topic_learning_components(topic_id);
+"""
+
+
+def _migrate_v16(conn: sqlite3.Connection) -> None:
+    """v16：topic_learning_components + tasks.component_id/activity_kind（幂等）。"""
+    conn.executescript(_V16_SQL)
+    add_column_if_not_exists(conn, "tasks", "component_id", "INTEGER")
+    add_column_if_not_exists(
+        conn, "tasks", "learning_activity_kind", "TEXT"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_component ON tasks(component_id)"
+    )
+    conn.commit()
+
+
+_MIGRATIONS[16] = _migrate_v16
 
 
 def get_schema_version(conn) -> int:

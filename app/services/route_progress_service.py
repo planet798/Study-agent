@@ -62,6 +62,11 @@ class RouteProgress:
     due_review_count: int = 0
     upcoming_review_count: int = 0
     overdue_review_count: int = 0
+    # Phase 2：学习活动完成度（不混入 mastery）
+    activity_required_total: int = 0
+    activity_required_done: int = 0
+    activity_optional_total: int = 0
+    activity_optional_done: int = 0
     knowledge: list[KnowledgeStatus] = field(default_factory=list)
 
     @property
@@ -89,11 +94,13 @@ class RouteProgress:
 
 class RouteProgressService:
     def __init__(self, repo, assessment_repo, plan_repo,
-                 route_repo: LearningRouteRepository | None = None):
+                 route_repo: LearningRouteRepository | None = None,
+                 topic_learning_service=None):
         self.repo = repo
         self.assessment_repo = assessment_repo
         self.plan_repo = plan_repo
         self.route_repo = route_repo
+        self.topic_learning_service = topic_learning_service
 
     # ================= 基础 =================
 
@@ -105,6 +112,15 @@ class RouteProgressService:
             ).fetchall()
         }
 
+    def _complete_topic_ids(self) -> set[int]:
+        """Component-aware curriculum 完成集合；无 service 时回退旧语义。"""
+        if self.topic_learning_service is not None:
+            try:
+                return self.topic_learning_service.curriculum_complete_topic_ids()
+            except Exception:  # noqa: BLE001
+                pass
+        return self._done_topic_ids()
+
     def route_topics(self, route_id: int) -> list:
         return self.plan_repo.list_topics_by_route(route_id)
 
@@ -112,9 +128,15 @@ class RouteProgressService:
 
     def get_progress(self, route_id: int, today: str) -> RouteProgress:
         topics = self.route_topics(route_id)
-        done = self._done_topic_ids()
+        done = self._complete_topic_ids()
         progress = RouteProgress(route_id=route_id, topic_total=len(topics))
         progress.topic_covered = sum(1 for t in topics if t.id in done)
+        if self.topic_learning_service is not None:
+            act = self.topic_learning_service.route_activity_summary(route_id)
+            progress.activity_required_total = act["required_total"]
+            progress.activity_required_done = act["required_done"]
+            progress.activity_optional_total = act["optional_total"]
+            progress.activity_optional_done = act["optional_done"]
 
         kps = self.assessment_repo.list_knowledge_points_by_route(route_id)
         topic_names = {t.id: t.name for t in topics}
@@ -254,6 +276,13 @@ class RouteProgressService:
             covered = self._covered_topics_in_route(route_id)
             if not tasks and not assessed and not covered:
                 continue  # 本月无任何活动/证据的桶不占位（含空“未分类”）
+            activity = {"required_total": 0, "required_done": 0}
+            if self.topic_learning_service is not None and route_id is not None:
+                try:
+                    activity = self.topic_learning_service.\
+                        route_activity_summary(route_id)
+                except Exception:  # noqa: BLE001
+                    activity = {"required_total": 0, "required_done": 0}
             out.append({
                 "route_id": route_id,
                 "route_name": name,
@@ -265,11 +294,14 @@ class RouteProgressService:
                 "weak_count": len(weak),
                 "weak_topics": [kp["name"] for kp in weak],
                 "review_count": review_tasks,
+                # Phase 2：学习活动完成度（不是 capability）
+                "activity_required": activity.get("required_total", 0),
+                "activity_completed": activity.get("required_done", 0),
             })
         return out
 
     def _covered_topics_in_route(self, route_id: int | None) -> int:
         if route_id is None:
             return 0
-        done = self._done_topic_ids()
+        done = self._complete_topic_ids()
         return sum(1 for t in self.route_topics(route_id) if t.id in done)

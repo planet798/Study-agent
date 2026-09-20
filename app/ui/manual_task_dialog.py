@@ -45,11 +45,13 @@ class AddLearningTaskDialog(QDialog):
         parent=None,
         routes=None,
         topics_by_route=None,
+        topic_learning_service=None,
     ):
         """topics: 兼容旧调用（未分类 topic 列表，Phase A）。
 
         routes: [{"id": int, "name": str}, ...] active learning routes；
         topics_by_route: {route_id: [{"id","name"}, ...]} 按路线分组的 topic。
+        topic_learning_service: Phase 2 学习活动解析（可为 None）。
         """
         super().__init__(parent)
         self._topics = list(topics or [])
@@ -57,6 +59,7 @@ class AddLearningTaskDialog(QDialog):
         self._topics_by_route = {
             int(k): list(v) for k, v in (topics_by_route or {}).items()
         }
+        self._tl = topic_learning_service
         self.setWindowTitle("添加学习任务")
         self.setModal(True)
         self.resize(520, 520)
@@ -132,6 +135,29 @@ class AddLearningTaskDialog(QDialog):
         kbox.addWidget(self.topic_radio)
         kbox.addWidget(self.topic_combo)
         kbox.addWidget(self.temp_radio)
+
+        # Phase 2：学习方式
+        from ..services.learning_activity import ALL_ACTIVITY_KINDS, ACTIVITY_LABELS
+
+        self.activity_box = QWidget()
+        abox = QVBoxLayout(self.activity_box)
+        abox.setContentsMargins(0, 0, 0, 0)
+        abox.setSpacing(4)
+        abox.addWidget(QLabel("学习方式"))
+        self.activity_mode_combo = QComboBox()
+        self.activity_mode_combo.addItem("跟随课程组件（自动）", "auto")
+        self.activity_mode_combo.addItem("自定义（不关联课程组件）", "custom")
+        self.activity_mode_combo.currentIndexChanged.connect(
+            self._on_activity_mode_changed
+        )
+        abox.addWidget(self.activity_mode_combo)
+        self.component_combo = QComboBox()
+        abox.addWidget(self.component_combo)
+        self.kind_combo = QComboBox()
+        for kind in ALL_ACTIVITY_KINDS:
+            self.kind_combo.addItem(ACTIVITY_LABELS.get(kind, kind), kind)
+        abox.addWidget(self.kind_combo)
+        kbox.addWidget(self.activity_box)
         root.addWidget(self.knowledge_box)
         self.knowledge_box.setVisible(False)
 
@@ -166,9 +192,41 @@ class AddLearningTaskDialog(QDialog):
 
     def _on_type_changed(self) -> None:
         self.knowledge_box.setVisible(self.knowledge_radio.isChecked())
+        self._on_activity_mode_changed()
 
     def _on_route_changed(self) -> None:
         self._reload_topics()
+
+    def _on_activity_mode_changed(self) -> None:
+        is_knowledge = self.knowledge_radio.isChecked()
+        mode = self.activity_mode_combo.currentData()
+        custom = mode == "custom" or self.temp_radio.isChecked()
+        self.activity_box.setVisible(is_knowledge)
+        self.kind_combo.setVisible(custom)
+        self.component_combo.setVisible(is_knowledge and not custom)
+        if not custom:
+            self._reload_components()
+
+    def _reload_components(self) -> None:
+        self.component_combo.clear()
+        if self._tl is None or not self.topic_radio.isChecked():
+            return
+        topic_id = self.topic_combo.currentData()
+        if topic_id is None:
+            return
+        try:
+            statuses = self._tl.get_component_status(topic_id)
+        except Exception:  # noqa: BLE001
+            statuses = []
+        for s in statuses:
+            state = "✓" if s["complete"] else ("必需" if s["required"] else "可选")
+            self.component_combo.addItem(
+                f"{s['label']}（{state}）", s["component_id"]
+            )
+        if self.component_combo.count() == 0:
+            self.activity_mode_combo.setCurrentIndex(
+                self.activity_mode_combo.findData("custom")
+            )
 
     def _reload_topics(self) -> None:
         """Topic 下拉严格按所选路线过滤（禁止跨路线关联）。"""
@@ -190,6 +248,7 @@ class AddLearningTaskDialog(QDialog):
             self.temp_radio.setChecked(True)
         elif not self.temp_radio.isChecked():
             self.topic_radio.setChecked(True)
+        self._reload_components()
 
     def _title(self) -> str:
         return self.title_edit.text().strip()
@@ -216,7 +275,16 @@ class AddLearningTaskDialog(QDialog):
             "scheduled_date": self.date_edit.date().toString("yyyy-MM-dd"),
             "topic_id": None,
             "route_id": self._selected_route_id(),
+            "component_id": None,
+            "learning_activity_kind": None,
         }
         if is_knowledge and self.topic_radio.isChecked():
             payload["topic_id"] = self.topic_combo.currentData()
+        if is_knowledge:
+            mode = self.activity_mode_combo.currentData()
+            custom = mode == "custom" or not self.topic_radio.isChecked()
+            if custom:
+                payload["learning_activity_kind"] = self.kind_combo.currentData()
+            elif self.component_combo.count() > 0:
+                payload["component_id"] = self.component_combo.currentData()
         return payload

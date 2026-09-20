@@ -77,6 +77,11 @@ class Task:
     expected_artifact: str = ""
     # v12 起（Phase B）：所属学习路线（可为 NULL = 未分类）
     route_id: int | None = None
+    # v16 起（Phase 2）：Topic Learning Activity
+    # component_id: 关联的 topic_learning_components.id（可为 NULL）
+    # learning_activity_kind: 本次活动实际采用的方式（可为 NULL）
+    component_id: int | None = None
+    learning_activity_kind: str | None = None
 
     @property
     def is_done(self) -> bool:
@@ -288,6 +293,8 @@ class TaskRepository:
         acceptance_criteria: str = "",
         expected_artifact: str = "",
         route_id: int | None = None,
+        component_id: int | None = None,
+        learning_activity_kind: str | None = None,
     ) -> Task:
         """新增一条任务，返回带 id 的 Task。
 
@@ -311,13 +318,14 @@ class TaskRepository:
             " status, scheduled_date, postpone_count, created_at, updated_at, "
             " source, topic_id, task_type, knowledge_point_id, difficulty, "
             " project_name, project_repo, deliverable, acceptance_criteria, "
-            " expected_artifact, route_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " expected_artifact, route_id, component_id, learning_activity_kind) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (title.strip(), description, category, estimated_minutes,
              priority, STATUS_ACTIVE, date_str, ts, ts, source, topic_id,
              task_type, knowledge_point_id, difficulty,
              project_name or "", project_repo or "", deliverable or "",
-             acceptance_criteria or "", expected_artifact or "", route_id),
+             acceptance_criteria or "", expected_artifact or "", route_id,
+             component_id, learning_activity_kind),
         )
         self.conn.commit()
         return self.get(cur.lastrowid)

@@ -115,6 +115,7 @@ class MainWindow(QMainWindow):
         ai_config_service=None,
         prompt_registry=None,
         prompt_preview_service=None,
+        topic_learning_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -161,6 +162,8 @@ class MainWindow(QMainWindow):
         self.ai_config_service = ai_config_service
         self.prompt_registry = prompt_registry
         self.prompt_preview_service = prompt_preview_service
+        # Phase 2：Topic Learning Activity（可选）
+        self.topic_learning_service = topic_learning_service
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -335,6 +338,7 @@ class MainWindow(QMainWindow):
                 today_provider=self.today_provider,
                 ai_route_service=self.ai_route_service,
                 skill_service=self.skill_service,
+                topic_learning_service=self.topic_learning_service,
             )
             self.stack.addWidget(self.routes_page)
             self.routes_page_index = self.stack.count() - 1
@@ -723,6 +727,7 @@ class MainWindow(QMainWindow):
             parent=self,
             routes=routes,
             topics_by_route=self._topics_by_route(),
+            topic_learning_service=self.topic_learning_service,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -745,6 +750,8 @@ class MainWindow(QMainWindow):
                     scheduled_date=payload["scheduled_date"],
                     topic_id=payload.get("topic_id"),
                     route_id=payload.get("route_id"),
+                    component_id=payload.get("component_id"),
+                    learning_activity_kind=payload.get("learning_activity_kind"),
                 )
                 msg = "已添加正式知识学习任务"
         except Exception as e:  # noqa: BLE001 - 添加失败不崩溃

@@ -173,16 +173,27 @@ class DailyPlannerService:
 
         ctx.current_phase = phase.name
         ctx.phase_goal = phase.goals or ""
-        ctx.available_topics = [
-            ContextTopic(
+        from .learning_activity import activity_label
+
+        tl = self.study_plan_service._tl()
+        context_topics = []
+        for t in phase.topics:
+            component = None
+            try:
+                component = tl.get_next_required_component(t.id)
+            except Exception:  # noqa: BLE001
+                component = None
+            kind = component["activity_kind"] if component else ""
+            context_topics.append(ContextTopic(
                 topic_id=t.id,
                 title=t.name,
                 description=t.description,
                 estimated_minutes=t.estimated_minutes,
                 priority=t.priority,
-            )
-            for t in phase.topics
-        ]
+                next_activity=kind,
+                next_activity_label=activity_label(kind) if kind else "",
+            ))
+        ctx.available_topics = context_topics
 
         recent = self._build_recent_days(plan_next_date, week=WEEK_DAYS)
         ctx.recent_7_days = recent
@@ -704,8 +715,12 @@ class DailyPlannerService:
         else:
             problems.append(f"{plan_date} 不在任何阶段内")
 
-        done_topic_ids = self._done_topic_ids()
+        done_topic_ids = self._curriculum_complete_topic_ids()
         scheduled_topic_ids = self._scheduled_topic_ids(plan_date)
+        # Phase 2：活动维度去重状态
+        pending_topic_ids, component_task_ids_today = \
+            self._today_activity_state(plan_date)
+        pending_component_ids = self._pending_component_ids()
         # 当天任何非 cancelled、带 topic 的任务（含 manual / done / 延期）
         # 都视为该 topic 今日已被占用，Agent 不得重复生成。
         occupied_topic_ids = self._occupied_topic_ids(plan_date)
@@ -742,9 +757,6 @@ class DailyPlannerService:
                         rec_topic.estimated_minutes > max_minutes:
                     # Phase D.1：全局剩余分钟不够 → 跳过（不算规划失败）
                     continue
-            if rec.topic_id in done_topic_ids:
-                problems.append(f"topic_id {rec.topic_id} 已完成，不应重新生成")
-                continue
             if rec.topic_id in blocked_ids:
                 # 前置关键技能未满足：即使 JD 高分也不能越级安排
                 problems.append(
@@ -757,14 +769,36 @@ class DailyPlannerService:
             if rec.topic_id in today_cancelled_topic_ids:
                 # 今天已移除过该 topic：去重，不重新安排
                 continue
-            if rec.topic_id in scheduled_topic_ids or rec.topic_id in seen_topic_ids:
-                # 已存在/已排过：去重，不算违规
-                continue
-            if rec.topic_id in occupied_topic_ids:
-                # 今天已有该 topic 的任意任务（含 manual/done）：不重复
-                continue
+            # Phase 2：component-aware 选择 next activity（AI 不得越过课程结构）
+            tl = self.study_plan_service._tl()
+            component = None
+            activity_kind = None
+            if tl.has_profile(rec.topic_id):
+                component = tl.get_next_required_component(rec.topic_id)
+                if component is None:
+                    # curriculum complete：不生成，也不算规划失败
+                    continue
+                activity_kind = component["activity_kind"]
+                if component["id"] in component_task_ids_today:
+                    continue
+                if component["id"] in pending_component_ids:
+                    continue
+                if rec.topic_id in pending_topic_ids:
+                    continue
+            else:
+                # legacy：无 profile 的 Topic 保持旧语义
+                if rec.topic_id in done_topic_ids:
+                    problems.append(
+                        f"topic_id {rec.topic_id} 已完成，不应重新生成"
+                    )
+                    continue
+                if rec.topic_id in scheduled_topic_ids or \
+                        rec.topic_id in seen_topic_ids:
+                    continue
+                if rec.topic_id in occupied_topic_ids:
+                    continue
             seen_topic_ids.add(rec.topic_id)
-            to_create.append(rec)
+            to_create.append((rec, component, activity_kind))
 
         # carry_over 校验
         to_carry: list = []
@@ -796,9 +830,11 @@ class DailyPlannerService:
             return False, [], problems
 
         # 全部合法：先创建推荐任务
-        for rec in to_create:
+        for item in to_create:
+            rec, component, activity_kind = item
             task = self._create_task_from_recommendation(
-                rec, plan_date, topic_by_id=topic_by_id
+                rec, plan_date, topic_by_id=topic_by_id,
+                component=component, activity_kind=activity_kind,
             )
             created.append(task.id)
         # 再安排 carry_over（改期到今天，保留延期次数）
@@ -840,22 +876,58 @@ class DailyPlannerService:
         ).fetchall()
         return {r["topic_id"] for r in rows}
 
+    def _today_activity_state(self, date_str: str):
+        """今天该路线下：pending topics 与已安排的 component。"""
+        tasks = self.repo.list_by_date(date_str)
+        if self.scope_tasks_by_route and self._route_id() is not None:
+            tasks = [t for t in tasks if t.route_id == self._route_id()]
+        pending = {
+            t.topic_id for t in tasks
+            if t.topic_id is not None
+            and t.status in (STATUS_ACTIVE, STATUS_NOT_DONE)
+        }
+        component_ids = {
+            t.component_id for t in tasks
+            if t.component_id is not None and t.status != STATUS_CANCELLED
+        }
+        return pending, component_ids
+
+    def _pending_component_ids(self) -> set[int]:
+        sql = (
+            "SELECT DISTINCT component_id FROM tasks "
+            "WHERE component_id IS NOT NULL "
+            "AND status IN ('active','not_done')"
+        )
+        args: tuple = ()
+        if self.scope_tasks_by_route and self._route_id() is not None:
+            sql += " AND route_id = ?"
+            args = (int(self._route_id()),)
+        try:
+            rows = self.repo.conn.execute(sql, args).fetchall()
+        except Exception:  # noqa: BLE001
+            return set()
+        return {int(r[0]) for r in rows if r[0] is not None}
+
     def _create_task_from_recommendation(
-        self, rec, plan_date: str, topic_by_id: dict | None = None
+        self, rec, plan_date: str, topic_by_id: dict | None = None,
+        component=None, activity_kind=None,
     ) -> Task:
-        """创建 AI 推荐的任务；description 若无执行性则升级为结构化学习内容。"""
+        """创建 AI 推荐的任务；program 强制写 component/activity（AI 不得自定义）。"""
         from .task_content import build_topic_task_content, has_actionable_content
 
+        topic = (topic_by_id or {}).get(rec.topic_id)
         if not has_actionable_content(rec.description):
-            topic = (topic_by_id or {}).get(rec.topic_id)
             if topic is not None:
-                content = build_topic_task_content(topic.name, topic.description)
+                content = build_topic_task_content(
+                    topic.name, topic.description, activity_kind=activity_kind
+                )
             else:
                 content = build_topic_task_content(rec.title)
         else:
             content = rec.description
+        title = rec.title
         task = self.repo.create(
-            title=rec.title,
+            title=title,
             scheduled_date=plan_date,
             description=content,
             category="学习",
@@ -863,9 +935,10 @@ class DailyPlannerService:
             priority=rec.priority,
             source="generated",
             topic_id=rec.topic_id,
+            component_id=(component["id"] if component else None),
+            learning_activity_kind=activity_kind,
         )
         # 与 fallback path 复用同一个 topic -> knowledge_point 关联实现
-        topic = (topic_by_id or {}).get(rec.topic_id)
         return self.study_plan_service.link_task_knowledge_point(task, topic)
 
     def _done_topic_ids(self) -> set[int]:
@@ -874,6 +947,12 @@ class DailyPlannerService:
             (STATUS_DONE,),
         ).fetchall()
         return {r["topic_id"] for r in rows}
+
+    def _curriculum_complete_topic_ids(self) -> set[int]:
+        try:
+            return self.study_plan_service._tl().curriculum_complete_topic_ids()
+        except Exception:  # noqa: BLE001
+            return self._done_topic_ids()
 
     def _current_phase_id(self, plan_date: str) -> int | None:
         phase = self.study_plan_service.get_current_phase(plan_date)

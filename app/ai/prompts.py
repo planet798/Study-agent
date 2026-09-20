@@ -170,6 +170,7 @@ def build_planner_user_vars(
     evidence = build_knowledge_evidence_section(context)
     skill = build_skill_priority_section(context)
     market = build_market_trend_section(context)
+    activity = build_learning_activity_section(context)
     long_term_section = build_long_term_context_section(long_term)
 
     daily_limit = getattr(context, "current_daily_limit", 180)
@@ -182,6 +183,7 @@ def build_planner_user_vars(
         "knowledge_evidence_section": ("\n\n" + evidence) if evidence else "",
         "skill_priority_section": ("\n\n" + skill) if skill else "",
         "market_trend_section": ("\n\n" + market) if market else "",
+        "learning_activity_section": ("\n\n" + activity) if activity else "",
         "long_term_section": long_term_section,
         "output_instruction": "\n\n" + output_instruction,
         "daily_limit": daily_limit,
@@ -228,6 +230,30 @@ def build_knowledge_evidence_section(context: "object") -> str:
     lines.append(
         "用途：只用于调整‘下一步学什么’的优先级与针对性；不要据此跳过整个阶段，"
         "不要代替复习调度；不要重复已掌握/正在复习的内容。"
+    )
+    return "\n".join(lines)
+
+
+def build_learning_activity_section(context: "object") -> str:
+    """把当前阶段 topic 的“下一步学习活动”渲染为 Prompt 段；无则返回空串。
+
+    活动由 TopicLearningProfileService 确定性计算，AI 不得自由更改。
+    """
+    topics = getattr(context, "available_topics", None) or []
+    rows = [
+        (t.title, getattr(t, "next_activity_label", ""))
+        for t in topics if getattr(t, "next_activity", "")
+    ]
+    if not rows:
+        return ""
+    lines = [
+        "【学习活动】（由课程结构确定性决定，不得自由更改 activity 类型）"
+    ]
+    for title, label in rows[:20]:
+        lines.append(f"- {title}：下一步活动 = {label}")
+    lines.append(
+        "使用要求：每个 topic 只能规划其“下一步活动”对应的任务；"
+        "不得跳过未完成的必需活动，也不得自由更换 activity 类型。"
     )
     return "\n".join(lines)
 
@@ -343,6 +369,7 @@ def build_assessment_generate_vars(
     knowledge_point_name: str,
     description: str = "",
     num_questions: int = 4,
+    activity_kind: str | None = None,
 ) -> dict:
     types = " / ".join(ASSESSMENT_QUESTION_TYPES)
     output_instruction = render_template(
@@ -353,6 +380,21 @@ def build_assessment_generate_vars(
             "max_points": MAX_ASSESSMENT_POINTS,
         },
     )
+    activity_context = ""
+    if activity_kind:
+        from ..services.learning_activity import ACTIVITY_LABELS
+
+        label = ACTIVITY_LABELS.get(activity_kind, activity_kind)
+        hints = {
+            "theory": "可侧重概念解释与机制理解",
+            "code_reading": "可侧重代码理解与实现细节",
+            "experiment": "可侧重实验现象、参数影响与原因分析",
+            "interview": "可侧重面试型解释与推导",
+            "practice": "可侧重综合实践的设计与取舍",
+        }
+        activity_context = (
+            f"- 本次学习方式：{label}（{hints.get(activity_kind, '')}）"
+        )
     return {
         "knowledge_point_name": knowledge_point_name,
         "knowledge_point_description": (
@@ -362,6 +404,7 @@ def build_assessment_generate_vars(
         "types": types,
         "max_questions": MAX_ASSESSMENT_QUESTIONS,
         "max_points": MAX_ASSESSMENT_POINTS,
+        "activity_context": activity_context,
         "output_instruction": "\n\n" + output_instruction,
     }
 
@@ -371,11 +414,14 @@ def build_assessment_prompt(
     description: str = "",
     num_questions: int = 4,
     registry: PromptRegistry | None = None,
+    activity_kind: str | None = None,
 ) -> str:
     """根据知识点构造验收题 Prompt（向后兼容入口）。"""
     return render_prompt(
         "assessment.generate.user",
-        build_assessment_generate_vars(knowledge_point_name, description, num_questions),
+        build_assessment_generate_vars(
+            knowledge_point_name, description, num_questions, activity_kind
+        ),
         registry,
     )
 

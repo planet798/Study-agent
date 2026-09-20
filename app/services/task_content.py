@@ -313,8 +313,33 @@ _MODULES = [
 ]
 
 
-def build_topic_task_content(name: str, description: str = "") -> str:
-    """按主题名生成结构化、可执行的任务内容；同一输入输出确定。"""
+def build_topic_task_content(
+    name: str, description: str = "", activity_kind: str | None = None
+) -> str:
+    """按主题名 + 学习方式生成结构化、可执行的任务内容；同一输入输出确定。
+
+    - activity_kind=None / 'theory' → 沿用原主题模板（保持向后兼容）；
+    - code_reading / experiment / interview / practice → 活动专用模板。
+    """
+    from .learning_activity import (
+        ACTIVITY_CODE_READING,
+        ACTIVITY_EXPERIMENT,
+        ACTIVITY_INTERVIEW,
+        ACTIVITY_PRACTICE,
+        ACTIVITY_THEORY,
+    )
+
+    if activity_kind and activity_kind != ACTIVITY_THEORY:
+        builders = {
+            ACTIVITY_CODE_READING: _build_code_reading_content,
+            ACTIVITY_EXPERIMENT: _build_experiment_content,
+            ACTIVITY_INTERVIEW: _build_interview_content,
+            ACTIVITY_PRACTICE: _build_practice_content,
+        }
+        builder = builders.get(activity_kind)
+        if builder is not None:
+            return builder(name, description)
+
     T = (name or "").strip() or (description or "").strip() or "该主题"
     low = T.lower()
     info = None
@@ -336,6 +361,123 @@ def build_topic_task_content(name: str, description: str = "") -> str:
     lines += ["", "【客观验收】"]
     lines += [f"- {_fmt(v)}" for v in src["verify"]]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Activity-specific 任务内容（Phase 2）
+# ---------------------------------------------------------------------------
+
+def _topic_of(name: str, description: str = "") -> str:
+    return (name or "").strip() or (description or "").strip() or "该主题"
+
+
+def _build_code_reading_content(name: str, description: str = "") -> str:
+    T = _topic_of(name, description)
+    return "\n".join([
+        "【阅读目标】",
+        f"读懂「{T}」的关键实现，能解释它“为什么这样写”。",
+        "",
+        "【阅读范围】",
+        f"- 定位「{T}」的官方实现 / 参考源码 / 关键模块",
+        "- 先看接口与数据流，再看核心函数实现",
+        "",
+        "【需要解释的实现机制】",
+        "1. 输入/输出的张量或数据结构形状与含义",
+        "2. 核心函数/类的调用链与关键分支",
+        "3. 一个最容易误解的实现细节",
+        "",
+        "【完成标准】",
+        "- 能画出调用链并说明每一步作用",
+        "- 能定位并解释至少 2 个关键函数",
+        "- 能指出一个实现细节及其原因",
+        "",
+        "【客观验收】",
+        "- 口述/写出关键调用链",
+        "- 回答 2~3 道代码理解选择题",
+    ])
+
+
+def _build_experiment_content(name: str, description: str = "") -> str:
+    T = _topic_of(name, description)
+    return "\n".join([
+        "【实验目标】",
+        f"用最小代码亲手验证「{T}」的行为，并观察结果。",
+        "",
+        "【最小代码】",
+        f"- 写一个「{T}」的最小可运行示例（能独立跑起来）",
+        "- 只保留验证核心机制所需的代码，不要堆功能",
+        "",
+        "【输入 / 输出】",
+        "- 明确实验输入的构造与预期输出",
+        "- 记录实际输出，与预期对比",
+        "",
+        "【观察指标】",
+        "- 记录 1~2 个可量化或可对比的现象/指标",
+        "- 改动一个参数，观察指标变化并解释原因",
+        "",
+        "【完成标准】",
+        "- 实验能独立复现",
+        "- 记录输入、输出、观察指标",
+        "- 能解释“改动参数→指标变化”的因果关系",
+        "",
+        "【客观验收】",
+        "- 展示实验代码与运行结果",
+        "- 回答实验现象与原因的客观验收题",
+    ])
+
+
+def _build_interview_content(name: str, description: str = "") -> str:
+    T = _topic_of(name, description)
+    return "\n".join([
+        "【面试目标】",
+        f"能用面试语言清晰解释「{T}」，并应对追问。",
+        "",
+        "【高频问题】",
+        f"1. 「{T}」要解决的核心问题是什么？",
+        f"2. 「{T}」的关键机制/步骤有哪些？为什么这样设计？",
+        "3. 与相邻概念的区别与取舍？",
+        "4. 有什么典型坑 / 失败模式？",
+        "",
+        "【必须能够口述 / 推导】",
+        "- 用 1~2 分钟讲清核心机制",
+        "- 能画出结构图或写出关键公式/伪代码",
+        "- 能说出复杂度或工程取舍（如适用）",
+        "",
+        "【完成标准】",
+        "- 不看笔记完整回答上述问题",
+        "- 能追问下不崩（解释原因与边界）",
+        "- 能给出一个真实使用场景",
+        "",
+        "【客观验收】",
+        "- 模拟一次口述回答",
+        "- 回答 2~3 道面试型客观题",
+    ])
+
+
+def _build_practice_content(name: str, description: str = "") -> str:
+    T = _topic_of(name, description)
+    return "\n".join([
+        "【综合实践目标】",
+        f"用「{T}」完成一个小型综合任务，形成可验收产物。",
+        "（这是课程内的小型综合实践，不是 Phase 4 的正式 Practice Project。）",
+        "",
+        "【任务】",
+        f"- 设计一个用到「{T}」的小型端到端任务",
+        "- 明确输入、流程与预期产出",
+        "",
+        "【产物】",
+        "- 可运行代码或脚本",
+        "- 一段结果说明 / README",
+        "",
+        "【验收标准】",
+        "- 产物可独立运行并复现",
+        f"- 能说明「{T}」在任务中的作用",
+        "- 能指出一个可改进点",
+        "",
+        "【客观验收】",
+        "- 展示产物并运行",
+        "- 回答关于设计取舍的客观验收题",
+    ])
 
 
 # ---------------------------------------------------------------------------

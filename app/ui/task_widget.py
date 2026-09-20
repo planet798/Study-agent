@@ -108,6 +108,11 @@ class TaskWidget(QFrame):
         self.route_tag_label = QLabel("")
         self.route_tag_label.setObjectName("ReviewTag")
         top.addWidget(self.route_tag_label)
+
+        self.activity_tag_label = QLabel("")
+        self.activity_tag_label.setObjectName("ReviewTag")
+        self.activity_tag_label.setVisible(False)
+        top.addWidget(self.activity_tag_label)
         top.addStretch()
         top.addWidget(self.category_label)
         top.addWidget(self.priority_label)
@@ -273,6 +278,17 @@ class TaskWidget(QFrame):
             route_text = self._route_name or f"路线{task.route_id}"
         self.route_tag_label.setText(f"【{route_text}】")
         self.route_tag_label.setVisible(True)
+        # Phase 2：学习活动标签（与路线标签并列）
+        activity = getattr(task, "learning_activity_kind", None)
+        if activity:
+            from ..services.learning_activity import activity_label
+
+            self.activity_tag_label.setText(
+                f"【{activity_label(activity)}】"
+            )
+            self.activity_tag_label.setVisible(True)
+        else:
+            self.activity_tag_label.setVisible(False)
         self.category_label.setText(f"分类：{task.category or '未分类'}")
         prio = _PRIORITY_TEXT.get(task.priority, "?")
         self.priority_label.setText(f"优先级：{prio}")

@@ -20,10 +20,27 @@ class RouteStructureError(ValueError):
 
 class RoutePlanService:
     def __init__(self, plan_repo: StudyPlanRepository, task_repo,
-                 assessment_repo=None):
+                 assessment_repo=None, topic_learning_service=None):
         self.plan_repo = plan_repo
         self.task_repo = task_repo
         self.assessment_repo = assessment_repo
+        # Phase 2：新增 Topic 自动建默认 component profile
+        self.topic_learning_service = topic_learning_service
+
+    def _tl(self):
+        if self.topic_learning_service is None:
+            from ..database.topic_learning_repository import (
+                TopicLearningComponentRepository,
+            )
+            from .topic_learning_profile_service import (
+                TopicLearningProfileService,
+            )
+
+            self.topic_learning_service = TopicLearningProfileService(
+                self.task_repo.conn,
+                TopicLearningComponentRepository(self.task_repo.conn),
+            )
+        return self.topic_learning_service
 
     # ================= Plan =================
 
@@ -119,7 +136,7 @@ class RoutePlanService:
             raise RouteStructureError("阶段不属于该路线，拒绝添加知识点")
         if order_index is None:
             order_index = len(self.plan_repo.list_topics(phase_id)) + 1
-        return self.plan_repo.create_topic(
+        topic = self.plan_repo.create_topic(
             phase_id=phase_id,
             name=name,
             description=description or name,
@@ -127,6 +144,9 @@ class RoutePlanService:
             priority=int(priority),
             order_index=int(order_index),
         )
+        # Phase 2：所有新 Topic 自动获得最小 component profile（theory required）
+        self._tl().ensure_default_profile(topic.id)
+        return topic
 
     def topic_has_history(self, topic_id: int) -> bool:
         """Topic 是否已有学习记录（task 或 knowledge_point）。"""
@@ -155,6 +175,12 @@ class RoutePlanService:
             raise RouteStructureError(
                 "该知识点已有学习记录，不能直接删除。"
             )
+        # Phase 2：无历史 → 一并清掉 component profile（无 task 关系）
+        self.task_repo.conn.execute(
+            "DELETE FROM topic_learning_components WHERE topic_id = ?",
+            (int(topic_id),),
+        )
+        self.task_repo.conn.commit()
         self.plan_repo.delete_topic(topic_id)
 
     # ================= Phase F：AI 路线草稿持久化 =================
@@ -206,6 +232,7 @@ class RoutePlanService:
             )
         conn = self.plan_repo.conn
         plan_id = None
+        new_topic_ids: list[int] = []
         try:
             plan = self.plan_repo.get_plan_by_route(route_id)
             if plan is None:
@@ -220,6 +247,12 @@ class RoutePlanService:
             else:
                 plan_id = plan.id
                 # 空计划替换：清掉空结构后重建（此时无 task/kp 引用）
+                conn.execute(
+                    "DELETE FROM topic_learning_components WHERE topic_id IN "
+                    "(SELECT t.id FROM study_topics t JOIN study_phases ph "
+                    " ON ph.id = t.phase_id WHERE ph.plan_id = ?)",
+                    (plan_id,),
+                )
                 conn.execute(
                     "DELETE FROM study_topics WHERE phase_id IN "
                     "(SELECT id FROM study_phases WHERE plan_id = ?)",
@@ -243,7 +276,7 @@ class RoutePlanService:
                 )
                 phase_id = cur.lastrowid
                 for topic in sorted(phase.topics, key=lambda t: t.order):
-                    conn.execute(
+                    cur = conn.execute(
                         "INSERT INTO study_topics (phase_id, name, description, "
                         "estimated_minutes, priority, order_index) "
                         "VALUES (?, ?, ?, ?, ?, ?)",
@@ -251,10 +284,19 @@ class RoutePlanService:
                          int(topic.estimated_minutes), int(topic.priority),
                          int(topic.order)),
                     )
+                    # Phase 2：先只记录；profile 在事务提交后统一创建
+                    # （ensure_default_profile 会 commit，不能在事务中调用）
+                    new_topic_ids.append(int(cur.lastrowid))
             conn.commit()
         except Exception:
             conn.rollback()
             raise
+        # 事务已提交：幂等补建默认 component profile
+        for tid in new_topic_ids:
+            try:
+                self._tl().ensure_default_profile(tid)
+            except Exception:  # noqa: BLE001 - profile 缺失可由启动 repair 补回
+                pass
         return {"plan_id": plan_id, "mode": mode}
 
     # ================= 进度 =================

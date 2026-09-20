@@ -189,6 +189,7 @@ PLANNER_USER = """请根据以下上下文，为下一天（通常是明天）�
 {{knowledge_evidence_section}}
 {{skill_priority_section}}
 {{market_trend_section}}
+{{learning_activity_section}}
 {{long_term_section}}
 {{output_instruction}}"""
 
@@ -232,6 +233,7 @@ ASSESSMENT_USER = """请为以下知识点生成验收题。
 - 名称：{{knowledge_point_name}}
 {{knowledge_point_description}}
 - 目标题数：{{num_questions}}
+{{activity_context}}
 
 要求：
 - 题目必须能检验真实理解与动手能力，不能问主观掌握度。
@@ -313,6 +315,8 @@ SUMMARY_MONTHLY_USER = """请解读以下本月学习统计：
 - route_stats 为各学习路线的真实统计；若提及路线/知识点/薄弱项，
   必须来自 route_stats，不得虚构数据中不存在的知识点
 - 不要给出一个“整体 mastery 百分比”（不同路线不可简单平均）
+- route_stats 中的 activity_completed / activity_required 只表示“学习活动”完成度，
+  不是能力等级、也不是掌握度；不得把它解释成 capability
 - 只输出 JSON，不要输出其他文字"""
 
 
@@ -480,6 +484,7 @@ DEFAULT_PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
             "knowledge_evidence_section",
             "skill_priority_section",
             "market_trend_section",
+            "learning_activity_section",
             "long_term_section",
         ),
     ),
@@ -505,6 +510,7 @@ DEFAULT_PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
             "types",
             "max_questions",
             "max_points",
+            "activity_context",
         ),
     ),
     PromptDefinition(

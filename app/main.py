@@ -678,7 +678,22 @@ def main() -> int:
 
     route_repo = LearningRouteRepository(conn)
     route_service = LearningRouteService(route_repo, skill_repo=skill_repo)
-    route_plan_service = RoutePlanService(plan_repo, repo, assessment_repo)
+    # Phase 2：Topic Learning Activity 统一入口
+    from app.database.topic_learning_repository import (
+        TopicLearningComponentRepository,
+    )
+    from app.services.topic_learning_profile_service import (
+        TopicLearningProfileService,
+    )
+
+    topic_learning_service = TopicLearningProfileService(
+        conn, TopicLearningComponentRepository(conn)
+    )
+    skill_service.topic_learning_service = topic_learning_service
+    route_plan_service = RoutePlanService(
+        plan_repo, repo, assessment_repo,
+        topic_learning_service=topic_learning_service,
+    )
     # Phase F：route-specific curriculum gap 需要 route_skills
     skill_service.route_repo = route_repo
     # Phase E：路线进度 / 掌握 / 复习状态统一计算
@@ -686,7 +701,8 @@ def main() -> int:
     from app.services.route_repair_service import repair_route_assignments
 
     route_progress_service = RouteProgressService(
-        repo, assessment_repo, plan_repo, route_repo
+        repo, assessment_repo, plan_repo, route_repo,
+        topic_learning_service=topic_learning_service,
     )
     # 幂等修复历史 route 归属（绝不猜 manual NULL / ordinary todo）
     try:
@@ -700,6 +716,7 @@ def main() -> int:
         assessment_repo=assessment_repo,
         skill_service=skill_service,
         learning_route_repo=route_repo,
+        topic_learning_service=topic_learning_service,
     )
     study_plan_service.ensure_default_plan()
 
@@ -740,7 +757,8 @@ def main() -> int:
     # Phase 1：canonical 六技术路线 seed + 安全历史迁移 + skill→route 映射
     try:
         canonical_result = CanonicalRouteService(
-            conn, route_repo, plan_repo, skill_repo
+            conn, route_repo, plan_repo, skill_repo,
+            topic_learning_service=topic_learning_service,
         ).ensure_all()
         mig = canonical_result.get("migration") or {}
         print(
@@ -844,6 +862,7 @@ def main() -> int:
         skill_service=skill_service,
         jd_service=jd_service,
         planner=daily_planner.planner,
+        topic_learning_service=topic_learning_service,
     )
     date_service.scheduler = scheduler
     review_service = TaskReviewService(ai_client, prompt_registry=prompt_registry)
@@ -891,6 +910,7 @@ def main() -> int:
         repo,
         assessment_repo=assessment_repo,
         study_plan_service=study_plan_service,
+        topic_learning_service=topic_learning_service,
     )
 
     # 周/月总结（本地统计 + AI 解读 + 缓存）
@@ -969,6 +989,7 @@ def main() -> int:
         ai_config_service=ai_config_service,
         prompt_registry=prompt_registry,
         prompt_preview_service=prompt_preview_service,
+        topic_learning_service=topic_learning_service,
     )
     # 新实例启动请求 → 恢复/前置已有唯一实例（从托盘恢复或直接激活）
     if hasattr(window, "_restore_from_tray"):

@@ -30,11 +30,60 @@ class ManualTaskService:
         repo: TaskRepository,
         assessment_repo=None,
         study_plan_service=None,
+        topic_learning_service=None,
     ):
         self.repo = repo
         self.assessment_repo = assessment_repo
         # 复用 StudyPlanService.link_task_knowledge_point（topic -> kp 唯一实现）
         self.study_plan_service = study_plan_service
+        # Phase 2：Topic Learning Activity
+        self.topic_learning_service = topic_learning_service
+
+    def _tl(self):
+        if self.topic_learning_service is None:
+            from ..database.topic_learning_repository import (
+                TopicLearningComponentRepository,
+            )
+            from .topic_learning_profile_service import (
+                TopicLearningProfileService,
+            )
+
+            self.topic_learning_service = TopicLearningProfileService(
+                self.repo.conn,
+                TopicLearningComponentRepository(self.repo.conn),
+            )
+        return self.topic_learning_service
+
+    def resolve_activity(
+        self,
+        topic_id: int | None,
+        component_id: int | None,
+        activity_kind: str | None,
+    ) -> tuple[int | None, str | None]:
+        """解析 (component_id, activity_kind)，并校验一致性。
+
+        - 显式 component_id：必须属于 topic_id，activity_kind 跟随 component。
+        - 仅 activity_kind（无 component）：自定义学习方式（component_id=None）。
+        - 都不给且 topic 有 profile：默认 = topic 的 next required component。
+        """
+        from .learning_activity import is_valid_activity_kind
+
+        if activity_kind is not None and not is_valid_activity_kind(activity_kind):
+            raise ValueError(f"非法 learning_activity_kind: {activity_kind!r}")
+        if component_id is not None:
+            comp = self._tl().get_component(component_id)
+            if comp is None:
+                raise ValueError(f"学习活动不存在: id={component_id}")
+            if topic_id is None or comp["topic_id"] != topic_id:
+                raise ValueError("学习活动不属于该 Topic")
+            return comp["id"], comp["activity_kind"]
+        if activity_kind is not None:
+            return None, activity_kind
+        if topic_id is not None:
+            comp = self._tl().get_next_required_component(topic_id)
+            if comp is not None:
+                return comp["id"], comp["activity_kind"]
+        return None, None
 
     # ================= 普通 To-do =================
 
@@ -76,15 +125,21 @@ class ManualTaskService:
         category: str = "学习",
         priority: int = 1,
         route_id: int | None = None,
+        component_id: int | None = None,
+        learning_activity_kind: str | None = None,
     ) -> Task:
         """创建正式知识学习任务（manual knowledge）。
 
         - 传入 topic_id：关联已有 study_topic，task.route_id 强制等于该 topic 的
           route（不接受调用方覆盖）；复用 link_task_knowledge_point。
+        - component_id / learning_activity_kind：见 resolve_activity。
         - 不传 topic_id：创建/复用一个 (name, route_id) 维度的临时知识点，
-          task.route_id = kp.route_id；route_id=None 保持未分类。
+          task.route_id = kp.route_id；component_id 必须为 None。
         - 两种情况均可进入 Assessment（done ≠ mastered）。
         """
+        component_id, learning_activity_kind = self.resolve_activity(
+            topic_id, component_id, learning_activity_kind
+        )
         if topic_id is not None:
             topic_route_id = None
             if self.study_plan_service is not None:
@@ -101,6 +156,8 @@ class ManualTaskService:
                 task_type=MANUAL_KNOWLEDGE,
                 topic_id=topic_id,
                 route_id=topic_route_id,
+                component_id=component_id,
+                learning_activity_kind=learning_activity_kind,
             )
             if self.study_plan_service is not None:
                 linked = self.study_plan_service.link_task_knowledge_point(task)
@@ -127,6 +184,8 @@ class ManualTaskService:
             task_type=MANUAL_KNOWLEDGE,
             knowledge_point_id=kp_id,
             route_id=kp_route_id,
+            component_id=None,
+            learning_activity_kind=learning_activity_kind,
         )
 
     # ================= 幂等临时知识点 =================

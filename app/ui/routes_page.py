@@ -60,7 +60,8 @@ class RouteDetailDialog(QDialog):
 
     def __init__(self, route, route_service, route_plan_service, parent=None,
                  progress_service=None, today_provider=None,
-                 ai_route_service=None, skill_service=None):
+                 ai_route_service=None, skill_service=None,
+                 topic_learning_service=None):
         super().__init__(parent)
         self.route = route
         self.route_service = route_service
@@ -69,6 +70,7 @@ class RouteDetailDialog(QDialog):
         self.today_provider = today_provider or _default_today
         self.ai_route_service = ai_route_service
         self.skill_service = skill_service
+        self.topic_learning_service = topic_learning_service
         self._ai_worker = None
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
@@ -207,6 +209,16 @@ class RouteDetailDialog(QDialog):
             prog2.setObjectName("TaskMeta")
             self.body_layout.addWidget(prog2)
 
+        if rp is not None and rp.activity_required_total > 0:
+            act = QLabel(
+                "【学习活动】必需完成："
+                f"{rp.activity_required_done} / {rp.activity_required_total}"
+                + (f"　可选：{rp.activity_optional_done} / {rp.activity_optional_total}"
+                   if rp.activity_optional_total else "")
+            )
+            act.setObjectName("TaskMeta")
+            self.body_layout.addWidget(act)
+
         if rp is not None and rp.knowledge:
             self.body_layout.addWidget(self._section_label("知识掌握"))
             for ks in rp.knowledge:
@@ -238,7 +250,7 @@ class RouteDetailDialog(QDialog):
             rev.setWordWrap(True)
             self.body_layout.addWidget(rev)
 
-        done_ids = self.route_plan_service.done_topic_ids()
+        done_ids = self._complete_topic_ids()
         if not structure.phases:
             self.body_layout.addWidget(
                 _secondary("＋ 添加阶段", self._on_add_phase)
@@ -293,12 +305,58 @@ class RouteDetailDialog(QDialog):
             lbl = QLabel(text)
             lbl.setWordWrap(True)
             row.addWidget(lbl, stretch=1)
+            # Phase 2：学习活动 chips
+            if self.topic_learning_service is not None:
+                chips = self._activity_chips(topic.id)
+                if chips:
+                    chip_lbl = QLabel(chips)
+                    chip_lbl.setObjectName("TaskMeta")
+                    row.addWidget(chip_lbl)
+                    row.addWidget(_secondary(
+                        "学习组成",
+                        lambda _=False, t=topic: self._on_edit_profile(t),
+                    ))
             if not self.route.is_archived:
                 row.addWidget(_secondary(
                     "删除", lambda _=False, t=topic: self._on_delete_topic(t)
                 ))
             lay.addLayout(row)
         return card
+
+    def _complete_topic_ids(self) -> set:
+        if self.topic_learning_service is not None and not self.route.is_archived:
+            try:
+                return set(
+                    self.topic_learning_service.curriculum_complete_topic_ids()
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return set(self.route_plan_service.done_topic_ids())
+
+    def _activity_chips(self, topic_id: int) -> str:
+        try:
+            statuses = self.topic_learning_service.get_component_status(topic_id)
+        except Exception:  # noqa: BLE001
+            return ""
+        parts = []
+        for s in statuses:
+            if s["complete"]:
+                mark = "✓"
+            elif s["required"]:
+                mark = "○"
+            else:
+                mark = "◇"
+            parts.append(f"{s['label']} {mark}")
+        return "　".join(parts)
+
+    def _on_edit_profile(self, topic) -> None:
+        from .topic_learning_dialog import TopicLearningProfileDialog
+
+        dlg = TopicLearningProfileDialog(
+            topic, self.topic_learning_service, parent=self
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.refresh()
 
     # ---------- 操作 ----------
 
@@ -644,7 +702,8 @@ class LearningRoutesPage(QWidget):
 
     def __init__(self, route_service, route_plan_service=None, parent=None,
                  progress_service=None, today_provider=None,
-                 ai_route_service=None, skill_service=None):
+                 ai_route_service=None, skill_service=None,
+                 topic_learning_service=None):
         super().__init__(parent)
         self.route_service = route_service
         self.route_plan_service = route_plan_service
@@ -652,6 +711,7 @@ class LearningRoutesPage(QWidget):
         self.today_provider = today_provider or _default_today
         self.ai_route_service = ai_route_service
         self.skill_service = skill_service
+        self.topic_learning_service = topic_learning_service
         self.show_archived = False
         self._build_ui()
         self.refresh()
@@ -844,11 +904,21 @@ class LearningRoutesPage(QWidget):
         structure = self.route_plan_service.get_structure(route_id)
         if structure is None or not structure.phases:
             return "尚未创建学习计划"
-        done_ids = self.route_plan_service.done_topic_ids()
+        done_ids = self._complete_topic_ids()
         for phase in structure.phases:
             if any(t.id not in done_ids for t in phase.topics):
                 return phase.name
         return structure.phases[-1].name
+
+    def _complete_topic_ids(self) -> set:
+        if self.topic_learning_service is not None:
+            try:
+                return set(
+                    self.topic_learning_service.curriculum_complete_topic_ids()
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return set(self.route_plan_service.done_topic_ids())
 
     # ---------- 操作 ----------
 
@@ -895,6 +965,7 @@ class LearningRoutesPage(QWidget):
             today_provider=self.today_provider,
             ai_route_service=self.ai_route_service,
             skill_service=self.skill_service,
+            topic_learning_service=self.topic_learning_service,
         )
         dlg.exec()
         self.refresh()

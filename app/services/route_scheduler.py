@@ -62,6 +62,7 @@ class GlobalDailyScheduler:
         max_daily_minutes: int = MAX_DAILY_STUDY_MINUTES,
         budget: int = GLOBAL_AGENT_DAILY_BUDGET,
         fairness_window: int = FAIRNESS_WINDOW_DAYS,
+        topic_learning_service=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo
@@ -73,6 +74,7 @@ class GlobalDailyScheduler:
         self.max_daily_minutes = max_daily_minutes
         self.budget = int(budget)
         self.fairness_window = int(fairness_window)
+        self.topic_learning_service = topic_learning_service
 
     # ================= 路线状态 =================
 
@@ -87,6 +89,7 @@ class GlobalDailyScheduler:
             route_id=route_id,
             learning_route_repo=self.route_repo,
             scope_tasks_by_route=True,
+            topic_learning_service=self.topic_learning_service,
         )
         return DailyPlannerService(
             self.repo,

@@ -163,3 +163,53 @@ def six_route_env(conn):
         skill_repo=skill_repo,
         legacy_route=route_repo.get_default_learning_route(),
     )
+
+
+# ============================================================
+# Phase 2：Topic Learning Activity fixtures
+# ============================================================
+
+
+@pytest.fixture()
+def topic_learning(conn):
+    from app.database.topic_learning_repository import (
+        TopicLearningComponentRepository,
+    )
+    from app.services.topic_learning_profile_service import (
+        TopicLearningProfileService,
+    )
+
+    return TopicLearningProfileService(
+        conn, TopicLearningComponentRepository(conn)
+    )
+
+
+@pytest.fixture()
+def activity_env(six_route_env, topic_learning):
+    """Canonical 六路线 + Topic Learning profiles 的环境。
+
+    返回 SimpleNamespace：conn/repo/plan_repo/route_repo/skill_repo/tl/
+    route_id（dict）/ result。
+    """
+    from types import SimpleNamespace
+
+    from app.services.canonical_route_service import CanonicalRouteService
+
+    result = CanonicalRouteService(
+        six_route_env.conn,
+        six_route_env.route_repo,
+        six_route_env.plan_repo,
+        six_route_env.skill_repo,
+        topic_learning_service=topic_learning,
+    ).ensure_all()
+    return SimpleNamespace(
+        conn=six_route_env.conn,
+        repo=six_route_env.repo,
+        plan_repo=six_route_env.plan_repo,
+        route_repo=six_route_env.route_repo,
+        skill_repo=six_route_env.skill_repo,
+        legacy_route=six_route_env.legacy_route,
+        tl=topic_learning,
+        route_ids=result["route_ids"],
+        result=result,
+    )

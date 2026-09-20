@@ -27,7 +27,12 @@ from ..database.learning_route_repository import (
 )
 from ..database.skill_repository import SkillRepository
 from ..database.study_plan_repository import StudyPlan, StudyPlanRepository
+from ..database.topic_learning_repository import (
+    TopicLearningComponentRepository,
+)
 from . import canonical_routes as C
+from .canonical_topic_components import profile_for_topic
+from .topic_learning_profile_service import TopicLearningProfileService
 
 
 class CanonicalRouteService:
@@ -37,11 +42,15 @@ class CanonicalRouteService:
         route_repo: LearningRouteRepository | None = None,
         plan_repo: StudyPlanRepository | None = None,
         skill_repo: SkillRepository | None = None,
+        topic_learning_service: TopicLearningProfileService | None = None,
     ):
         self.conn = conn
         self.route_repo = route_repo or LearningRouteRepository(conn)
         self.plan_repo = plan_repo or StudyPlanRepository(conn)
         self.skill_repo = skill_repo
+        self.topic_learning = topic_learning_service or TopicLearningProfileService(
+            conn, TopicLearningComponentRepository(conn)
+        )
 
     # ================= 入口 =================
 
@@ -68,6 +77,9 @@ class CanonicalRouteService:
         self.ensure_extra_skills()
         links = self.ensure_route_skills(routes)
         topic_links = self.ensure_topic_skill_links()
+        profiles = self.ensure_topic_profiles(routes)
+        backfill = self.topic_learning.backfill_legacy_theory()
+        consistency = self.topic_learning.repair_consistency()
         return {
             "group_id": pre["group"].id,
             "route_ids": {k: r.id for k, r in routes.items()},
@@ -75,12 +87,33 @@ class CanonicalRouteService:
             "plan_ids": {k: p.id for k, p in plans.items()},
             "route_skill_links": links,
             "topic_skill_links": topic_links,
+            "activity_profiles": profiles,
+            "legacy_theory_backfill": backfill,
+            "consistency_repair": consistency,
             "migration": {
                 "applied": migration.get("applied"),
                 "reason": migration.get("reason"),
                 "summary": migration.get("summary"),
             },
         }
+
+    def ensure_topic_profiles(self, routes: dict[str, LearningRoute]) -> int:
+        """首次初始化每个 canonical Topic 的 learning component profile。
+
+        已有 profile（用户可能已修改）→ 不覆盖。返回新建 profile 的 Topic 数。
+        """
+        created = 0
+        for key in C.CANONICAL_LEARNING_KEYS:
+            route = routes.get(key)
+            if route is None:
+                continue
+            for topic in self.plan_repo.list_topics_by_route(route.id):
+                if self.topic_learning.has_profile(topic.id):
+                    continue
+                spec = profile_for_topic(topic.name, key)
+                self.topic_learning.ensure_profile_from_spec(topic.id, spec)
+                created += 1
+        return created
 
     def ensure_pre_migration(self) -> dict:
         """只建 routes + plans + phases（不建 topics、不迁移）。

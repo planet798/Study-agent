@@ -33,6 +33,9 @@ class ContextTopic:
     description: str = ""
     estimated_minutes: int = 0
     priority: int = 1
+    # Phase 2：下一个未完成的 required learning activity（确定性计算）
+    next_activity: str = ""
+    next_activity_label: str = ""
 
 
 @dataclass

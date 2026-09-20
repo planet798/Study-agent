@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from ..database.repository import TaskRepository
-from ..database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_DONE
+from ..database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_DONE, STATUS_NOT_DONE
 from ..database.study_plan_repository import StudyPlan, StudyPlanRepository
 
 # 默认每日自主学习时间预算（分钟）
@@ -154,6 +154,7 @@ class StudyPlanService:
         route_id: int | None = None,
         learning_route_repo=None,
         scope_tasks_by_route: bool = False,
+        topic_learning_service=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -171,9 +172,27 @@ class StudyPlanService:
         # Phase D：多路线 Scheduler 创建的 route-scoped 实例置 True，
         # 使“当天已有任务 / 预算 / 最近任务”只统计本路线，避免跨路线干扰。
         self.scope_tasks_by_route = scope_tasks_by_route
+        # Phase 2：Topic Learning Activity（可注入；未注入时惰性构造）
+        self.topic_learning_service = topic_learning_service
         self._resolved_route_id_cache: int | None = None
         self._route_resolved = False
         self._default_plan_created = False
+
+    def _tl(self):
+        """惰性获取 TopicLearningProfileService（保证注入与直构一致）。"""
+        if self.topic_learning_service is None:
+            from ..database.topic_learning_repository import (
+                TopicLearningComponentRepository,
+            )
+            from .topic_learning_profile_service import (
+                TopicLearningProfileService,
+            )
+
+            self.topic_learning_service = TopicLearningProfileService(
+                self.repo.conn,
+                TopicLearningComponentRepository(self.repo.conn),
+            )
+        return self.topic_learning_service
 
     def _resolved_route_id(self) -> int | None:
         """解析本 Service 服务的 route_id（显式优先，其次系统默认 learning route）。"""
@@ -415,14 +434,14 @@ class StudyPlanService:
             if anchor_index is None:
                 return None
 
-        done_ids = self._done_topic_ids()
+        done_ids = self._curriculum_complete_topic_ids()
         for phase in phases[anchor_index:]:
             if self._phase_has_remaining_topics(phase, done_ids):
                 return phase
         return None
 
     def _phase_has_remaining_topics(self, phase, done_topic_ids: set[int]) -> bool:
-        """阶段内是否还存在未完成（未生成过 done 任务）的主题。"""
+        """阶段内是否还存在未完成 curriculum 的主题（component-aware）。"""
         return any(t.id not in done_topic_ids for t in phase.topics)
 
     # ================= 每日任务生成 =================
@@ -493,6 +512,20 @@ class StudyPlanService:
             for t in today_tasks
             if t.topic_id is not None and t.status == STATUS_CANCELLED
         }
+        # Phase 2：活动维度去重
+        # pending_topic_ids：今天已有 active/not_done 任务（其它 component）→ 不再生成
+        pending_topic_ids = {
+            t.topic_id
+            for t in today_tasks
+            if t.topic_id is not None
+            and t.status in (STATUS_ACTIVE, STATUS_NOT_DONE)
+        }
+        # component_task_ids_today：今天已安排过（非 cancelled）的 component
+        component_task_ids_today = {
+            t.component_id
+            for t in today_tasks
+            if t.component_id is not None and t.status != STATUS_CANCELLED
+        }
         committed = sum(
             t.estimated_minutes
             for t in today_tasks
@@ -509,8 +542,11 @@ class StudyPlanService:
             )
         remaining = self.max_daily_minutes - committed
 
-        # 已完成的主题列表（任意日期完成过即视为已掌握）
-        done_topic_ids = self._done_topic_ids()
+        # Phase 2：跨日期的“待完成 component”（active/not_done）→ 不得重复生成
+        pending_component_ids = self._pending_component_ids(scope_route)
+
+        # 已 curriculum complete 的主题（component-aware；无 profile 回退 legacy）
+        done_topic_ids = self._curriculum_complete_topic_ids()
 
         # 知识掌握证据（Phase 8；无 assessment_repo 时为空，行为与旧版一致）
         weak_ids = set()
@@ -550,13 +586,36 @@ class StudyPlanService:
                 # 前置关键技能未满足：即使 JD 高频也不能生成
                 result["skipped_gate"].append(topic.id)
                 continue
-            if topic.id in occupied_topic_ids or topic.id in active_topic_ids:
-                result["skipped_duplicate"].append(topic.id)
-                continue
             if topic.id in cancelled_topic_ids:
                 # 当天被用户移除过的 topic：今天 replan / 回退生成都不要再安排
                 result["skipped_cancelled"].append(topic.id)
                 continue
+            # Phase 2：component-aware 选择 next activity
+            tl = self._tl()
+            component = None
+            activity_kind = None
+            if tl.has_profile(topic.id):
+                component = tl.get_next_required_component(topic.id)
+                if component is None:
+                    # 有 profile 但所有 required 已完 → curriculum complete
+                    result["skipped_done"].append(topic.id)
+                    continue
+                activity_kind = component["activity_kind"]
+                if component["id"] in component_task_ids_today:
+                    result["skipped_duplicate"].append(topic.id)
+                    continue
+                if component["id"] in pending_component_ids:
+                    # 该 component 已有未完成任务（可能延期到其它天）
+                    result["skipped_duplicate"].append(topic.id)
+                    continue
+                if topic.id in pending_topic_ids:
+                    result["skipped_duplicate"].append(topic.id)
+                    continue
+            else:
+                # legacy：无 profile 的 Topic 保持旧去重语义
+                if topic.id in occupied_topic_ids or topic.id in active_topic_ids:
+                    result["skipped_duplicate"].append(topic.id)
+                    continue
             if max_minutes is not None and \
                     topic.estimated_minutes > max_minutes:
                 # Phase D.1：全局剩余分钟不够 → 不生成，绝不突破 180 分钟
@@ -564,7 +623,9 @@ class StudyPlanService:
                 continue
             # 至少安排一个核心任务：当天完全为空时，第一个可用的主题直接采纳
             if not today_tasks and not result["selected"]:
-                task = self._create_task_from_topic(topic, date_str)
+                task = self._create_task_from_topic(
+                    topic, date_str, component, activity_kind
+                )
                 result["generated"].append(task)
                 result["selected"].append(topic.id)
                 remaining -= topic.estimated_minutes
@@ -572,24 +633,45 @@ class StudyPlanService:
             if topic.estimated_minutes > remaining:
                 result["skipped_budget"].append(topic.id)
                 continue
-            task = self._create_task_from_topic(topic, date_str)
+            task = self._create_task_from_topic(
+                topic, date_str, component, activity_kind
+            )
             result["generated"].append(task)
             result["selected"].append(topic.id)
             remaining -= topic.estimated_minutes
 
         return result
 
-    def _create_task_from_topic(self, topic, date_str: str):
+    def _pending_component_ids(self, scope_route) -> set[int]:
+        """跨日期的未完成 component（active / not_done）。"""
+        sql = (
+            "SELECT DISTINCT component_id FROM tasks "
+            "WHERE component_id IS NOT NULL "
+            "AND status IN ('active','not_done')"
+        )
+        args: tuple = ()
+        if scope_route is not None:
+            sql += " AND route_id = ?"
+            args = (int(scope_route),)
+        try:
+            rows = self.repo.conn.execute(sql, args).fetchall()
+        except Exception:  # noqa: BLE001
+            return set()
+        return {int(r[0]) for r in rows if r[0] is not None}
+
+    def _create_task_from_topic(
+        self, topic, date_str: str, component=None, activity_kind=None
+    ):
         """把一个主题落成 tasks 表中的一条任务（description 用可执行学习内容）。"""
         from .task_content import build_topic_task_content
-        from .task_service import TaskService
 
-        # 直接走 repository（等价于 TaskService.create_task 的底层），
-        # 保留 source='generated' 与 topic_id 关联，且与 TaskService 兼容。
+        title = topic.name
         task = self.repo.create(
-            title=topic.name,
+            title=title,
             scheduled_date=date_str,
-            description=build_topic_task_content(topic.name, topic.description),
+            description=build_topic_task_content(
+                topic.name, topic.description, activity_kind=activity_kind
+            ),
             category="学习",
             estimated_minutes=topic.estimated_minutes,
             priority=topic.priority,
@@ -597,17 +679,26 @@ class StudyPlanService:
             topic_id=topic.id,
             route_id=self.plan_repo.get_route_id_for_topic(topic.id)
             or self._resolved_route_id(),
+            component_id=(component["id"] if component else None),
+            learning_activity_kind=activity_kind,
         )
         # 新建正式任务即建立 topic -> knowledge_point -> task 关联（幂等）
         return self.link_task_knowledge_point(task, topic)
 
     def _done_topic_ids(self) -> set[int]:
-        """返回所有已完成过的主主题 id。"""
+        """返回所有已完成过的主主题 id（legacy 语义，仅 task done）。"""
         rows = self.repo.conn.execute(
             "SELECT DISTINCT topic_id FROM tasks WHERE status = ? AND topic_id IS NOT NULL",
             (STATUS_DONE,),
         ).fetchall()
         return {r["topic_id"] for r in rows}
+
+    def _curriculum_complete_topic_ids(self) -> set[int]:
+        """Component-aware curriculum 完成集合（无 profile 时回退 legacy）。"""
+        try:
+            return self._tl().curriculum_complete_topic_ids()
+        except Exception:  # noqa: BLE001 - 任何异常回退旧语义，不阻断规划
+            return self._done_topic_ids()
 
     # ================= 技能视图（Phase C） =================
 

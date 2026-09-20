@@ -84,14 +84,37 @@ class AssessmentService:
             raise RuntimeError("AssessmentService 未注入 assessment_repo")
         return self.assessment_repo
 
+    def _task_activity_kind(self, task_id: int) -> str | None:
+        """读取 task 的 learning_activity_kind（仅供出题 context，不改评分）。"""
+        repo = self.assessment_repo
+        conn = getattr(repo, "conn", None)
+        if conn is None:
+            return None
+        try:
+            row = conn.execute(
+                "SELECT learning_activity_kind FROM tasks WHERE id = ?",
+                (int(task_id),),
+            ).fetchone()
+        except Exception:  # noqa: BLE001
+            return None
+        if row is None:
+            return None
+        return row[0] if not isinstance(row, dict) else row.get(
+            "learning_activity_kind"
+        )
+
     # ================= 出题（Phase 3C 延续） =================
 
     def generate_questions(
         self,
         knowledge_point,
         num_questions: int = 4,
+        activity_kind: str | None = None,
     ) -> AssessmentQuestionSet:
-        """为给定知识点生成一组客观验收题（不落库、不判题）。"""
+        """为给定知识点生成一组客观验收题（不落库、不判题）。
+
+        :param activity_kind: 本次学习方式（仅作为出题 context，不改评分算法）。
+        """
         data = _as_knowledge_dict(knowledge_point)
         name = (data.get("name") or "").strip() if isinstance(data, dict) else ""
         if not name:
@@ -107,7 +130,9 @@ class AssessmentService:
         )
         user_prompt = render_prompt(
             "assessment.generate.user",
-            build_assessment_generate_vars(name, description, target),
+            build_assessment_generate_vars(
+                name, description, target, activity_kind
+            ),
             self.prompt_registry,
         )
 
@@ -130,9 +155,12 @@ class AssessmentService:
         knowledge_point_id: int,
         task_id: int | None = None,
         num_questions: int = 4,
+        activity_kind: str | None = None,
     ) -> dict:
         """生成验收题并创建一条 pending 的 assessment_attempts 记录。
 
+        :param activity_kind: 显式指定学习方式；未给且 task_id 有效时，
+            自动读取 task.learning_activity_kind（仅影响出题 context）。
         :return: attempt dict（含 id / knowledge_point_id / task_id /
             questions_json / judge_status）；额外附 questions 字段便于展示。
         """
@@ -141,7 +169,12 @@ class AssessmentService:
         if kp is None:
             raise ValueError(f"知识点不存在: id={knowledge_point_id}")
 
-        question_set = self.generate_questions(kp, num_questions=num_questions)
+        if activity_kind is None and task_id is not None:
+            activity_kind = self._task_activity_kind(task_id)
+
+        question_set = self.generate_questions(
+            kp, num_questions=num_questions, activity_kind=activity_kind
+        )
         attempt = repo.create_attempt(
             knowledge_point_id=knowledge_point_id,
             questions_json=question_set.questions_json(),
