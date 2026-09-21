@@ -20,10 +20,19 @@ from ..database.study_plan_repository import StudyPlan, StudyPlanRepository
 # 默认每日自主学习时间预算（分钟）
 MAX_DAILY_STUDY_MINUTES = 180
 
-# 长期学习路线的默认阶段/主题种子（与 docs/career_context.json 的 skill_roadmap 对齐）。
-# Phase1 保留历史名称与主题，以兼容已有完成任务的主题关联；
-# 后续阶段按 career_context 的“阶段二~五”展开为可跟踪主题。
-_DEFAULT_PHASES = [
+# ============================================================
+# LEGACY COMPATIBILITY ONLY
+# ============================================================
+# 旧单体学习路线「搜广推 + LLM」的默认阶段/主题种子。
+#
+# 现行课程定义在 app/services/canonical_routes.py（R1–R6）。
+# 本常量只用于：
+#   - 旧 DB 首次初始化（canonical 尚未建立时的一次性 seed）；
+#   - 旧 DB recovery / migration 兼容。
+#
+# 一旦 canonical R1–R6 已存在，ensure_default_plan() 不会再创建 / 恢复 /
+# 激活本 legacy 计划（见 StudyPlanService._canonical_routes_present）。
+LEGACY_DEFAULT_PHASES = [
     {
         "name": "Python + Linux + Git",
         "desc": "编程与开发环境基础（工程底座）",
@@ -134,7 +143,7 @@ _DEFAULT_PHASES = [
     },
 ]
 
-_EXPECTED_PHASE_NAMES = tuple(p["name"] for p in _DEFAULT_PHASES)
+_EXPECTED_PHASE_NAMES = tuple(p["name"] for p in LEGACY_DEFAULT_PHASES)
 
 # 新增「阶段四：推荐 / 搜索系统基础」后，把旧的后两个阶段改名（保留 phase_id/topics）。
 _LEGACY_PHASE_RENAMES = {
@@ -194,32 +203,73 @@ class StudyPlanService:
             )
         return self.topic_learning_service
 
+    def _route_repo(self):
+        """惰性返回 LearningRouteRepository（无路线表时返回 None）。"""
+        repo = self.learning_route_repo
+        if repo is not None:
+            return repo
+        try:
+            from ..database.learning_route_repository import (
+                LearningRouteRepository,
+            )
+
+            return LearningRouteRepository(self.repo.conn)
+        except Exception:  # noqa: BLE001 - 无路线表时不阻塞旧行为
+            return None
+
+    @staticmethod
+    def _route_is_canonical(route) -> bool:
+        """是否为 canonical R1–R6 路线（稳定 route_key 前缀）。"""
+        key = str(getattr(route, "route_key", "") or "")
+        return bool(key) and key[0] == "R" and key[1:2].isdigit()
+
+    def _canonical_routes_present(self) -> bool:
+        """canonical R1–R6 是否已建立（决定是否还允许 legacy seed）。"""
+        repo = self._route_repo()
+        if repo is None:
+            return False
+        try:
+            for route in repo.list_learning_routes():
+                if self._route_is_canonical(route):
+                    return True
+        except Exception:  # noqa: BLE001
+            return False
+        return False
+
     def _resolved_route_id(self) -> int | None:
-        """解析本 Service 服务的 route_id（显式优先，其次系统默认 learning route）。"""
+        """解析本 Service 服务的 route_id。
+
+        优先级：
+        1. 显式构造时传入的 route_id；
+        2. 单 active plan 兼容（旧 DB / 旧测试库）；
+        3. 否则返回 None（“未指定路线”）。
+
+        绝不隐式回退到旧「搜广推 + LLM」默认路线：Multi-Route 体系下，
+        生产规划路径必须显式绑定 route_id。
+        """
         if self.route_id is not None:
             return self.route_id
         if self._route_resolved:
             return self._resolved_route_id_cache
         self._route_resolved = True
-        repo = self.learning_route_repo
-        if repo is None:
-            try:
-                from ..database.learning_route_repository import (
-                    LearningRouteRepository,
-                )
-
-                repo = LearningRouteRepository(self.repo.conn)
-            except Exception:  # noqa: BLE001 - 无路线表时不阻塞旧行为
-                repo = None
+        self._resolved_route_id_cache = None
+        # canonical R1–R6 已存在 → 不再猜默认路线
+        if self._canonical_routes_present():
+            return None
+        # legacy 兼容：唯一的 system learning route（v12 seed）作为旧行为绑定
+        repo = self._route_repo()
         if repo is not None:
             try:
-                default = repo.get_default_learning_route()
-                self._resolved_route_id_cache = (
-                    default.id if default is not None else None
-                )
+                system = [
+                    r for r in repo.list_learning_routes()
+                    if getattr(r, "source", "") == "system"
+                ]
+                if len(system) == 1:
+                    self._resolved_route_id_cache = int(system[0].id)
+                    return self._resolved_route_id_cache
             except Exception:  # noqa: BLE001
-                self._resolved_route_id_cache = None
-        return self._resolved_route_id_cache
+                pass
+        return None
 
     def is_planning_enabled(self) -> bool:
         """当前路线的自动规划是否启用。
@@ -250,13 +300,18 @@ class StudyPlanService:
 
     # ================= 默认研一计划 =================
 
-    def ensure_default_plan(self) -> StudyPlan:
-        """确保默认计划存在并与长期学习路线一致（幂等）。
+    def ensure_default_plan(self) -> StudyPlan | None:
+        """确保 legacy 默认计划存在（幂等）；canonical 已接管时不再 seed。
 
-        首次运行：创建计划 + 全量种子。
-        之后每次运行：对已有计划就地同步（更新/补齐阶段与主题，并移除
-        没有任务引用的过期阶段），绝不触碰历史任务。
+        LEGACY COMPATIBILITY ONLY：
+        - canonical R1–R6 已存在 → 直接返回现有 legacy plan（或 None），
+          绝不创建 / 恢复 / 激活旧「搜广推 + LLM」计划；
+        - 仅在旧 DB（canonical 尚未建立）时执行一次性 seed / 就地同步。
         """
+        if self._canonical_routes_present():
+            return self.plan_repo.get_active_plan(
+                route_id=self._resolved_route_id()
+            )
         existing = self.plan_repo.get_active_plan(
             route_id=self._resolved_route_id()
         )
@@ -286,8 +341,8 @@ class StudyPlanService:
         return plan
 
     def _seed_phases_and_topics(self, plan_id: int) -> None:
-        """按 _DEFAULT_PHASES 写入阶段与主题（仅新建计划时使用）。"""
-        for spec in _DEFAULT_PHASES:
+        """按 LEGACY_DEFAULT_PHASES 写入阶段与主题（仅 legacy 新建计划时使用）。"""
+        for spec in LEGACY_DEFAULT_PHASES:
             phase = self.plan_repo.create_phase(
                 plan_id=plan_id,
                 name=spec["name"],
@@ -302,7 +357,7 @@ class StudyPlanService:
     # ---------- 计划同步（把旧 DB 计划对齐到长期学习路线） ----------
 
     def _reconcile_plan(self, plan: StudyPlan) -> None:
-        """把已有计划就地同步到 _DEFAULT_PHASES（幂等，不触碰任务历史）。
+        """把已有计划就地同步到 LEGACY_DEFAULT_PHASES（幂等，不触碰任务历史）。
 
         - 对每个预期阶段/主题按 name 做 upsert（不存在创建、存在更新）；
         - 先把旧阶段名（阶段四/五）改名为阶段五/六，保留 phase_id 与 topics；
@@ -316,7 +371,7 @@ class StudyPlanService:
             ) is None:
                 self.plan_repo.update_phase(old.id, name=new_name)
 
-        for spec in _DEFAULT_PHASES:
+        for spec in LEGACY_DEFAULT_PHASES:
             phase = self._find_phase_by_name(plan.id, spec["name"])
             if phase is None:
                 phase = self.plan_repo.create_phase(

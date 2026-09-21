@@ -91,17 +91,14 @@ class AssessmentRepository:
         ).fetchone()
         return _row(row)
 
-    def get_knowledge_point_by_name(self, name: str) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM knowledge_points WHERE name = ? ORDER BY id ASC LIMIT 1",
-            (name,),
-        ).fetchone()
-        return _row(row)
-
     def get_knowledge_point_by_name_and_route(
         self, name: str, route_id: int | None
     ) -> dict | None:
-        """按 (规范化 name, route_id) 精确查找（Phase C 多路线唯一性）。"""
+        """按 (规范化 name, route_id) 精确查找（Phase C 多路线唯一性）。
+
+        注意：正式 knowledge_point identity 必须使用 kp_id / topic_id / route_id；
+        **禁止**任何全局按 name 的 identity lookup（已删除旧 get_knowledge_point_by_name）。
+        """
         if route_id is None:
             row = self.conn.execute(
                 "SELECT * FROM knowledge_points WHERE name = ? "

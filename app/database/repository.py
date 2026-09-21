@@ -299,10 +299,12 @@ class TaskRepository:
         """新增一条任务，返回带 id 的 Task。
 
         :param source: 任务来源（manual=手动 / generated=学习计划自动生成 /
-            review=复习任务 / extra=额外学习）
+            review=复习任务；LEGACY COMPATIBILITY ONLY: extra=已移除的额外学习，
+            仅用于读取/过滤历史行，无创建入口）
         :param topic_id: 关联的 study_topics 主题 id（自动生成任务使用）
-        :param task_type: 任务性质（new / review / extra；Phase 11 起也允许
-            project / experiment，无数据库 CHECK 约束）
+        :param task_type: 任务性质（new / review；LEGACY COMPATIBILITY ONLY:
+            extra=已移除的额外学习，仅历史行；Phase 11 起也允许 project /
+            experiment，无数据库 CHECK 约束）
         :param knowledge_point_id: 关联的知识点 id（复习任务使用）
         :param difficulty: 难度（basic / practice / challenge，额外任务用）
         :param project_name/project_repo/deliverable/acceptance_criteria/

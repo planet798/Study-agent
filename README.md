@@ -359,3 +359,50 @@ Project Skill / Activity / Curriculum / Mastery / Review / Planner / Scheduler
   Capability 仍只由真实证据推导；三者继续独立；
 - 不为项目单独分配每日预算；不自动创建 requirement / project / evidence；
 - 没有 requirement 的 Project Topic 只是项目关联，不产生 Planner blocker。
+
+## v1 Stabilization：发布工具与 legacy 边界
+
+### Planner Diagnostic（只读）
+
+```bash
+python -m app.main planner-diagnostic --db "...\\study_agent.db" [--route R3_LLM_INFRA] [--date YYYY-MM-DD] [--json]
+```
+
+逐条 active route 打印确定性 planner 状态：priority / planning_enabled /
+current phase / legal topics（next activity · Tier · reasons · market factor）/
+最终 `candidate_topic_ids`。**不创建 Task、不写 planner_decisions、不调用 AI、
+不输出 secret / private URI / Output details。** 用于回答“今天为什么安排这个”，
+排查时先看确定性状态，再怀疑 LLM Prompt。
+
+### 正式库逐级迁移（Windows）
+
+```bash
+# 1) 备份（不覆盖，带时间戳）
+python -m app.main db-release backup --db "D:\\Projects\\study-agent\\data\\study_agent.db"
+
+# 2) 迁移前只读盘点（不会迁移 schema）
+python -m app.main db-release inventory --db "...\\study_agent.db" --save before.json
+
+# 3) 逐级迁移 v14→v20 + canonical seed（可选 capability backfill）
+python -m app.main db-release migrate --db "...\\study_agent.db" --before before.json --apply-capability
+
+# 4) 完整性校验（route / evidence / before-after 行数）
+python -m app.main db-release verify --db "...\\study_agent.db" --before before.json
+```
+
+- inventory/verify 使用 SQLite read-only 连接，零写入；
+- `migrate` 逐级执行 v15→v20 并打印每级版本，canonical seed/迁移遇 conflict 立即停止；
+- v20 不自动创建任何 Project / Requirement / PROJECT evidence。
+
+### Legacy 边界（v1 stabilization）
+
+- 生产规划链（Scheduler / DailyPlanner / StudyPlan / Route UI / PlannerFeedback）
+  **不再调用** `get_default_learning_route`；只保留 migration / legacy compatibility /
+  old DB recovery 调用（`route_migration_service` 与 deprecated wrapper）；
+- `study_plan_service` 的旧「搜广推 + LLM」阶段种子已重命名为
+  `LEGACY_DEFAULT_PHASES`（LEGACY COMPATIBILITY ONLY）；canonical R1–R6 一旦存在，
+  `ensure_default_plan()` 不再创建 / 恢复 / 激活该 legacy 计划；
+- 全局按 name 的 KP lookup（`get_knowledge_point_by_name`）已删除；正式 identity
+  一律使用 `kp_id` / `topic_id` / `route_id`；
+- `task_type='extra'` / `source='extra'` 仅剩 legacy 清理与过滤，**无生产创建入口**；
+  `exploration / 额外学习 / 课外探索` 无任何生产 service / UI / prompt 入口。

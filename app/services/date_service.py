@@ -74,8 +74,9 @@ class DateService:
             "legacy_extra_cancelled": 0,
         }
 
-        # legacy cleanup（幂等）：已移除“额外学习”功能，历史 active extra 任务
+        # LEGACY COMPATIBILITY ONLY：已移除“额外学习”功能，历史 active extra 任务
         # 安全转为 cancelled（不删除），避免旧功能遗留任务阻塞启动/补确认。
+        # 已无任何生产路径可以创建 extra / exploration 任务。
         result["legacy_extra_cancelled"] = \
             self._cancel_legacy_extra_tasks()
 
@@ -127,10 +128,11 @@ class DateService:
     # ---------- 内部扩展点 ----------
 
     def _cancel_legacy_extra_tasks(self) -> int:
-        """幂等：把历史遗留的 active extra 任务转为 cancelled（不物理删除）。
+        """LEGACY COMPATIBILITY ONLY：把历史遗留 active extra 转为 cancelled。
 
         - 已 done / not_done / cancelled 的 extra 不动；
-        - 只改 status/updated_at，保留历史 task / kp / assessment / outcome 引用。
+        - 只改 status/updated_at，保留历史 task / kp / assessment / outcome 引用；
+        - “额外学习 / 课外探索” 已无任何生产创建入口，本方法只做幂等清理。
         """
         from ..database.schema import STATUS_CANCELLED
         from ..utils.date_utils import now_iso

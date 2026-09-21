@@ -1388,6 +1388,15 @@ def migrate(conn) -> int:
 
     迁移失败时 user_version 停留在失败前版本，下次启动会因幂等迁移自动重试。
     """
+    return migrate_stepwise(conn)
+
+
+def migrate_stepwise(conn, target: int | None = None, on_step=None) -> int:
+    """逐级迁移并在每级后调用 on_step(version)（供诊断/发布工具）。
+
+    行为与 migrate() 完全一致，只是把每一步暴露出来以便打印/校验。
+    """
+    target = SCHEMA_VERSION if target is None else int(target)
     create_schema(conn)
 
     current = get_schema_version(conn)
@@ -1396,7 +1405,7 @@ def migrate(conn) -> int:
         current = 1
         _set_user_version(conn, current)
 
-    for version in range(current + 1, SCHEMA_VERSION + 1):
+    for version in range(current + 1, target + 1):
         fn = _MIGRATIONS.get(version)
         if fn is None:
             raise RuntimeError(
@@ -1404,5 +1413,7 @@ def migrate(conn) -> int:
             )
         fn(conn)
         _set_user_version(conn, version)
+        if on_step is not None:
+            on_step(version)
 
     return get_schema_version(conn)

@@ -274,12 +274,11 @@ class LearningRouteRepository:
         return [self._from_row(r) for r in rows]
 
     def get_default_learning_route(self) -> LearningRoute | None:
-        """[DEPRECATED / legacy] 系统默认 learning route（搜广推 + LLM）。
+        """[DEPRECATED / LEGACY COMPATIBILITY ONLY] 旧默认 learning route。
 
-        新体系是 Multi-Route，没有业务意义上的“唯一默认路线”。
-        本方法**仅用于** legacy compatibility / 历史 migration /
-        尚未升级的旧调用；新 production code 必须使用 :meth:`get_by_key` /
-        canonical route 集合，不得依赖“默认路线”。
+        仅允许 migration / legacy compatibility / old DB recovery 调用。
+        生产规划链（Scheduler / DailyPlanner / StudyPlan / Route UI）不得调用。
+        新 production code 必须使用 :meth:`get_by_key` / canonical route 集合。
         """
         row = self.conn.execute(
             "SELECT * FROM learning_routes WHERE name = ? "

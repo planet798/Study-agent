@@ -112,9 +112,12 @@ class DailyPlannerService:
     def _allowed_skill_names(self) -> set[str] | None:
         """本路线允许影响 Planner 的技能名集合。
 
-        - None：不做限制（默认路线且无显式 route_skills 绑定 → 保留旧行为）；
-        - set()：完全无技能信号（非默认路线且未绑定任何 skill）；
+        - None：不做限制（**legacy 未建 canonical 的路线**且无 route_skills 绑定）；
+        - set()：canonical 路线但未绑定任何 skill（无技能信号）；
         - 非空 set：只允许 route_skills 中显式绑定的技能。
+
+        注意：不再依赖旧「默认路线」判定；canonical 路线（有 route_key）
+        一律按 route_skills 严格限定，绝不隐式放行全部技能。
         """
         binding = self.route_skill_ids()
         route_id = self._route_id()
@@ -122,14 +125,25 @@ class DailyPlannerService:
         if repo is None or route_id is None:
             # 无法读取路线/route_skills（旧调用）→ 不限制，保持旧行为
             return None
-        is_default = False
+        is_legacy_default = True
         try:
-            default = repo.get_default_learning_route()
-            is_default = default is not None and default.id == route_id
+            route = repo.get(route_id)
+            key = str(getattr(route, "route_key", "") or "")
+            is_canonical = len(key) >= 2 and key[0] == "R" and key[1].isdigit()
+            if is_canonical:
+                is_legacy_default = False
+            else:
+                system = [
+                    r for r in repo.list_learning_routes()
+                    if getattr(r, "source", "") == "system"
+                ]
+                is_legacy_default = (
+                    len(system) == 1 and int(system[0].id) == int(route_id)
+                )
         except Exception:  # noqa: BLE001
-            is_default = False
+            is_legacy_default = True
         if not binding:
-            return None if is_default else set()
+            return None if is_legacy_default else set()
         names: set[str] = set()
         if self.skill_service is not None:
             for skill_id in binding:

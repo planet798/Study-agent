@@ -90,6 +90,7 @@ class PlannerFeedbackService:
         route_repo: LearningRouteRepository | None = None,
         skill_service=None,
         task_repo=None,
+        refresh_market_on_rank: bool = True,
     ):
         self.conn = conn
         self.readiness = readiness_service or PracticeReadinessService(conn)
@@ -97,6 +98,8 @@ class PlannerFeedbackService:
         self.route_repo = route_repo or LearningRouteRepository(conn)
         self.skill_service = skill_service
         self.task_repo = task_repo
+        # 只读诊断场景置 False：不触发 skill_service.refresh_market（会写 coverage）
+        self.refresh_market_on_rank = bool(refresh_market_on_rank)
 
     def _blocked_provider_for(self, study_plan_service):
         def provider(route_id, plan_date):
@@ -141,6 +144,7 @@ class PlannerFeedbackService:
             route_repo=self.route_repo,
             skill_service=self.skill_service,
             task_repo=self.task_repo,
+            refresh_market_on_rank=self.refresh_market_on_rank,
         )
 
     # ================= 学习时间 =================
@@ -203,6 +207,8 @@ class PlannerFeedbackService:
         return best_market, best_priority
 
     def _refresh_market(self, plan_date: str) -> None:
+        if not self.refresh_market_on_rank:
+            return
         if self.skill_service is None:
             return
         try:

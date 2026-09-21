@@ -28,7 +28,11 @@ from app.ai.long_term_context import load_long_term_context
 from app.ai.planner import AIPlanner
 from app.ai.prompt_registry import PromptOverrideRepository, PromptRegistry
 from app.ai.summary import AISummaryGenerator
-from app.database.connection import get_connection, resolve_db_path
+from app.database.connection import (
+    get_connection,
+    get_raw_connection,
+    resolve_db_path,
+)
 from app.database.repository import TaskRepository
 from app.database.study_plan_repository import (
     StudyPlanRepository,
@@ -656,6 +660,238 @@ def _run_capability_cli(argv) -> int:
         conn.close()
 
 
+def _run_planner_diagnostic_cli(argv) -> int:
+    """planner-diagnostic 子命令（只读）：
+
+      study-agent planner-diagnostic [--db PATH] [--date YYYY-MM-DD]
+                                     [--route ROUTE_KEY] [--json]
+
+    输出每条 active 学习路线的确定性 planner 状态（phase / legal topics /
+    next activity / Tier / reasons / candidate pool）。
+    **不创建 Task、不写 planner_decisions、不调用 AI、不输出 secret。**
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="study-agent planner-diagnostic",
+        description="只读打印 Planner 的确定性候选与优先级状态。",
+    )
+    parser.add_argument("--db", default=None)
+    parser.add_argument("--date", default=None)
+    parser.add_argument("--route", default=None, help="route_key，例如 R3_LLM_INFRA")
+    parser.add_argument("--json", action="store_true")
+    args, _ = parser.parse_known_args(argv)
+
+    from app.diagnostics.planner_diagnostic import (
+        format_planner_diagnostic,
+        run_planner_diagnostic,
+    )
+
+    conn = get_raw_connection(args.db)
+    try:
+        data = run_planner_diagnostic(
+            conn, plan_date=args.date, route_key=args.route
+        )
+        if args.json:
+            import json as _json
+
+            print(_json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(format_planner_diagnostic(data))
+        return 0
+    finally:
+        conn.close()
+
+
+def _run_db_release_cli(argv) -> int:
+    """db-release 子命令：正式 DB 备份 / 盘点 / 逐级迁移 / 完整性校验。
+
+    用法：
+      study-agent db-release backup     --db PATH [--out-dir DIR]
+      study-agent db-release inventory  --db PATH [--json] [--save SNAP.json]
+      study-agent db-release migrate    --db PATH [--apply-capability]
+                                        [--save-snapshot SNAP.json]
+      study-agent db-release verify     --db PATH [--before SNAP.json] [--json]
+    """
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="study-agent db-release",
+        description="Learning System v1 正式库迁移/校验工具（不调 AI）。",
+    )
+    parser.add_argument(
+        "action", choices=["backup", "inventory", "migrate", "verify"]
+    )
+    parser.add_argument("--db", required=True)
+    parser.add_argument("--out-dir", default=None)
+    parser.add_argument("--before", default=None)
+    parser.add_argument("--save", default=None)
+    parser.add_argument("--save-snapshot", default=None)
+    parser.add_argument("--apply-capability", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    args, _ = parser.parse_known_args(argv)
+
+    from app.diagnostics import release_migration as rm
+
+    if args.action == "backup":
+        path = rm.backup_database(args.db, out_dir=args.out_dir)
+        print(f"backup: {path}")
+        return 0
+
+    # inventory/verify 严格只读；migrate 使用不自动迁移的连接
+    if args.action in ("inventory", "verify"):
+        conn = get_raw_connection(args.db, read_only=True)
+    else:
+        conn = get_raw_connection(args.db)
+    try:
+        if args.action == "inventory":
+            data = rm.inventory(conn)
+            if args.save:
+                Path(args.save).write_text(rm.dumps(data), encoding="utf-8")
+                print(f"snapshot saved: {args.save}")
+            print(_json.dumps(data, ensure_ascii=False, indent=2)
+                  if args.json else _inventory_text(data))
+            return 0
+
+        if args.action == "migrate":
+            before = None
+            if args.before and Path(args.before).exists():
+                before = _json.loads(Path(args.before).read_text(encoding="utf-8"))
+            else:
+                before = rm.inventory(conn)
+            stats = _run_release_migrate(conn, apply_capability=args.apply_capability)
+            after = rm.inventory(conn)
+            report = {
+                "migration": stats,
+                "before": before,
+                "after": after,
+                "verify": rm.verify(conn, before=before),
+            }
+            if args.save_snapshot:
+                Path(args.save_snapshot).write_text(
+                    rm.dumps(after), encoding="utf-8"
+                )
+                print(f"snapshot saved: {args.save_snapshot}")
+            print(_json.dumps(report, ensure_ascii=False, indent=2)
+                  if args.json else _migrate_text(report))
+            return 0 if report["verify"]["ok"] else 1
+
+        # verify
+        before = None
+        if args.before and Path(args.before).exists():
+            before = _json.loads(Path(args.before).read_text(encoding="utf-8"))
+        result = rm.verify(conn, before=before)
+        print(_json.dumps(result, ensure_ascii=False, indent=2)
+              if args.json else _verify_text(result))
+        return 0 if result["ok"] else 1
+    finally:
+        conn.close()
+
+
+def _run_release_migrate(conn, apply_capability: bool = False) -> dict:
+    """schema 逐级迁移 → canonical seed/迁移（→ 可选 capability backfill）。"""
+    from app.database.assessment_repository import AssessmentRepository
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.database.learning_route_repository import LearningRouteRepository
+    from app.database.repository import TaskRepository
+    from app.database.schema import get_schema_version, migrate_stepwise
+    from app.database.skill_repository import SkillRepository
+    from app.database.study_plan_repository import StudyPlanRepository
+    from app.database.topic_learning_repository import (
+        TopicLearningComponentRepository,
+    )
+    from app.services.canonical_route_service import CanonicalRouteService
+    from app.services.capability_service import CapabilityService
+    from app.services.topic_learning_profile_service import (
+        TopicLearningProfileService,
+    )
+
+    steps: list[int] = []
+    version_before = get_schema_version(conn)
+    final = migrate_stepwise(conn, on_step=steps.append)
+    plan_repo = StudyPlanRepository(conn)
+    route_repo = LearningRouteRepository(conn)
+    skill_repo = SkillRepository(conn)
+    tl = TopicLearningProfileService(
+        conn, TopicLearningComponentRepository(conn)
+    )
+    canonical = CanonicalRouteService(
+        conn, route_repo, plan_repo, skill_repo,
+        topic_learning_service=tl,
+    ).ensure_all()
+    mig = canonical.get("migration") or {}
+    conflicts = int(mig.get("conflicts") or 0)
+    if conflicts:
+        raise RuntimeError(
+            f"六路线迁移存在 conflicts={conflicts}，已停止（请先人工处理）"
+        )
+    cap_stats = None
+    if apply_capability:
+        svc = CapabilityService(conn, CapabilityEvidenceRepository(conn))
+        preview = svc.preview()
+        if preview.get("conflicts"):
+            raise RuntimeError(
+                f"capability backfill 存在 conflicts={preview['conflicts']}，已停止"
+            )
+        cap_stats = svc.backfill()
+    return {
+        "schema_version_before": version_before,
+        "schema_version_after": final,
+        "steps": steps,
+        "routes": canonical.get("route_ids"),
+        "migration": mig,
+        "route_skill_links": canonical.get("route_skill_links"),
+        "topic_skill_links": canonical.get("topic_skill_links"),
+        "capability_backfill": cap_stats,
+    }
+
+
+def _inventory_text(data: dict) -> str:
+    lines = [f"schema_version: {data.get('schema_version')}", "counts:"]
+    for k, v in (data.get("counts") or {}).items():
+        lines.append(f"  {k}: {v}")
+    for k in ("tasks_done", "mastery_nonzero", "tasks_null_route",
+              "kp_null_route", "legacy_route", "legacy_topic_count",
+              "duplicate_active_plans", "same_name_kp_conflicts"):
+        if data.get(k) is not None:
+            lines.append(f"{k}: {data.get(k)}")
+    lines.append(f"canonical_route_keys: {data.get('canonical_route_keys')}")
+    return "\n".join(lines)
+
+
+def _migrate_text(report: dict) -> str:
+    m = report["migration"]
+    lines = [
+        f"schema: v{m['schema_version_before']} → v{m['schema_version_after']}",
+        f"steps: {m['steps']}",
+        f"routes: {m['routes']}",
+        f"route_skills: +{m.get('route_skill_links')}",
+        f"topic_skill_links: +{m.get('topic_skill_links')}",
+        f"migration: {m.get('migration')}",
+        f"capability_backfill: {m.get('capability_backfill')}",
+    ]
+    v = report["verify"]
+    lines.append(f"verify.ok: {v['ok']}")
+    if v["route_problems"]:
+        lines.append(f"route_problems: {v['route_problems']}")
+    if v["evidence_problems"]:
+        lines.append(f"evidence_problems: {v['evidence_problems']}")
+    if v["history_decreases"]:
+        lines.append(f"history_decreases: {v['history_decreases']}")
+    return "\n".join(lines)
+
+
+def _verify_text(result: dict) -> str:
+    lines = [f"schema_version: {result['schema_version']}",
+             f"verify.ok: {result['ok']}"]
+    lines.append(f"route_problems: {result['route_problems']}")
+    lines.append(f"evidence_problems: {result['evidence_problems']}")
+    if result.get("before"):
+        lines.append(f"history_decreases: {result['history_decreases']}")
+    return "\n".join(lines)
+
+
 def main() -> int:
     # 0) 子命令：不进 GUI
     if "add-jd-summary" in sys.argv[1:]:
@@ -670,6 +906,10 @@ def main() -> int:
         return _run_six_routes_cli(sys.argv[2:])
     if "capability-backfill" in sys.argv[1:]:
         return _run_capability_cli(sys.argv[2:])
+    if "planner-diagnostic" in sys.argv[1:]:
+        return _run_planner_diagnostic_cli(sys.argv[2:])
+    if "db-release" in sys.argv[1:]:
+        return _run_db_release_cli(sys.argv[2:])
     # 1) 解析 --date（仅开发/测试）：注入“今天”。
     #    只在内存层面覆盖 date_utils.today()，不写数据库、不改系统时间；
     #    不传 --date 时保持默认（系统真实日期）。

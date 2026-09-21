@@ -1513,12 +1513,17 @@ class MainWindow(QMainWindow):
             return False
 
     def _planning_route_name(self) -> str:
+        """当前规划路线名；不隐式回退到旧默认路线。"""
         if self.route_service is None:
             return "当前学习路线"
         try:
-            default = self.route_service.route_repo.get_default_learning_route()
-            if default is not None:
-                return default.name
+            route_id = None
+            if self.study_plan_service is not None:
+                route_id = self.study_plan_service._resolved_route_id()
+            if route_id is not None:
+                route = self.route_service.route_repo.get(route_id)
+                if route is not None:
+                    return route.name
         except Exception:  # noqa: BLE001
             pass
         return "当前学习路线"
