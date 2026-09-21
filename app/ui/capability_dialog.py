@@ -88,14 +88,13 @@ class CapabilityEvidenceDialog(QDialog):
             f"当前能力：{cap['label']}（{cap['name']}）"
         )
         evidence = service.list_evidence(kp_id)
-        active = [e for e in evidence if e["is_active"]]
-        if not active:
+        if not evidence:
             empty = QLabel("暂无能力证据")
             empty.setObjectName("EmptyHint")
             self.body_layout.addWidget(empty)
             self.body_layout.addStretch()
             return
-        for e in active:
+        for e in evidence:
             self._add_evidence_block(e)
         self.body_layout.addStretch()
 
@@ -103,6 +102,7 @@ class CapabilityEvidenceDialog(QDialog):
         level = int(e["capability_level"])
         desc = e.get("description") or ""
         ts = (e.get("created_at") or "")[:10]
+        active = bool(e.get("is_active"))
         if e.get("evidence_type") == EVIDENCE_TYPE_PRACTICE_PROJECT \
                 and self.practice_capability_service is not None:
             pte_id = e.get("practice_topic_evidence_id")
@@ -110,25 +110,42 @@ class CapabilityEvidenceDialog(QDialog):
                 if pte_id else None
             if info is not None:
                 outputs = " · ".join(info.get("output_labels") or [])
-                block = QLabel(
-                    f"{ts}\n已在真实项目中使用\n"
-                    f"来源：{info.get('project_name') or '—'}\n"
-                    f"项目使用：{info.get('usage_description') or '—'}\n"
-                    f"支撑产出：{outputs or '—'}"
-                )
+                if active:
+                    head = "已在真实项目中使用"
+                else:
+                    head = "PROJECT（已撤销）"
+                lines = [ts, head,
+                         f"来源：{info.get('project_name') or '—'}",
+                         f"项目使用：{info.get('usage_description') or '—'}",
+                         f"支撑产出：{outputs or '—'}"]
+                route_name = info.get("route_name") or ""
+                if route_name:
+                    lines.append(f"Route：{route_name}")
+                if not active:
+                    lines.append(
+                        f"撤销时间：{(info.get('revoked_at') or '')[:10] or '—'}"
+                    )
+                    lines.append(
+                        f"撤销原因：{info.get('revocation_reason') or '—'}"
+                    )
+                block = QLabel("\n".join(lines))
                 block.setObjectName("TaskMeta")
                 block.setWordWrap(True)
                 self.body_layout.addWidget(block)
-                revoke = QPushButton("撤销证据")
-                revoke.setObjectName("SecondaryButton")
-                revoke.clicked.connect(
-                    lambda _=False, pte=pte_id: self._revoke_practice(pte)
-                )
-                self.body_layout.addWidget(revoke)
+                if active:
+                    revoke = QPushButton("撤销证据")
+                    revoke.setObjectName("SecondaryButton")
+                    revoke.clicked.connect(
+                        lambda _=False, pte=pte_id: self._revoke_practice(pte)
+                    )
+                    self.body_layout.addWidget(revoke)
                 return
-        block = QLabel(
-            f"{ts}\n{capability_label(level)}\n来源：{e.get('evidence_type')}\n{desc}"
-        )
+        head = capability_label(level) if active else f"{capability_label(level)}（已撤销）"
+        lines = [ts, head, f"来源：{e.get('evidence_type')}", desc]
+        if not active:
+            lines.append(f"撤销时间：{(e.get('revoked_at') or '')[:10] or '—'}")
+            lines.append(f"撤销原因：{e.get('revocation_reason') or '—'}")
+        block = QLabel("\n".join(x for x in lines if x))
         block.setObjectName("TaskMeta")
         block.setWordWrap(True)
         self.body_layout.addWidget(block)

@@ -1,4 +1,4 @@
-"""PracticeProjectService（Phase 4）。
+"""PracticeProjectService（Phase 4 / Phase 5.1）。
 
 职责：
 - PracticeProject CRUD / status / archive / restore / delete 保护；
@@ -14,6 +14,13 @@ Phase 5 追加保护：
 - Output 被 active PracticeTopicEvidence 引用时：禁止删除、锁定关键字段修改；
 - Topic 存在 active evidence 时禁止解除关联；
 - 项目只要产生过 PracticeTopicEvidence（含已撤销历史）就禁止物理删除。
+
+Phase 5.1（Historical Integrity）：
+- 只要 Output 曾被**任意** evidence（含已撤销）引用，就禁止物理删除；
+  且 `output_type / description / uri / details` 永久冻结（仅允许改 `title`）；
+- 只要 Project/Topic 存在过任意 evidence（含 revoked），就禁止移除该 Topic 关联，
+  从而对应 Route 关联也无法被拆掉；
+- revoke 仅表示“不再参与 current capability”，不代表历史不存在。
 """
 
 from __future__ import annotations
@@ -318,6 +325,11 @@ class PracticeProjectService:
                 "该 Topic 存在生效的项目使用证据，不能解除关联；"
                 "请先撤销对应能力证据。"
             )
+        if self.evidence_repo.has_any_topic_reference(project_id, topic_id):
+            raise PracticeError(
+                "该 Topic 曾产生项目能力证据（含已撤销历史），"
+                "为保留历史证据链不能解除关联。"
+            )
         return self.projects.remove_topic(project_id, topic_id)
 
     def set_topics(self, project_id: int, topic_ids: list[int]) -> dict:
@@ -331,6 +343,11 @@ class PracticeProjectService:
             if self.evidence_repo.has_active_topic_reference(project_id, tid):
                 raise PracticeError(
                     "被移除的 Topic 存在生效的项目使用证据，请先撤销能力证据。"
+                )
+            if self.evidence_repo.has_any_topic_reference(project_id, tid):
+                raise PracticeError(
+                    "被移除的 Topic 曾产生项目能力证据（含已撤销历史），"
+                    "为保留历史证据链不能移除。"
                 )
         try:
             self.conn.execute("BEGIN")
@@ -472,24 +489,23 @@ class PracticeProjectService:
             raise PracticeError("非法成果类型")
         _assert_no_secret(fields.get("uri"), fields.get("title"),
                           fields.get("description"))
-        if self.evidence_repo.has_active_output_reference(output_id):
+        if self.evidence_repo.has_any_output_reference(output_id):
             locked = [
                 k for k in self._EVIDENCE_LOCKED_OUTPUT_FIELDS
                 if k in fields
             ]
             if locked:
                 raise PracticeError(
-                    "该成果正在支持项目能力证据，不能修改类型 / 链接 / "
-                    "结构化信息 / 说明；请先撤销对应能力证据。"
+                    "该成果曾作为项目能力证据使用，类型 / 链接 / 结构化信息 / "
+                    "说明已永久冻结；为保留历史证据链不能修改（仅可改标题）。"
                 )
         return self.outputs.update(output_id, **fields)
 
     def delete_output(self, output_id: int) -> bool:
-        """Phase 5：被 active PracticeTopicEvidence 引用的成果禁止物理删除。"""
-        if self.evidence_repo.has_active_output_reference(output_id):
+        """历史完整性：曾被任意 PracticeTopicEvidence 引用（含已撤销）→ 禁止删除。"""
+        if self.evidence_repo.has_any_output_reference(output_id):
             raise PracticeError(
-                "该成果正在支持项目能力证据，不能删除；"
-                "请先撤销对应能力证据。"
+                "该成果曾作为项目能力证据使用，为保留历史证据链不能删除。"
             )
         return self.outputs.delete(output_id)
 

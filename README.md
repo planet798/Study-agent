@@ -310,9 +310,21 @@ Level 5 **只能**由实践项目的“项目使用证据”产生，且必须�
 - 已存在的 Phase 4 项目**不会自动 backfill**；
 - 撤销 = `is_active=0` + `revoked_at` + `revocation_reason`，历史行保留，
   并同步撤销对应 capability evidence；
-- 被 active evidence 引用的 Output 禁止删除、禁止修改类型/链接/详情/说明；
-  被引用的 Topic 关联禁止解除；项目只要产生过证据（含已撤销历史）禁止物理删除；
-- archive / reopen 项目不会撤销或降低已产生的历史能力证据。
+- **历史完整性（Phase 5.1）**：revoke 的语义是“不再参与 current capability”，
+  不是“历史上从未存在”。因此只要 Output / Project-Topic 曾经被任意
+  PracticeTopicEvidence 使用过（active 或 revoked）：
+  - Output 禁止物理删除；`output_type / description / uri / details_json`
+    永久冻结（仅允许改 `title`）；
+  - Project-Topic 关联禁止移除，其对应 Route 关联也不能因此被拆掉；
+  - Evidence Timeline 仍展示已撤销证据的创建/撤销时间、撤销原因、来源项目、
+    Topic 与当时关联的支撑产出；
+  - 从未被 evidence 使用过的 Output 仍按 Phase 4 原逻辑正常编辑/删除；
+- archive / reopen 项目不会撤销或降低已产生的历史能力证据；
+- 产生过证据（含已撤销历史）的项目禁止物理删除。
+
+> DB 层 `practice_topic_evidence_outputs.output_id` 仍为 `ON DELETE CASCADE`；
+> 历史完整性目前由 Service invariant 保证（生产代码永不删除被引用的 Output），
+> 并有测试锁定。Phase 5.1 不做危险的表重建。
 
 Project Skill / Activity / Curriculum / Mastery / Review / Planner / Scheduler
 均**不**因 PROJECT evidence 改变。

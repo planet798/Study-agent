@@ -668,6 +668,24 @@ class PracticeTopicEvidenceRepository:
         ).fetchone()
         return row is not None
 
+    def has_any_output_reference(self, output_id: int) -> bool:
+        """历史完整性：只要 **曾经** 被任意 evidence 使用过（active/revoked）。"""
+        row = self.conn.execute(
+            "SELECT 1 FROM practice_topic_evidence_outputs "
+            "WHERE output_id = ? LIMIT 1",
+            (int(output_id),),
+        ).fetchone()
+        return row is not None
+
+    def has_any_topic_reference(self, project_id: int, topic_id: int) -> bool:
+        """历史完整性：project/topic 只要出现过任意 evidence（含 revoked）。"""
+        row = self.conn.execute(
+            "SELECT 1 FROM practice_topic_evidence "
+            "WHERE project_id = ? AND topic_id = ? LIMIT 1",
+            (int(project_id), int(topic_id)),
+        ).fetchone()
+        return row is not None
+
     # ---------- knowledge_points（Phase 5 确定性路径） ----------
 
     def find_knowledge_point_by_topic(self, topic_id: int) -> Optional[dict]:

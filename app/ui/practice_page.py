@@ -484,11 +484,15 @@ class PracticeProjectDetailDialog(QDialog):
             else:
                 if c["eligible"]:
                     status = "可确认项目能力证据"
+                    if c.get("has_historical_evidence"):
+                        status = "曾有已撤销证据（可重新确认）"
                 else:
                     status = (
                         "尚未确认项目使用证据"
                         + (f"（{c['reason_label']}）" if c["reason_label"] else "")
                     )
+                    if c.get("has_historical_evidence"):
+                        status += "　曾有已撤销证据"
                 lbl = QLabel(f"{c['topic_name']}\n{status}")
                 row.addWidget(lbl, stretch=1)
                 btn = _secondary(

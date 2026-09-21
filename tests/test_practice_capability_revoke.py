@@ -104,15 +104,17 @@ class TestOutputProtection:
         out = env.service.update_output(r.repo["id"], title="新标题")
         assert out["title"] == "新标题"
 
-    def test_after_revoke_output_editable_and_deletable(
-        self, practice_capability_env
-    ):
+    def test_after_revoke_output_still_protected(self, practice_capability_env):
+        """Phase 5.1：历史完整性——撤销后仍冻结关键字段并禁止删除。"""
         env = practice_capability_env
         r = ready_lora(env)
         ev = create_evidence(env, r.project, r.lora, [r.repo["id"]])
         env.pc.revoke_project_topic_evidence(ev["id"], "r")
-        env.service.update_output(r.repo["id"], uri="https://x/new")
-        assert env.service.delete_output(r.repo["id"]) is True
+        with pytest.raises(PracticeError):
+            env.service.update_output(r.repo["id"], uri="https://x/new")
+        with pytest.raises(PracticeError):
+            env.service.delete_output(r.repo["id"])
+        assert env.service.outputs.get(r.repo["id"]) is not None
 
     def test_unreferenced_output_still_deletable(self, practice_capability_env):
         env = practice_capability_env
@@ -142,12 +144,14 @@ class TestRelationAndProjectProtection:
         with pytest.raises(PracticeError):
             env.service.set_topics(r.project["id"], [])
 
-    def test_remove_topic_allowed_after_revoke(self, practice_capability_env):
+    def test_remove_topic_still_blocked_after_revoke(self, practice_capability_env):
+        """Phase 5.1：历史 evidence 存在时，Topic 关联仍不可解除。"""
         env = practice_capability_env
         r = ready_lora(env)
         ev = create_evidence(env, r.project, r.lora, [r.repo["id"]])
         env.pc.revoke_project_topic_evidence(ev["id"], "r")
-        assert env.service.remove_topic(r.project["id"], r.lora.id) is True
+        with pytest.raises(PracticeError):
+            env.service.remove_topic(r.project["id"], r.lora.id)
 
     def test_project_with_evidence_history_cannot_be_deleted(
         self, practice_capability_env

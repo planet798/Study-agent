@@ -146,6 +146,10 @@ class PracticeCapabilityService:
     def has_active_output_reference(self, output_id: int) -> bool:
         return self.evidence_repo.has_active_output_reference(output_id)
 
+    def has_any_output_reference(self, output_id: int) -> bool:
+        """曾被任意 evidence（含已撤销）引用 —— 历史完整性保护。"""
+        return self.evidence_repo.has_any_output_reference(output_id)
+
     def count_created_between(self, start: str, end: str) -> int:
         return self.evidence_repo.count_created_between(start, end)
 
@@ -218,6 +222,11 @@ class PracticeCapabilityService:
                 "reason_label": reason_label(reason),
                 "has_active_evidence": active is not None,
                 "active_evidence_id": active["id"] if active else None,
+                "has_historical_evidence": (
+                    self.evidence_repo.has_any_topic_reference(
+                        project_id, topic_id
+                    )
+                ),
                 "qualifying_output_count": len(qualifying),
                 "output_count": len(outputs),
             })

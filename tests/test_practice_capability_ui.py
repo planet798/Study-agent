@@ -75,9 +75,12 @@ class TestProjectDetailEvidence:
         assert "✓ 已在真实项目中使用" in "\n".join(_labels(dlg))
         env.pc.revoke_project_topic_evidence(ev["id"], "r")
         dlg.refresh()
-        joined = "\n".join(_labels(dlg))
+        labels = _labels(dlg)
+        joined = "\n".join(labels)
         assert "✓ 已在真实项目中使用" not in joined
-        assert "撤销证据" not in joined
+        assert "曾有已撤销证据（可重新确认）" in joined
+        # 撤销按钮消失（精确匹配，避免匹配到“曾有已撤销证据”文案）
+        assert "撤销证据" not in labels
 
 
 class TestConfirmationDialog:

@@ -43,6 +43,16 @@ def _assert_near(w, before, *, tol=80):
     assert abs(after - before) <= tol, (after, before, bar.maximum())
 
 
+def _settle_and_assert(qtbot, w, before, *, tol=80):
+    """等待延迟恢复完成（prod 使用多帧 QTimer 重试）；满负载下布局会更慢。"""
+    bar = w.scroll.verticalScrollBar()
+    qtbot.waitUntil(
+        lambda: bar.maximum() > 0 and abs(bar.value() - before) <= tol,
+        timeout=3000,
+    )
+    _assert_near(w, before, tol=tol)
+
+
 class TestScrollPreservation:
     def test_complete_keeps_position(self, qtbot, make_window, task_service):
         w = _prepare(qtbot, make_window, task_service)
@@ -51,7 +61,7 @@ class TestScrollPreservation:
         qtbot.mouseClick(w._task_widgets[idx].complete_btn,
                          Qt.MouseButton.LeftButton)
         qtbot.wait(320)
-        _assert_near(w, before)
+        _settle_and_assert(qtbot, w, before)
 
     def test_not_done_keeps_position(self, qtbot, make_window, task_service,
                                      monkeypatch):
@@ -65,7 +75,7 @@ class TestScrollPreservation:
         qtbot.mouseClick(w._task_widgets[idx].not_done_btn,
                          Qt.MouseButton.LeftButton)
         qtbot.wait(320)
-        _assert_near(w, before)
+        _settle_and_assert(qtbot, w, before)
 
     def test_remove_keeps_position(self, qtbot, make_window, task_service):
         w = _prepare(qtbot, make_window, task_service)
@@ -104,7 +114,7 @@ class TestScrollPreservation:
         assert target is not None
         qtbot.mouseClick(target.complete_btn, Qt.MouseButton.LeftButton)
         qtbot.wait(320)
-        _assert_near(w, before)
+        _settle_and_assert(qtbot, w, before)
 
     def test_manual_task_mutation(self, qtbot, make_window, task_service):
         w = _prepare(qtbot, make_window, task_service)
@@ -113,7 +123,7 @@ class TestScrollPreservation:
         qtbot.mouseClick(w._task_widgets[idx].complete_btn,
                          Qt.MouseButton.LeftButton)
         qtbot.wait(320)
-        _assert_near(w, before)
+        _settle_and_assert(qtbot, w, before)
 
     def test_generated_task_mutation(self, qtbot, make_window, repo,
                                      task_service):
@@ -131,7 +141,7 @@ class TestScrollPreservation:
         qtbot.mouseClick(w._task_widgets[len(w._task_widgets) // 2].complete_btn,
                          Qt.MouseButton.LeftButton)
         qtbot.wait(320)
-        _assert_near(w, before)
+        _settle_and_assert(qtbot, w, before)
 
     def test_consecutive_clicks(self, qtbot, make_window, task_service):
         w = _prepare(qtbot, make_window, task_service)
@@ -143,7 +153,7 @@ class TestScrollPreservation:
                 break
             qtbot.mouseClick(widget.complete_btn, Qt.MouseButton.LeftButton)
             qtbot.wait(320)
-        _assert_near(w, before)
+        _settle_and_assert(qtbot, w, before)
 
     def test_top_stays_near_top(self, qtbot, make_window, task_service):
         w = _prepare(qtbot, make_window, task_service)

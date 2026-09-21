@@ -602,7 +602,7 @@ class MainWindow(QMainWindow):
                 pass
 
         _apply()
-        for delay in (0, 16, 60, 160):
+        for delay in (0, 16, 60, 160, 400, 800):
             QTimer.singleShot(delay, _apply)
 
     # ---------- Phase C：路线筛选 / 统计 ----------
