@@ -898,7 +898,14 @@ def migration_gate_status(db_path) -> dict:
         finally:
             conn.close()
     except sqlite3.Error:
-        return {"blocked": False, "version": None, "reason": "unreadable"}
+        # fail closed：已存在的 DB 无法安全读取 → 禁止自动迁移
+        return {
+            "blocked": True,
+            "version": None,
+            "target": SCHEMA_VERSION,
+            "db_path": str(path),
+            "reason": "unreadable_db",
+        }
     if version >= SCHEMA_VERSION:
         return {"blocked": False, "version": version, "reason": "current"}
     if version == 0 and not has_business:
@@ -914,6 +921,18 @@ def migration_gate_status(db_path) -> dict:
 
 def migration_gate_message(status: dict) -> str:
     db = status.get("db_path", "data/study_agent.db")
+    if status.get("reason") == "unreadable_db":
+        return (
+            "=" * 68 + "\n"
+            "数据库无法安全读取（read-only 探测失败）。\n"
+            "为避免在未知状态下自动迁移，GUI 启动已停止（fail closed）。\n\n"
+            "请先：\n"
+            "  1) 确认文件不是正在被其它进程占用（先关闭旧实例）；\n"
+            "  2) 从备份恢复，或人工检查数据库文件完整性；\n"
+            "  3) 用命令行复查：\n"
+            f'     python -m app.main db-release inventory --db "{db}"\n'
+            + "=" * 68
+        )
     v = status.get("version")
     target = status.get("target")
     return (

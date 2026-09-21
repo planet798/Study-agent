@@ -409,6 +409,31 @@ python -m app.main db-release verify --db "...\\study_agent.db" --before before.
 新库（文件不存在/空库）与已是最新版本不受影响。开发/测试可用
 `--allow-auto-migrate`（或 `STUDY_AGENT_ALLOW_AUTO_MIGRATE=1`）跳过门禁。
 
+### Canonical 用户状态所有权（Stabilization 1.2）
+
+Canonical seed 把「路线是谁」与「用户怎么使用」严格分开：
+
+- **system-owned metadata**（每次 `ensure_all()` 可同步）：`name` /
+  `parent_id` / `route_type` / `source` / `route_key` / `goal` /
+  `description`；
+- **user-owned runtime state**（seed 绝不覆盖）：`status` / `priority` /
+  `planning_enabled` / `archived_at`。
+
+因此：用户改过 `priority`、暂停（pause）、归档（archive）后重启，状态保持不变；
+archive 不会被自动 restore（restore 只能显式操作）。缺失的 canonical route
+仍会用 canonical 默认值自愈创建（priority=spec / active / planning=True）。
+
+`ensure_default_plan()`：canonical R1–R6 已存在时，未绑定 route 的全局 service
+直接返回 `None`（不再读 first active plan）；显式 route-scoped service 返回自己
+route 的 plan；canonical 尚未建立的旧库仍走 legacy recovery。
+
+### Migration Gate
+
+若 `data/study_agent.db` 已存在且 `user_version < SCHEMA_VERSION`，GUI **拒绝启动**
+（退出码 3）并打印 `db-release` 步骤；若文件存在但只读探测失败（损坏/被占用），
+同样 **fail closed**（`reason=unreadable_db`），提示恢复备份或人工检查。
+新库（不存在/空库）与已最新版本不受影响。
+
 ### Legacy 边界（v1 stabilization）
 
 - 生产规划链（Scheduler / DailyPlanner / StudyPlan / Route UI / PlannerFeedback）

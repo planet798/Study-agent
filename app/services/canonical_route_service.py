@@ -147,14 +147,14 @@ class CanonicalRouteService:
                 route_key=ROUTE_KEY_JOB_PREP,
                 description=C.CANONICAL_ROUTES[ROUTE_KEY_JOB_PREP]["description"],
             )
+        # 已存在（route_key 或按名认领）→ 只同步 system-owned metadata，
+        # 不覆盖 status / priority / planning_enabled / archived_at。
         return self.route_repo.update(
             route.id,
             name=C.CANONICAL_ROUTES[ROUTE_KEY_JOB_PREP]["name"],
             parent_id=None,
             route_type=ROUTE_TYPE_GROUP,
             source=ROUTE_SOURCE_SYSTEM,
-            priority=C.CANONICAL_ROUTES[ROUTE_KEY_JOB_PREP]["priority"],
-            planning_enabled=False,
             route_key=ROUTE_KEY_JOB_PREP,
             description=C.CANONICAL_ROUTES[ROUTE_KEY_JOB_PREP]["description"],
         )
@@ -162,41 +162,71 @@ class CanonicalRouteService:
     # ================= routes =================
 
     def ensure_routes(self, group_id: int) -> dict[str, LearningRoute]:
+        """幂等 seed R1–R6（绝不覆盖用户运行时状态）。
+
+        所有权划分（重要）：
+        - **system-owned metadata**（每次 seed 可同步）：
+          name / parent_id / route_type / source / route_key / goal /
+          description —— 回答“这条路线是谁”；
+        - **user-owned runtime state**（seed 绝不覆盖）：
+          status / priority / planning_enabled / archived_at ——
+          回答“用户现在怎么使用它”（暂停 / 归档 / 调优先级）。
+
+        分支：
+        - 已有稳定 route_key → 只同步 metadata；
+        - 首次 adoption（无 route_key 的同名旧 route）→ 只补 canonical
+          identity + metadata，保留其已有运行时状态；
+        - 完全不存在 → 用 canonical 默认值创建（status=active /
+          priority=spec / planning_enabled=True），保证自愈能力。
+        """
         out: dict[str, LearningRoute] = {}
         for key in C.CANONICAL_LEARNING_KEYS:
             spec = C.CANONICAL_ROUTES[key]
             route = self.route_repo.get_by_key(key)
-            if route is None:
-                route = self._adopt_existing_route(key, group_id)
-            if route is None:
-                route = self.route_repo.create(
-                    name=spec["name"],
-                    parent_id=group_id,
-                    route_type=ROUTE_TYPE_LEARNING,
-                    source=ROUTE_SOURCE_SYSTEM,
-                    status="active",
-                    priority=spec["priority"],
-                    planning_enabled=True,
-                    route_key=key,
-                    goal=spec["goal"],
-                    description=spec["description"],
+            if route is not None:
+                # 已是 canonical identity：仅同步系统结构字段
+                route = self.route_repo.update(
+                    route.id, **self._canonical_metadata(key, group_id)
                 )
             else:
-                route = self.route_repo.update(
-                    route.id,
-                    name=spec["name"],
-                    parent_id=group_id,
-                    route_type=ROUTE_TYPE_LEARNING,
-                    source=ROUTE_SOURCE_SYSTEM,
-                    status="active",
-                    priority=spec["priority"],
-                    planning_enabled=True,
-                    route_key=key,
-                    goal=spec["goal"],
-                    description=spec["description"],
-                )
+                adopted = self._adopt_existing_route(key, group_id)
+                if adopted is not None:
+                    # 一次性 adoption：补 route_key + metadata，不重置用户状态
+                    route = self.route_repo.update(
+                        adopted.id, **self._canonical_metadata(key, group_id)
+                    )
+                else:
+                    route = self.route_repo.create(
+                        name=spec["name"],
+                        parent_id=group_id,
+                        route_type=ROUTE_TYPE_LEARNING,
+                        source=ROUTE_SOURCE_SYSTEM,
+                        status="active",
+                        priority=spec["priority"],
+                        planning_enabled=True,
+                        route_key=key,
+                        goal=spec["goal"],
+                        description=spec["description"],
+                    )
             out[key] = route
         return out
+
+    @staticmethod
+    def _canonical_metadata(key: str, group_id: int) -> dict:
+        """canonical seed 可同步的 system-owned 字段（不含用户运行时状态）。"""
+        spec = C.CANONICAL_ROUTES[key]
+        return {
+            "name": spec["name"],
+            "parent_id": group_id,
+            "route_type": (
+                ROUTE_TYPE_GROUP if key == ROUTE_KEY_JOB_PREP
+                else ROUTE_TYPE_LEARNING
+            ),
+            "source": ROUTE_SOURCE_SYSTEM,
+            "route_key": key,
+            "goal": spec.get("goal", ""),
+            "description": spec["description"],
+        }
 
     def _adopt_existing_route(
         self, key: str, group_id: int

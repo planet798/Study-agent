@@ -309,9 +309,12 @@ class StudyPlanService:
         - 仅在旧 DB（canonical 尚未建立）时执行一次性 seed / 就地同步。
         """
         if self._canonical_routes_present():
-            return self.plan_repo.get_active_plan(
-                route_id=self._resolved_route_id()
-            )
+            # canonical 接管：绝不 seed / reconcile legacy 计划。
+            # 未显式绑定 route 时直接返回 None（不读 first active plan）；
+            # 显式 route-scoped service 返回该 route 自己的 plan。
+            if self.route_id is None:
+                return None
+            return self.plan_repo.get_active_plan(route_id=self.route_id)
         existing = self.plan_repo.get_active_plan(
             route_id=self._resolved_route_id()
         )
