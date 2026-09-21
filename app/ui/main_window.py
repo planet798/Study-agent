@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
         capability_service=None,
         practice_service=None,
         practice_capability_service=None,
+        practice_readiness_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -173,6 +174,8 @@ class MainWindow(QMainWindow):
         self.practice_service = practice_service
         # Phase 5：Practice → Capability（可选）
         self.practice_capability_service = practice_capability_service
+        # Phase 6：Practice Planner Feedback / Readiness（可选）
+        self.practice_readiness_service = practice_readiness_service
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -356,6 +359,7 @@ class MainWindow(QMainWindow):
                 outcome_service=self.outcome_service,
                 practice_service=self.practice_service,
                 practice_capability_service=self.practice_capability_service,
+                practice_readiness_service=self.practice_readiness_service,
             )
             self.stack.addWidget(self.routes_page)
             self.routes_page_index = self.stack.count() - 1
@@ -374,6 +378,7 @@ class MainWindow(QMainWindow):
                 self.skill_service.skill_repo if self.skill_service else None,
                 self.practice_service.plan_repo,
                 capability_service=self.practice_capability_service,
+                readiness_service=self.practice_readiness_service,
             )
             self.stack.addWidget(self.practice_page)
             self.practice_page_index = self.stack.count() - 1

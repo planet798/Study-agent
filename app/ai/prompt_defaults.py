@@ -142,6 +142,9 @@ PLANNER_SYSTEM = """你是个人学习规划助手。
     引用时必须写成“近期目标岗位样本需求”。
 16. 高频但被前置阻塞的技能（如 RAG 高需求但缺 LLM 基础 / Embedding）不得直接
     安排；应改为提升其必要前置技能的近期优先级。
+17. 候选 Topic 的合法性与优先级已由系统完成筛选：你只能从 available_topics 中
+    选择（planner_feedback_section 会说明本轮最高优先级候选），不得创造其它 Topic，
+    也不得以“你的判断”推翻系统给出的优先级与候选范围。
 
 你必须只输出严格 JSON，不要输出任何其他文字，不要使用 Markdown 代码块。"""
 
@@ -186,6 +189,7 @@ PLANNER_USER = """请根据以下上下文，为下一天（通常是明天）�
 {{route_section}}
 上下文 JSON：
 {{context_json}}
+{{planner_feedback_section}}
 {{knowledge_evidence_section}}
 {{skill_priority_section}}
 {{market_trend_section}}
@@ -481,6 +485,7 @@ DEFAULT_PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
         required_variables=("context_json", "output_instruction"),
         optional_variables=(
             "route_section",
+            "planner_feedback_section",
             "knowledge_evidence_section",
             "skill_priority_section",
             "market_trend_section",

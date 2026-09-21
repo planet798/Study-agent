@@ -63,6 +63,7 @@ class GlobalDailyScheduler:
         budget: int = GLOBAL_AGENT_DAILY_BUDGET,
         fairness_window: int = FAIRNESS_WINDOW_DAYS,
         topic_learning_service=None,
+        feedback_service=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo
@@ -75,6 +76,9 @@ class GlobalDailyScheduler:
         self.budget = int(budget)
         self.fairness_window = int(fairness_window)
         self.topic_learning_service = topic_learning_service
+        # Phase 6：只影响“某 route 被选中后该 route 内部 Topic 优先级”，
+        # 绝不参与 route allocation / fairness / budget。
+        self.feedback_service = feedback_service
 
     # ================= 路线状态 =================
 
@@ -101,6 +105,10 @@ class GlobalDailyScheduler:
             skill_service=self.skill_service,
             jd_service=self.jd_service,
             scope_tasks_by_route=True,
+            feedback_service=(
+                self.feedback_service.for_route(route_id, sps)
+                if self.feedback_service is not None else None
+            ),
         )
 
     def _done_topic_ids(self) -> set[int]:

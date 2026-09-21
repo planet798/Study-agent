@@ -793,6 +793,32 @@ def main() -> int:
         plan_repo=plan_repo,
         route_repo=route_repo,
     )
+    # Phase 6：Practice Planner Feedback（Project Readiness + 确定性 Tier 排序）
+    from app.database.practice_repository import (
+        PracticeRequirementRepository,
+    )
+    from app.services.planner_feedback import PlannerFeedbackService
+    from app.services.practice_readiness import PracticeReadinessService
+
+    practice_requirement_repo = PracticeRequirementRepository(conn)
+    practice_readiness_service = PracticeReadinessService(
+        conn,
+        requirement_repo=practice_requirement_repo,
+        project_repo=PracticeProjectRepository(conn),
+        plan_repo=plan_repo,
+        route_repo=route_repo,
+        capability_repo=capability_service.repo,
+        topic_learning_service=topic_learning_service,
+        task_repo=repo,
+    )
+    planner_feedback_service = PlannerFeedbackService(
+        conn,
+        readiness_service=practice_readiness_service,
+        plan_repo=plan_repo,
+        route_repo=route_repo,
+        skill_service=skill_service,
+        task_repo=repo,
+    )
     # 幂等修复历史 route 归属（绝不猜 manual NULL / ordinary todo）
     try:
         repaired = repair_route_assignments(conn, assessment_repo)
@@ -959,6 +985,7 @@ def main() -> int:
         jd_service=jd_service,
         planner=daily_planner.planner,
         topic_learning_service=topic_learning_service,
+        feedback_service=planner_feedback_service,
     )
     date_service.scheduler = scheduler
     review_service = TaskReviewService(ai_client, prompt_registry=prompt_registry)
@@ -1100,6 +1127,7 @@ def main() -> int:
         topic_learning_service=topic_learning_service,
         practice_service=practice_service,
         practice_capability_service=practice_capability_service,
+        practice_readiness_service=practice_readiness_service,
     )
     # 新实例启动请求 → 恢复/前置已有唯一实例（从托盘恢复或直接激活）
     if hasattr(window, "_restore_from_tray"):

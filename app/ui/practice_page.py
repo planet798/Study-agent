@@ -40,6 +40,7 @@ from .practice_dialogs import (
     MilestoneEditorDialog,
     OutputEditorDialog,
     PracticeTopicEvidenceDialog,
+    PracticeTopicRequirementDialog,
     RevokeEvidenceDialog,
 )
 from .styles import apply_secondary_button_text
@@ -78,13 +79,15 @@ _FILTERS = (
 
 class PracticeProjectsPage(QWidget):
     def __init__(self, practice_service, route_repo, skill_repo, plan_repo,
-                 capability_service=None, parent=None):
+                 capability_service=None, parent=None,
+                 readiness_service=None):
         super().__init__(parent)
         self.service = practice_service
         self.route_repo = route_repo
         self.skill_repo = skill_repo
         self.plan_repo = plan_repo
         self.capability_service = capability_service
+        self.readiness_service = readiness_service
         self._build_ui()
         self.refresh()
 
@@ -229,6 +232,7 @@ class PracticeProjectsPage(QWidget):
         dlg = PracticeProjectDetailDialog(
             project["id"], self.service, self.route_repo, self.skill_repo,
             self.plan_repo, self.capability_service, parent=self,
+            readiness_service=self.readiness_service,
         )
         dlg.exec()
         self.refresh()
@@ -260,7 +264,8 @@ class PracticeProjectsPage(QWidget):
 
 class PracticeProjectDetailDialog(QDialog):
     def __init__(self, project_id, service, route_repo, skill_repo, plan_repo,
-                 capability_service=None, parent=None):
+                 capability_service=None, parent=None,
+                 readiness_service=None):
         super().__init__(parent)
         self.project_id = project_id
         self.service = service
@@ -268,6 +273,7 @@ class PracticeProjectDetailDialog(QDialog):
         self.skill_repo = skill_repo
         self.plan_repo = plan_repo
         self.capability_service = capability_service
+        self.readiness_service = readiness_service
         self.setWindowTitle("实践项目")
         self.setModal(True)
         self.resize(680, 640)
@@ -319,6 +325,7 @@ class PracticeProjectDetailDialog(QDialog):
         self._routes_section(detail["routes"])
         self._skills_section(detail["skills"])
         self._topics_section(detail["topics"])
+        self._readiness_section()
         self._milestones_section(detail["milestones"])
         self._outputs_section(detail["outputs"])
         self._evidence_section()
@@ -436,6 +443,100 @@ class PracticeProjectDetailDialog(QDialog):
                 "删除", lambda _=False, oo=o: self._delete_output(oo)
             ))
             self.body_layout.addLayout(row)
+
+    # ---------- Phase 6：学习准备度 ----------
+
+    def _readiness_section(self) -> None:
+        head = QHBoxLayout()
+        head.addWidget(self._section("【学习准备】"))
+        head.addStretch()
+        self.body_layout.addLayout(head)
+        if self.readiness_service is None:
+            lbl = QLabel("未启用学习准备度")
+            lbl.setObjectName("TaskMeta")
+            self.body_layout.addWidget(lbl)
+            return
+        try:
+            readiness = self.readiness_service.get_project_readiness(
+                self.project_id
+            )
+        except Exception as e:  # noqa: BLE001
+            lbl = QLabel(f"学习准备度不可用：{e}")
+            lbl.setObjectName("TaskMeta")
+            self.body_layout.addWidget(lbl)
+            return
+        summary = QLabel(
+            f"学习准备度：{readiness['satisfied_count']} / "
+            f"{readiness['total_count']} 已满足"
+            + (f"　待补 {readiness['pending_count']} 项"
+               if readiness['pending_count'] else "")
+            + ("　（项目未在进行中：只展示，不驱动 Planner）"
+               if not readiness["drives_planner"] else "")
+        )
+        summary.setObjectName("TaskMeta")
+        summary.setWordWrap(True)
+        self.body_layout.addWidget(summary)
+        statuses = readiness.get("statuses") or []
+        covered = {int(st.topic_id) for st in statuses}
+        for st in statuses:
+            row = QHBoxLayout()
+            if st.satisfied:
+                state = "✓ 已满足"
+            else:
+                state = f"⚠ 能力缺口（{st.reason_label}）"
+            lines = [
+                st.topic_name,
+                f"要求：{st.target_capability_label}（{st.target_capability_level}）",
+                f"当前：{st.current_capability_label}",
+                state,
+            ]
+            if st.planner_actionable and st.next_activity_label:
+                lines.append(f"下一步：{st.next_activity_label}")
+            elif st.reason_code == "needs_assessment":
+                lines.append("建议：进行验收")
+            elif st.reason_code == "needs_experiment_evidence":
+                lines.append("建议：记录实验成果")
+            if st.note:
+                lines.append(f"备注：{st.note}")
+            lbl = QLabel("\n".join(lines))
+            lbl.setObjectName("TaskMeta")
+            lbl.setWordWrap(True)
+            row.addWidget(lbl, stretch=1)
+            row.addWidget(_secondary(
+                "设置学习要求",
+                lambda _=False, tid=st.topic_id, nm=st.topic_name:
+                    self._edit_requirement(tid, nm),
+            ))
+            self.body_layout.addLayout(row)
+
+        # 已关联但未设置要求的 Topic（§75：不强制，用户需要时再设）
+        for tid in self.service.projects.list_topic_ids(self.project_id):
+            if int(tid) in covered:
+                continue
+            topic = self.plan_repo.get_topic(tid)
+            name = getattr(topic, "name", "") if topic else ""
+            row = QHBoxLayout()
+            lbl = QLabel(f"{name}\n能力要求：未设置")
+            lbl.setObjectName("TaskMeta")
+            lbl.setWordWrap(True)
+            row.addWidget(lbl, stretch=1)
+            row.addWidget(_secondary(
+                "设置学习要求",
+                lambda _=False, tid=tid, nm=name: self._edit_requirement(tid, nm),
+            ))
+            self.body_layout.addLayout(row)
+
+    def _edit_requirement(self, topic_id, topic_name) -> None:
+        project = self.service.projects.get(self.project_id)
+        existing = self.readiness_service.get_requirement(
+            self.project_id, topic_id
+        )
+        dlg = PracticeTopicRequirementDialog(
+            project, topic_id, topic_name,
+            self.readiness_service, existing=existing, parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.refresh()
 
     # ---------- Phase 5：项目能力证据 ----------
 

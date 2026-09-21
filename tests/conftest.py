@@ -332,3 +332,91 @@ def practice_capability_env(practice_env):
         r4=practice_env.r4, r5=practice_env.r5, r6=practice_env.r6,
         group=practice_env.group,
     )
+
+
+# ============================================================
+# Phase 6：Practice Planner Feedback fixtures
+# ============================================================
+
+
+@pytest.fixture()
+def practice_readiness_env(practice_env):
+    """Canonical 六路线 + Requirement / Readiness / Feedback。
+
+    readiness 的 current phase / prerequisite gate 绑定到 route-scoped
+    StudyPlanService（与生产 Scheduler 一致）。
+    """
+    from types import SimpleNamespace
+
+    from app.database.assessment_repository import AssessmentRepository
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.database.practice_repository import PracticeRequirementRepository
+    from app.database.topic_learning_repository import (
+        TopicLearningComponentRepository,
+    )
+    from app.services.capability_service import CapabilityService
+    from app.services.planner_feedback import PlannerFeedbackService
+    from app.services.practice_readiness import PracticeReadinessService
+    from app.services.study_plan_service import StudyPlanService
+    from app.services.topic_learning_profile_service import (
+        TopicLearningProfileService,
+    )
+
+    conn = practice_env.conn
+    repo = practice_env.repo
+    plan_repo = practice_env.plan_repo
+    route_repo = practice_env.route_repo
+    arepo = AssessmentRepository(conn)
+    tl = TopicLearningProfileService(
+        conn, TopicLearningComponentRepository(conn)
+    )
+    cap = CapabilityService(conn, CapabilityEvidenceRepository(conn))
+    requirement_repo = PracticeRequirementRepository(conn)
+
+    cache: dict[int, object] = {}
+
+    def sps_for(route_id: int):
+        if route_id not in cache:
+            cache[route_id] = StudyPlanService(
+                repo, plan_repo, route_id=route_id,
+                learning_route_repo=route_repo, scope_tasks_by_route=True,
+                topic_learning_service=tl, assessment_repo=arepo,
+            )
+        return cache[route_id]
+
+    def _blocked(route_id: int, plan_date: str):
+        try:
+            service = sps_for(route_id)
+            phase = service.get_current_phase(plan_date)
+            if phase is None:
+                return set()
+            blocked, _ = service.skill_topic_views(list(phase.topics), plan_date)
+            return {int(x) for x in blocked}
+        except Exception:  # noqa: BLE001
+            return set()
+
+    readiness = PracticeReadinessService(
+        conn,
+        requirement_repo=requirement_repo,
+        plan_repo=plan_repo,
+        route_repo=route_repo,
+        capability_repo=cap.repo,
+        topic_learning_service=tl,
+        task_repo=repo,
+        current_phase_provider=lambda rid, d: sps_for(rid).get_current_phase(d),
+        blocked_topic_provider=_blocked,
+    )
+    feedback = PlannerFeedbackService(
+        conn, readiness_service=readiness, plan_repo=plan_repo,
+        route_repo=route_repo, skill_service=None, task_repo=repo,
+    )
+    return SimpleNamespace(
+        conn=conn, repo=repo, plan_repo=plan_repo, route_repo=route_repo,
+        skill_repo=practice_env.skill_repo, service=practice_env.service,
+        cap=cap, requirement_repo=requirement_repo,
+        readiness=readiness, feedback=feedback, tl=tl, arepo=arepo,
+        sps_for=sps_for,
+        r1=practice_env.r1, r2=practice_env.r2, r3=practice_env.r3,
+        r4=practice_env.r4, r5=practice_env.r5, r6=practice_env.r6,
+        group=practice_env.group,
+    )

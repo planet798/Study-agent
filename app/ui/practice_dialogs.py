@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..services.capability import capability_label, capability_name
 from ..services.practice import (
     ALL_MILESTONE_STATUSES,
     ALL_PROJECT_TYPES,
@@ -621,3 +623,81 @@ class RevokeEvidenceDialog(QDialog):
 
     def reason(self) -> str:
         return self.reason_edit.toPlainText().strip()
+
+
+class PracticeTopicRequirementDialog(QDialog):
+    """Phase 6：设置项目学习要求（目标能力只能 1~4，禁止 PROJECT）。"""
+
+    def __init__(self, project, topic_id, topic_name, readiness_service,
+                 existing=None, parent=None):
+        super().__init__(parent)
+        self._readiness = readiness_service
+        self._project = project
+        self._topic_id = int(topic_id)
+        self.setWindowTitle("设置学习要求")
+        self.setModal(True)
+        self.resize(480, 360)
+        root = QVBoxLayout(self)
+        info = QLabel(
+            f"项目：{project.get('name', '')}\nTopic：{topic_name}"
+        )
+        info.setObjectName("TaskMeta")
+        info.setWordWrap(True)
+        root.addWidget(info)
+
+        root.addWidget(QLabel("项目最低能力要求"))
+        from PySide6.QtWidgets import QRadioButton
+
+        from ..services.practice import REQUIREMENT_TARGET_LEVELS
+
+        self._buttons: dict[int, object] = {}
+        self._group = QButtonGroup(self)
+        current = int((existing or {}).get("target_capability_level") or 2)
+        for level in REQUIREMENT_TARGET_LEVELS:
+            rb = QRadioButton(
+                f"{capability_label(level)}（{capability_name(level)}）"
+            )
+            if level == current:
+                rb.setChecked(True)
+            self._buttons[level] = rb
+            self._group.addButton(rb, level)
+            root.addWidget(rb)
+
+        root.addWidget(QLabel("备注（可选）"))
+        self.note_edit = QPlainTextEdit((existing or {}).get("note") or "")
+        self.note_edit.setFixedHeight(60)
+        root.addWidget(self.note_edit)
+
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #e74c3c;")
+        self.error_label.setWordWrap(True)
+        self.error_label.setVisible(False)
+        root.addWidget(self.error_label)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("保存要求")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def selected_level(self) -> int:
+        for level, rb in self._buttons.items():
+            if rb.isChecked():
+                return int(level)
+        return 2
+
+    def _on_accept(self) -> None:
+        try:
+            self._readiness.set_requirement(
+                self._project["id"], self._topic_id, self.selected_level(),
+                note=self.note_edit.toPlainText().strip(),
+            )
+        except Exception as e:  # noqa: BLE001
+            self.error_label.setText(str(e))
+            self.error_label.setVisible(True)
+            return
+        self.accept()

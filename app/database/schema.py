@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1302,6 +1302,53 @@ def _migrate_v19(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[19] = _migrate_v19
+
+
+# ============================================================
+# v20：Practice Planner Feedback（Phase 6）
+# ============================================================
+#
+# practice_topic_requirements：“为了推进项目，这个 Topic 至少需要什么能力”。
+# 与 practice_project_topics（项目事实关联）语义不同，因此单独建表：
+#   - 不把字段硬塞进 practice_project_topics；
+#   - target_capability_level 只能是 1~4（禁止 PROJECT，避免循环依赖）；
+#   - UNIQUE(project_id, topic_id)；用户取消用 is_active=0，不物理 DELETE。
+#
+# 不修改 tasks / mastery / review / capability_evidence / scheduler。
+# 不自动创建任何 Requirement。
+
+_V20_SQL = """
+CREATE TABLE IF NOT EXISTS practice_topic_requirements (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id             INTEGER NOT NULL REFERENCES practice_projects(id),
+    topic_id               INTEGER NOT NULL REFERENCES study_topics(id),
+    target_capability_level INTEGER NOT NULL
+                           CHECK (target_capability_level BETWEEN 1 AND 4),
+    is_active              INTEGER NOT NULL DEFAULT 1,
+    note                   TEXT    NOT NULL DEFAULT '',
+    created_at             TEXT    NOT NULL DEFAULT '',
+    updated_at             TEXT    NOT NULL DEFAULT '',
+    UNIQUE(project_id, topic_id)
+);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_requirements_project
+    ON practice_topic_requirements(project_id);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_requirements_topic
+    ON practice_topic_requirements(topic_id);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_requirements_active
+    ON practice_topic_requirements(is_active);
+-- 仅 active requirement 参与 Planner（partial index 供 readiness 快速查询）
+CREATE INDEX IF NOT EXISTS idx_practice_topic_requirements_active_project
+    ON practice_topic_requirements(project_id) WHERE is_active = 1;
+"""
+
+
+def _migrate_v20(conn: sqlite3.Connection) -> None:
+    """v20：practice_topic_requirements（幂等，仅新增；不自动建 Requirement）。"""
+    conn.executescript(_V20_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[20] = _migrate_v20
 
 
 def get_schema_version(conn) -> int:

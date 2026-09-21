@@ -127,6 +127,21 @@ class WeeklyFocus:
 
 
 @dataclass
+class PlannerFeedback:
+    """Phase 6：某个 legal Topic 的结构化优先级信号（确定性来源）。"""
+
+    topic_id: int
+    tier: int = 2
+    tier_label: str = "normal_curriculum"
+    next_activity: str = ""
+    next_activity_label: str = ""
+    reasons: list[str] = field(default_factory=list)
+    project_requirements: list[dict] = field(default_factory=list)
+    active_project_blocker_count: int = 0
+    max_capability_gap: int = 0
+
+
+@dataclass
 class PlanningContext:
     """传给 AI 用于规划下一天的完整上下文。"""
 
@@ -157,6 +172,9 @@ class PlanningContext:
     estimated_minutes: int = 0
     actual_completed_minutes: int = 0
     current_daily_limit: int = 180
+    # Phase 6：Planner Feedback（确定性已排序候选）
+    planner_feedback: list[PlannerFeedback] = field(default_factory=list)
+    candidate_topic_ids: list[int] = field(default_factory=list)
 
     # ---------- 序列化 ----------
 
@@ -264,6 +282,21 @@ class PlanningContext:
             "estimated_minutes": self.estimated_minutes,
             "actual_completed_minutes": self.actual_completed_minutes,
             "current_daily_limit": self.current_daily_limit,
+            "candidate_topic_ids": list(self.candidate_topic_ids),
+            "planner_feedback": [
+                {
+                    "topic_id": f.topic_id,
+                    "tier": f.tier,
+                    "tier_label": f.tier_label,
+                    "next_activity": f.next_activity,
+                    "next_activity_label": f.next_activity_label,
+                    "reasons": list(f.reasons),
+                    "project_requirements": list(f.project_requirements),
+                    "active_project_blocker_count": f.active_project_blocker_count,
+                    "max_capability_gap": f.max_capability_gap,
+                }
+                for f in self.planner_feedback
+            ],
         }
 
     @staticmethod

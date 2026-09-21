@@ -249,12 +249,17 @@ class TestNoRegression:
         assert res2["reason"] == "confirmation_required"
 
     def test_planner_scheduler_review_untouched(self):
+        # Phase 6：Scheduler / StudyPlanService 不读 Practice；
+        # DailyPlannerService 只通过 feedback_service 间接使用。
         import app.services.daily_planner_service as dps
         import app.services.route_scheduler as sched
         import app.services.study_plan_service as sps
 
-        for mod in (dps, sched, sps):
+        for mod in (sched, sps):
             assert "practice" not in inspect.getsource(mod).lower()
+        planner_src = inspect.getsource(dps)
+        assert "PracticeReadinessService" not in planner_src
+        assert "feedback_service" in planner_src
 
     def test_review_interval_unchanged(self):
         from app.services.review_service import ReviewService

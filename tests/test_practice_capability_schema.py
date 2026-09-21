@@ -9,7 +9,7 @@ import pytest
 
 class TestSchemaV19:
     def test_version_and_tables(self, conn):
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 19
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 19
         names = {
             r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -58,8 +58,8 @@ class TestSchemaV19:
         from app.database.schema import migrate
 
         c = get_connection(str(tmp_path / "idem.db"))
-        assert migrate(c) == 19
-        assert migrate(c) == 19
+        assert migrate(c) >= 19
+        assert migrate(c) >= 19
         c.close()
 
     def test_v18_to_v19_sequential(self, tmp_path):
@@ -81,7 +81,7 @@ class TestSchemaV19:
         CanonicalRouteService(
             c, LearningRouteRepository(c), plan_repo, SkillRepository(c)
         ).ensure_all()
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 19
+        assert c.execute("PRAGMA user_version").fetchone()[0] >= 19
         assert c.execute(
             "SELECT COUNT(*) FROM practice_topic_evidence"
         ).fetchone()[0] == 0

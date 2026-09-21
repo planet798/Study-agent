@@ -26,6 +26,7 @@ from ..ai.planner_context import (
     JdGapSkill,
     KnowledgeEvidence,
     MarketTrend,
+    PlannerFeedback,
     PlanningContext,
     PrerequisiteBlocked,
     SkillPriority,
@@ -55,6 +56,7 @@ class DailyPlannerService:
         skill_service=None,
         jd_service=None,
         scope_tasks_by_route: bool = False,
+        feedback_service=None,
     ):
         self.repo = repo
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
@@ -76,6 +78,8 @@ class DailyPlannerService:
         # Phase D：route-scoped 实例（Scheduler 创建）置 True，
         # 使 recent/任务摘要/掌握证据只读本路线，避免跨路线污染。
         self.scope_tasks_by_route = scope_tasks_by_route
+        # Phase 6：Planner Feedback（可选）；不注入时行为与旧版一致
+        self.feedback_service = feedback_service
 
     def _route_id(self) -> int | None:
         try:
@@ -212,7 +216,66 @@ class DailyPlannerService:
         self._fill_knowledge_evidence(ctx, plan_next_date)
         # Phase C：JD / 技能 / 四周优先级上下文（无注入时保持空、兼容）
         self._fill_skill_context(ctx, plan_next_date)
+        # Phase 6：确定性候选排序（Tier / practice blocker / market）
+        self._fill_planner_feedback(ctx, plan_next_date)
         return ctx
+
+    # ================= Phase 6：Planner Feedback =================
+
+    def _current_phase_topics(self, plan_date: str) -> list:
+        phase = self.study_plan_service.get_current_phase(plan_date)
+        if phase is None:
+            return []
+        return list(phase.topics)
+
+    def _ranked_signals(self, plan_date: str) -> list:
+        """对本路线当前阶段 legal topics 做确定性排序（无 feedback 时返回 []）。"""
+        if self.feedback_service is None:
+            return []
+        route_id = self._route_id()
+        if route_id is None:
+            return []
+        topics = self._current_phase_topics(plan_date)
+        if not topics:
+            return []
+        try:
+            return self.feedback_service.rank_available_topics(
+                route_id, plan_date, topics
+            )
+        except Exception:  # noqa: BLE001 - 反馈服务异常不影响规划
+            return []
+
+    def _fill_planner_feedback(self, ctx: PlanningContext, plan_date: str) -> None:
+        signals = self._ranked_signals(plan_date)
+        if not signals:
+            return
+        by_id = {t.topic_id: t for t in ctx.available_topics}
+        ordered = [by_id[s.topic_id] for s in signals if s.topic_id in by_id]
+        if ordered:
+            ctx.available_topics = ordered
+        pool = self.feedback_service.highest_tier_pool(signals)
+        ctx.candidate_topic_ids = [s.topic_id for s in pool]
+        ctx.planner_feedback = [
+            PlannerFeedback(
+                topic_id=s.topic_id,
+                tier=s.tier,
+                tier_label=s.tier_label,
+                next_activity=s.next_activity_kind,
+                next_activity_label=s.next_activity_label,
+                reasons=list(s.priority_reasons),
+                project_requirements=list(s.practice_requirements),
+                active_project_blocker_count=s.active_project_blocker_count,
+                max_capability_gap=s.max_capability_gap,
+            )
+            for s in signals
+        ]
+
+    def _preferred_topic_ids(self, plan_date: str) -> list[int] | None:
+        """fallback 使用的确定性 Topic 顺序（最高 Tier 优先）；无 feedback 返回 None。"""
+        signals = self._ranked_signals(plan_date)
+        if not signals:
+            return None
+        return [s.topic_id for s in signals]
 
     def _fill_skill_context(self, ctx: PlanningContext, plan_date: str) -> None:
         """用 SkillService/JdService 的结果填充技能上下文；不重复计算优先级。
@@ -497,13 +560,20 @@ class DailyPlannerService:
             return self._fallback_plan(date_str, plan_date, reason="ai_not_configured")
 
         context = self.build_context(date_str)
+        candidate_ids = (
+            set(context.candidate_topic_ids)
+            if self.feedback_service is not None
+            and context.candidate_topic_ids else None
+        )
         try:
             plan = self.planner.plan_next_day(context)
         except AIServiceError:
             return self._fallback_plan(date_str, plan_date, reason="ai_error")
 
         # 本地二次校验 + 创建任务（严格：任何违规则整体回退规则型）
-        valid, accepted, problems = self._validate_and_create(plan, plan_date)
+        valid, accepted, problems = self._validate_and_create(
+            plan, plan_date, candidate_topic_ids=candidate_ids
+        )
         if not valid:
             return self._fallback_plan(date_str, plan_date, reason="validation_failed")
 
@@ -563,6 +633,11 @@ class DailyPlannerService:
             return result
 
         context = self.build_context(add_days(plan_date, -1))
+        candidate_ids = (
+            set(context.candidate_topic_ids)
+            if self.feedback_service is not None
+            and context.candidate_topic_ids else None
+        )
         if self.planner is None or not self.planner.is_configured():
             return self._fallback_plan_route(
                 plan_date, "ai_not_configured", max_tasks, result, context,
@@ -576,7 +651,8 @@ class DailyPlannerService:
             )
 
         valid, accepted, problems = self._validate_and_create(
-            plan, plan_date, max_tasks=max_tasks, max_minutes=max_minutes
+            plan, plan_date, max_tasks=max_tasks, max_minutes=max_minutes,
+            candidate_topic_ids=candidate_ids,
         )
         if not valid:
             return self._fallback_plan_route(
@@ -607,7 +683,9 @@ class DailyPlannerService:
 
     def _fallback_plan(self, date_str: str, plan_date: str, reason: str) -> dict:
         """AI 不可用/失败时回退到规则型生成（不因 AI 失败而无法生成）。"""
-        result = self.study_plan_service.generate_daily_tasks(plan_date)
+        result = self.study_plan_service.generate_daily_tasks(
+            plan_date, preferred_topic_ids=self._preferred_topic_ids(plan_date)
+        )
         accepted_ids = [t.id for t in result.get("generated", [])]
         self._save_decision(
             date=plan_date,
@@ -636,7 +714,8 @@ class DailyPlannerService:
     ) -> dict:
         """route-specific fallback：严格使用本路线（不触碰其它路线）。"""
         gen = self.study_plan_service.generate_daily_tasks(
-            plan_date, max_tasks=max_tasks, max_minutes=max_minutes
+            plan_date, max_tasks=max_tasks, max_minutes=max_minutes,
+            preferred_topic_ids=self._preferred_topic_ids(plan_date),
         )
         accepted_ids = [t.id for t in gen.get("generated", [])]
         self._save_decision(
@@ -686,6 +765,7 @@ class DailyPlannerService:
     def _validate_and_create(
         self, plan, plan_date: str, max_tasks: int | None = None,
         max_minutes: int | None = None,
+        candidate_topic_ids: set[int] | None = None,
     ):
         """本地规则二次校验 AI 建议，全部合法才创建任务。
 
@@ -750,6 +830,14 @@ class DailyPlannerService:
         for rec in plan.recommended_tasks:
             if rec.topic_id not in valid_topic_ids:
                 problems.append(f"topic_id {rec.topic_id} 不属于当前阶段")
+                continue
+            if candidate_topic_ids is not None and \
+                    rec.topic_id not in candidate_topic_ids:
+                # Phase 6：AI 只能从最高优先级候选池中选择
+                problems.append(
+                    f"topic_id {rec.topic_id} 不在本轮候选池"
+                    f"（AI 只能从最高优先级候选中选择）"
+                )
                 continue
             if max_minutes is not None:
                 rec_topic = topic_by_id.get(rec.topic_id)

@@ -328,3 +328,34 @@ Level 5 **只能**由实践项目的“项目使用证据”产生，且必须�
 
 Project Skill / Activity / Curriculum / Mastery / Review / Planner / Scheduler
 均**不**因 PROJECT evidence 改变。
+
+## Planner Feedback Loop / Project Readiness（v20）
+
+把「项目学习要求」接入 Planner，但**不修改 Scheduler**。
+
+- 新增 `practice_topic_requirements`（`UNIQUE(project_id, topic_id)`，
+  `target_capability_level` 只能 1~4，禁止 PROJECT 以免循环依赖）；
+- `PracticeReadinessService`：把 requirement 与 current capability
+  （`MAX(active evidence)`）/ 课程结构比对，输出结构化
+  `satisfied` 与 `reason_code`（`actionable_learning_component`、
+  `route_paused`、`topic_not_currently_available`、`prerequisite_blocked`、
+  `has_active_task`、`cancelled_today`、`needs_assessment`、
+  `needs_experiment_evidence` …）；
+- `PlannerFeedbackService`：对**已经 legal** 的 Topic 做确定性离散 Tier 排序
+  （TIER 0 practice blocker > TIER 1 market signal > TIER 2 normal），
+  硬 gate（Phase / prerequisite / 去重）永远优先；
+- Planner 只把「最高非空 Tier」作为 AI 候选池；fallback 使用同一套确定性顺序，
+  AI 不得越过 Component（activity 仍由 `TopicLearningProfileService` 强制）；
+- `planner_decisions.input_context` 记录 `planner_feedback` /
+  `candidate_topic_ids`（审计「为什么今天安排这个」）；
+- Prompt 新增 **optional** `planner_feedback_section`（旧 override 仍然有效）。
+
+职责边界（重要）：
+- `GlobalDailyScheduler`（route allocation / fairness / budget）**完全不读**
+  Practice / Capability：14 天模拟证明加入任意数量的 Practice blocker 后，
+  route allocation 序列与全局 budget（≤3 task / ≤180 min）不变；
+- route.priority 永远由用户控制，Practice blocker 不会自动改 priority；
+- Mastery 仍只服务 Assessment / Review / weak / Skill gate；
+  Capability 仍只由真实证据推导；三者继续独立；
+- 不为项目单独分配每日预算；不自动创建 requirement / project / evidence；
+- 没有 requirement 的 Project Topic 只是项目关联，不产生 Planner blocker。

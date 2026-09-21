@@ -63,7 +63,8 @@ class RouteDetailDialog(QDialog):
                  ai_route_service=None, skill_service=None,
                  topic_learning_service=None, capability_service=None,
                  outcome_service=None, practice_service=None,
-                 practice_capability_service=None):
+                 practice_capability_service=None,
+                 practice_readiness_service=None):
         super().__init__(parent)
         self.route = route
         self.route_service = route_service
@@ -77,6 +78,7 @@ class RouteDetailDialog(QDialog):
         self.outcome_service = outcome_service
         self.practice_service = practice_service
         self.practice_capability_service = practice_capability_service
+        self.practice_readiness_service = practice_readiness_service
         self._ai_worker = None
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
@@ -289,6 +291,7 @@ class RouteDetailDialog(QDialog):
         self._add_skills_section()
         self._add_curriculum_gap_section()
         self._add_linked_projects_section()
+        self._add_practice_blockers_section()
         self.body_layout.addStretch()
 
     def _section_label(self, text: str) -> QLabel:
@@ -313,6 +316,35 @@ class RouteDetailDialog(QDialog):
         for p in projects:
             lbl = QLabel(f"关联实践项目：{p['name']}")
             lbl.setObjectName("TaskMeta")
+            self.body_layout.addWidget(lbl)
+
+    def _add_practice_blockers_section(self) -> None:
+        """Phase 6：轻量展示该路线的项目学习阻塞（不展开完整 Project Dashboard）。"""
+        if self.practice_readiness_service is None:
+            return
+        try:
+            blockers = self.practice_readiness_service.list_route_blockers(
+                self.route.id, self.today_provider()
+            )
+        except Exception:  # noqa: BLE001
+            return
+        self.body_layout.addWidget(self._section_label("项目学习阻塞"))
+        if not blockers:
+            empty = QLabel("项目学习阻塞：0")
+            empty.setObjectName("TaskMeta")
+            self.body_layout.addWidget(empty)
+            return
+        hdr = QLabel(f"项目学习阻塞：{len(blockers)}")
+        hdr.setObjectName("TaskMeta")
+        self.body_layout.addWidget(hdr)
+        for st in blockers:
+            nxt = st.next_activity_label or st.reason_label
+            lbl = QLabel(
+                f"{st.topic_name}　{st.current_capability_label} → "
+                f"{st.target_capability_label}　下一步：{nxt}"
+            )
+            lbl.setObjectName("TaskMeta")
+            lbl.setWordWrap(True)
             self.body_layout.addWidget(lbl)
 
     # ---------- Phase 3：Capability ----------
@@ -794,7 +826,8 @@ class LearningRoutesPage(QWidget):
                  ai_route_service=None, skill_service=None,
                  topic_learning_service=None, capability_service=None,
                  outcome_service=None, practice_service=None,
-                 practice_capability_service=None):
+                 practice_capability_service=None,
+                 practice_readiness_service=None):
         super().__init__(parent)
         self.route_service = route_service
         self.route_plan_service = route_plan_service
@@ -807,6 +840,7 @@ class LearningRoutesPage(QWidget):
         self.outcome_service = outcome_service
         self.practice_service = practice_service
         self.practice_capability_service = practice_capability_service
+        self.practice_readiness_service = practice_readiness_service
         self.show_archived = False
         self._build_ui()
         self.refresh()
@@ -1065,6 +1099,7 @@ class LearningRoutesPage(QWidget):
             outcome_service=self.outcome_service,
             practice_service=self.practice_service,
             practice_capability_service=self.practice_capability_service,
+            practice_readiness_service=self.practice_readiness_service,
         )
         dlg.exec()
         self.refresh()

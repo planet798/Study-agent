@@ -160,3 +160,41 @@ def is_qualifying_project_output_type(value: str | None) -> bool:
 
 def is_supporting_project_output_type(value: str | None) -> bool:
     return (value or "") in SUPPORTING_PROJECT_OUTPUT_TYPES
+
+
+# ============================================================
+# Phase 6：Project Learning Requirement（实践项目学习要求）
+# ============================================================
+#
+# “为了推进项目，这个 Topic 至少需要什么能力”。
+# 目标只能是 1~4（AWARE / EXPLAIN / IMPLEMENT / EXPERIMENT）。
+# 禁止 PROJECT：PROJECT 是本项目完成后自然形成的结果，配置 PROJECT 会形成
+# “需要项目才能 PROJECT，但项目又要求先 PROJECT” 的循环依赖。
+
+REQUIREMENT_MIN_LEVEL = 1
+REQUIREMENT_MAX_LEVEL = 4
+
+REQUIREMENT_TARGET_LEVELS: tuple[int, ...] = (1, 2, 3, 4)
+
+# 中文标签（与 capability.CAPABILITY_LABELS 一致，但不含 UNLEARNED/PROJECT）
+REQUIREMENT_TARGET_LABELS: dict[int, str] = {
+    1: "知道概念",
+    2: "能够解释",
+    3: "能够写代码",
+    4: "完成独立实验",
+}
+
+
+def is_valid_requirement_target(level) -> bool:
+    try:
+        level = int(level)
+    except (TypeError, ValueError):
+        return False
+    return REQUIREMENT_MIN_LEVEL <= level <= REQUIREMENT_MAX_LEVEL
+
+
+def requirement_target_label(level) -> str:
+    try:
+        return REQUIREMENT_TARGET_LABELS.get(int(level), "")
+    except (TypeError, ValueError):
+        return ""

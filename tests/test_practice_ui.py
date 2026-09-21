@@ -177,13 +177,19 @@ class TestBoundaries:
         ).fetchone()[0] == 0
 
     def test_planner_scheduler_do_not_reference_practice(self):
+        # Phase 6：Scheduler / StudyPlanService 不读 Practice；
+        # DailyPlannerService 只通过 feedback_service 间接使用（不直接 import）。
         import app.services.daily_planner_service as dps
         import app.services.route_scheduler as sched
         import app.services.study_plan_service as sps
 
-        for mod in (dps, sched, sps):
+        for mod in (sched, sps):
             src = inspect.getsource(mod).lower()
             assert "practice" not in src, mod.__name__
+        planner_src = inspect.getsource(dps)
+        assert "PracticeReadinessService" not in planner_src
+        assert "practice_capability_service" not in planner_src
+        assert "feedback_service" in planner_src
 
     def test_review_unchanged_by_practice(self, practice_env):
         env = practice_env

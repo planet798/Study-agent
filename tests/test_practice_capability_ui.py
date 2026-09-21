@@ -244,20 +244,26 @@ class TestMonthlySummary:
 
 class TestNegativeRegressions:
     def test_planner_does_not_reference_practice(self):
+        # Phase 6：Scheduler / StudyPlanService 不读 Practice；
+        # DailyPlannerService 只通过 feedback_service 间接使用。
         import app.services.daily_planner_service as dps
         import app.services.route_scheduler as sched
         import app.services.study_plan_service as sps
 
-        for mod in (dps, sched, sps):
+        for mod in (sched, sps):
             src = inspect.getsource(mod).lower()
             assert "practice" not in src, mod.__name__
+        planner_src = inspect.getsource(dps)
+        assert "PracticeReadinessService" not in planner_src
+        assert "feedback_service" in planner_src
 
     def test_capability_service_does_not_read_practice_in_planner_path(self):
         import app.services.daily_planner_service as dps
 
-        src = inspect.getsource(dps).lower()
-        assert "practice_capability" not in src
-        assert "capability" not in src or "practice" not in src
+        src = inspect.getsource(dps)
+        assert "CapabilityService" not in src
+        assert "capability_repository" not in src
+        assert "from .capability" not in src
 
     def test_six_routes_isolation(self, practice_capability_env):
         env = practice_capability_env

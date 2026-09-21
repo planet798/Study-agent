@@ -198,14 +198,21 @@ class TestExperimentRecordFlow:
 
 
 class TestHardBoundaries:
-    def test_planner_does_not_read_capability(self):
+    def test_scheduler_and_plan_service_do_not_read_capability(self):
+        # Phase 6：Scheduler 不读 capability；StudyPlanService 也不读。
+        # DailyPlannerService 只通过 PlannerFeedbackService 间接获取能力缺口，
+        # 绝不直接 import CapabilityService。
         import app.services.daily_planner_service as dps
         import app.services.route_scheduler as sched
         import app.services.study_plan_service as sps
 
-        for mod in (dps, sched, sps):
+        for mod in (sched, sps):
             src = inspect.getsource(mod).lower()
             assert "capability" not in src, mod.__name__
+        planner_src = inspect.getsource(dps)
+        assert "CapabilityService" not in planner_src
+        assert "capability_repository" not in planner_src
+        assert "from .capability" not in planner_src
 
     def test_scheduler_fairness_still_works(self, activity_env):
         from app.services.route_scheduler import GlobalDailyScheduler

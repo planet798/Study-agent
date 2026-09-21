@@ -745,3 +745,138 @@ class PracticeTopicEvidenceRepository:
             "SELECT * FROM knowledge_points WHERE id = ?", (cur.lastrowid,)
         ).fetchone()
         return dict(row)
+
+
+class PracticeRequirementRepository:
+    """Project Learning Requirement 数据访问（Phase 6）。
+
+    - UNIQUE(project_id, topic_id)：取消用 deactivate（is_active=0），
+      重新启用用 create_or_update 复活同一行（不物理 DELETE）；
+    - target_capability_level 只能是 1~4。
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    @staticmethod
+    def _from_row(row) -> Optional[dict]:
+        if row is None:
+            return None
+        d = dict(row)
+        d["is_active"] = bool(d.get("is_active"))
+        return d
+
+    def create_or_update(
+        self,
+        *,
+        project_id: int,
+        topic_id: int,
+        target_capability_level: int,
+        note: str = "",
+        commit: bool = True,
+    ) -> dict:
+        from ..services.practice import is_valid_requirement_target
+
+        if not is_valid_requirement_target(target_capability_level):
+            raise ValueError(
+                f"非法目标能力等级: {target_capability_level!r}（只能 1~4）"
+            )
+        ts = now_iso()
+        existing = self.get(project_id, topic_id)
+        if existing is not None:
+            self.conn.execute(
+                "UPDATE practice_topic_requirements SET "
+                "target_capability_level = ?, note = ?, is_active = 1, "
+                "updated_at = ? WHERE id = ?",
+                (int(target_capability_level), note or "", ts,
+                 int(existing["id"])),
+            )
+            if commit:
+                self.conn.commit()
+            return self.get_by_id(existing["id"])
+        cur = self.conn.execute(
+            "INSERT INTO practice_topic_requirements "
+            "(project_id, topic_id, target_capability_level, is_active, note,"
+            " created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)",
+            (int(project_id), int(topic_id), int(target_capability_level),
+             note or "", ts, ts),
+        )
+        if commit:
+            self.conn.commit()
+        return self.get_by_id(cur.lastrowid)
+
+    def get_by_id(self, requirement_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM practice_topic_requirements WHERE id = ?",
+            (int(requirement_id),),
+        ).fetchone()
+        return self._from_row(row)
+
+    def get(self, project_id: int, topic_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM practice_topic_requirements "
+            "WHERE project_id = ? AND topic_id = ?",
+            (int(project_id), int(topic_id)),
+        ).fetchone()
+        return self._from_row(row)
+
+    def list_by_project(
+        self, project_id: int, active_only: bool = False
+    ) -> list[dict]:
+        sql = "SELECT * FROM practice_topic_requirements WHERE project_id = ?"
+        if active_only:
+            sql += " AND is_active = 1"
+        sql += " ORDER BY id ASC"
+        rows = self.conn.execute(sql, (int(project_id),)).fetchall()
+        return [self._from_row(r) for r in rows]
+
+    def list_by_topic(
+        self, topic_id: int, active_only: bool = True
+    ) -> list[dict]:
+        sql = "SELECT * FROM practice_topic_requirements WHERE topic_id = ?"
+        if active_only:
+            sql += " AND is_active = 1"
+        sql += " ORDER BY id ASC"
+        rows = self.conn.execute(sql, (int(topic_id),)).fetchall()
+        return [self._from_row(r) for r in rows]
+
+    def list_active(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM practice_topic_requirements WHERE is_active = 1 "
+            "ORDER BY project_id ASC, topic_id ASC"
+        ).fetchall()
+        return [self._from_row(r) for r in rows]
+
+    def deactivate(self, requirement_id: int, commit: bool = True) -> Optional[dict]:
+        if self.get_by_id(requirement_id) is None:
+            return None
+        self.conn.execute(
+            "UPDATE practice_topic_requirements SET is_active = 0, updated_at = ? "
+            "WHERE id = ?",
+            (now_iso(), int(requirement_id)),
+        )
+        if commit:
+            self.conn.commit()
+        return self.get_by_id(requirement_id)
+
+    def delete(self, requirement_id: int) -> bool:
+        """仅内部/测试使用；生产取消一律用 deactivate。"""
+        cur = self.conn.execute(
+            "DELETE FROM practice_topic_requirements WHERE id = ?",
+            (int(requirement_id),),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def count_by_project(self, project_id: int, active_only: bool = True) -> int:
+        sql = "SELECT COUNT(*) FROM practice_topic_requirements WHERE project_id = ?"
+        if active_only:
+            sql += " AND is_active = 1"
+        return int(self.conn.execute(sql, (int(project_id),)).fetchone()[0])
+
+    def has_any(self, project_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM practice_topic_requirements WHERE project_id = ? LIMIT 1",
+            (int(project_id),),
+        ).fetchone()
+        return row is not None

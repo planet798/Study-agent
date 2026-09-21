@@ -449,6 +449,7 @@ class StudyPlanService:
     def generate_daily_tasks(
         self, date_str: str, max_tasks: int | None = None,
         max_minutes: int | None = None,
+        preferred_topic_ids: list[int] | None = None,
     ) -> dict:
         """为 date_str 生成每日学习任务（不使用 LLM，规则简单可预测）。
 
@@ -563,11 +564,19 @@ class StudyPlanService:
         blocked_ids, jd_boost = self.skill_topic_views(phase.topics, date_str)
 
         # 优先级排序（Phase C）：
-        # 1. 前置满足（gate ok 在前） 2. 薄弱点 3. JD must/plus 4. 主题优先级 5. 原始顺序
+        # 1. 前置满足（gate ok 在前） 2. 主题优先级 3. JD must/plus 4. 原始顺序
+        # Phase 6：preferred_topic_ids（确定性 Planner Feedback 排序）优先，
+        # 保证 fallback 与 AI 路径使用同一套 Tier 优先级。
+        pref = {
+            int(tid): i
+            for i, tid in enumerate(preferred_topic_ids or [])
+        }
+        pref_missing = len(pref) + 1000
         topics = sorted(
             phase.topics,
             key=lambda t: (
                 int(t.id in blocked_ids),
+                pref.get(int(t.id), pref_missing),
                 -int(t.id in weak_ids),
                 -jd_boost.get(t.id, 0.0),
                 -t.priority,

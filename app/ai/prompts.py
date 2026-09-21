@@ -171,6 +171,7 @@ def build_planner_user_vars(
     skill = build_skill_priority_section(context)
     market = build_market_trend_section(context)
     activity = build_learning_activity_section(context)
+    feedback = build_planner_feedback_section(context)
     long_term_section = build_long_term_context_section(long_term)
 
     daily_limit = getattr(context, "current_daily_limit", 180)
@@ -184,6 +185,7 @@ def build_planner_user_vars(
         "skill_priority_section": ("\n\n" + skill) if skill else "",
         "market_trend_section": ("\n\n" + market) if market else "",
         "learning_activity_section": ("\n\n" + activity) if activity else "",
+        "planner_feedback_section": ("\n\n" + feedback) if feedback else "",
         "long_term_section": long_term_section,
         "output_instruction": "\n\n" + output_instruction,
         "daily_limit": daily_limit,
@@ -255,6 +257,48 @@ def build_learning_activity_section(context: "object") -> str:
         "使用要求：每个 topic 只能规划其“下一步活动”对应的任务；"
         "不得跳过未完成的必需活动，也不得自由更换 activity 类型。"
     )
+    return "\n".join(lines)
+
+
+def build_planner_feedback_section(context: "object") -> str:
+    """Phase 6：把已排序的 Planner Feedback 渲染为 Prompt 段；无则返回空串。
+
+    只传确定性信号：tier / project requirement / capability gap / next activity。
+    不传 Output 内容、本地路径、repo URI、details_json（隐私/噪声）。
+    """
+    feedback = getattr(context, "planner_feedback", None) or []
+    pool = set(getattr(context, "candidate_topic_ids", None) or [])
+    if not feedback:
+        return ""
+    lines = [
+        "【本轮优先级候选】（由系统确定性排序，你只能从 candidate 中选择）"
+    ]
+    for f in feedback[:20]:
+        mark = "candidate" if f.topic_id in pool else "-"
+        parts = [f"topic_id={f.topic_id}", f"tier={f.tier_label}", mark]
+        if f.active_project_blocker_count:
+            parts.append(
+                f"项目阻塞×{f.active_project_blocker_count}"
+                f"（最大能力缺口 {f.max_capability_gap}）"
+            )
+        if f.next_activity_label:
+            parts.append(f"下一步活动={f.next_activity_label}")
+        lines.append("- " + "；".join(parts))
+        for req in f.project_requirements[:3]:
+            lines.append(
+                f"    · 项目：{req.get('project_name', '')}；"
+                f"{req.get('current_capability', '')} → "
+                f"{req.get('target_capability', '')}"
+            )
+    if pool:
+        lines.append(
+            "使用要求：本轮只能从标记为 candidate 的 topic_id 中选择（最高优先级），"
+            "不得选择其它 tier 的 Topic，也不得创造新 Topic。"
+        )
+    else:
+        lines.append(
+            "使用要求：只能在 available_topics 中选择，不得创造新 Topic。"
+        )
     return "\n".join(lines)
 
 
