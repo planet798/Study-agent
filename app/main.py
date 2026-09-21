@@ -1071,6 +1071,8 @@ def _migrate_text(report: dict) -> str:
         lines.append(f"route_problems: {v['route_problems']}")
     if v["evidence_problems"]:
         lines.append(f"evidence_problems: {v['evidence_problems']}")
+    if v.get("component_problems"):
+        lines.append(f"component_problems: {v['component_problems']}")
     if v["history_decreases"]:
         lines.append(f"history_decreases: {v['history_decreases']}")
     if v.get("history_fingerprint_changes"):
@@ -1091,6 +1093,7 @@ def _verify_text(result: dict) -> str:
     )
     lines.append(f"route_problems: {result['route_problems']}")
     lines.append(f"evidence_problems: {result['evidence_problems']}")
+    lines.append(f"component_problems: {result.get('component_problems')}")
     if result.get("before"):
         lines.append(f"history_decreases: {result['history_decreases']}")
         lines.append(

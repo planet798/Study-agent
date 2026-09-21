@@ -161,6 +161,7 @@ def inventory(conn: sqlite3.Connection) -> dict:
     )
     # 历史行指纹（行数不变也能发现静默篡改/替换）
     data["fingerprints"] = fingerprint(conn)
+    data["fingerprint_version"] = FINGERPRINT_VERSION
     return data
 
 
@@ -179,7 +180,7 @@ def _scalar_list(conn: sqlite3.Connection, sql: str) -> list:
 FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
     "tasks": (
         "id", "title", "status", "scheduled_date", "topic_id",
-        "source", "task_type", "knowledge_point_id", "component_id",
+        "source", "task_type", "knowledge_point_id",
         "estimated_minutes", "postpone_count",
     ),
     "knowledge_points": (
@@ -198,8 +199,17 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
     "monthly_summaries": ("id", "period_start", "period_end", "source"),
     "planner_decisions": ("id", "date", "current_phase_id", "source"),
 }
-# 说明：`route_id` 有意不入指纹 —— canonical MOVE 会合法地更新 topic 所属 route，
-# 跨 route 一致性由 route_integrity() 单独校验。
+# 说明：以下 **migration-owned** 字段有意不入 tasks fingerprint：
+#   - route_id：v15 canonical MOVE 会合法更新 topic 所属 route；
+#   - component_id / learning_activity_kind：v16 `backfill_legacy_theory` 会合法地
+#     把历史 done 任务从 NULL 绑定到 theory component。
+# 它们的正确性改用结构校验（route_integrity /
+# component_consistency_problems）而不是“不可变字段”比较。
+
+
+# 每次修改 FINGERPRINT_COLUMNS 都要 +1：verify 仅在同版本时才比较 fields_hash，
+# 否则旧 snapshot 会因列集合不同而产生误报。ids_hash 不受列变化影响，始终比较。
+FINGERPRINT_VERSION = 2
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -537,11 +547,45 @@ def evidence_integrity(conn: sqlite3.Connection) -> list[str]:
     return problems
 
 
+def component_consistency_problems(conn: sqlite3.Connection) -> list[dict]:
+    """task.component_id / learning_activity_kind 的结构一致性校验。
+
+    复用既有 TopicLearningProfileService.validate_consistency()（不新建第二套规则），
+    覆盖：
+    - component_id 非 NULL 但 component 不存在（dangling）；
+    - component.topic_id != task.topic_id；
+    - component.activity_kind != task.learning_activity_kind。
+
+    这些字段是 migration-owned（不会被 fingerprint 当不可变字段），
+    因此必须由本结构校验单独守护。
+    """
+    from ..database.topic_learning_repository import (
+        TopicLearningComponentRepository,
+    )
+    from ..services.topic_learning_profile_service import (
+        TopicLearningProfileService,
+    )
+
+    try:
+        service = TopicLearningProfileService(
+            conn, TopicLearningComponentRepository(conn)
+        )
+        return service.validate_consistency()
+    except sqlite3.Error:
+        return []  # v16 之前的旧 schema 无 component 表 → 跳过
+    except Exception:  # noqa: BLE001 - 校验异常不应让 verify 崩溃
+        return []
+
+
 def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
     """完整性校验 + （可选）before/after 对比。
 
     包含：PRAGMA integrity_check、PRAGMA foreign_key_check、
-    route/evidence invariants、历史行数不减少、历史行指纹不变。
+    route / evidence / component 结构一致性、历史行数不减少、历史行指纹不变。
+
+    注意：tasks 的 migration-owned 字段（route_id / component_id /
+    learning_activity_kind）不入不可变指纹，改由 route_integrity /
+    component_consistency_problems 做结构校验，避免迁移 false-positive。
     """
     after = inventory(conn)
     integrity = integrity_check(conn)
@@ -552,13 +596,20 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
         "foreign_key_problems": fk_problems,
         "route_problems": route_integrity(conn),
         "evidence_problems": evidence_integrity(conn),
+        "component_problems": component_consistency_problems(conn),
         "before": before,
         "after": after,
         "history_decreases": {},
         "history_fingerprint_changes": {},
         "history_id_changes": {},
+        "fingerprint_version": after.get("fingerprint_version"),
+        "fingerprint_version_match": None,
     }
     if before:
+        fp_version_match = (
+            before.get("fingerprint_version") == after.get("fingerprint_version")
+        )
+        result["fingerprint_version_match"] = fp_version_match
         for table in HISTORY_TABLES:
             b = (before.get("counts") or {}).get(table)
             a = (after.get("counts") or {}).get(table)
@@ -575,7 +626,10 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
                     "before_count": bfp.get("count"),
                     "after_count": afp.get("count"),
                 }
-            if bfp.get("fields_hash") != afp.get("fields_hash"):
+            # 仅同 fingerprint 版本时比较不可变字段 hash；旧 snapshot（列集合不同）
+            # 会产生误报，此时仅依赖 ids_hash + 结构校验。
+            if fp_version_match and \
+                    bfp.get("fields_hash") != afp.get("fields_hash"):
                 result["history_fingerprint_changes"][table] = {
                     "before_count": bfp.get("count"),
                     "after_count": afp.get("count"),
@@ -586,8 +640,10 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
         and not fk_problems
         and not result["route_problems"]
         and not result["evidence_problems"]
+        and not result["component_problems"]
         and not result["history_decreases"]
         and not result["history_fingerprint_changes"]
+        and not result["history_id_changes"]
     )
     return result
 

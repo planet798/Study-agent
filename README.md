@@ -400,6 +400,14 @@ python -m app.main db-release verify --db "...\\study_agent.db" --before before.
 - **verify** 除行数外，还比较历史表的 id 集合 hash 与关键字段 hash（同数量静默篡改/
   替换也能发现），并运行 `PRAGMA integrity_check` / `PRAGMA foreign_key_check`；
   `route_id` 有意不入指纹（canonical MOVE 会合法更新它，跨 route 一致性单独校验）；
+  **migration-owned 字段**（tasks 的 `route_id` / `component_id` /
+  `learning_activity_kind`）一律不入不可变指纹（v15 MOVE、v16 legacy theory
+  backfill 会合法修改），改由结构校验守护：`route_integrity` +
+  `component_consistency_problems`（复用 `TopicLearningProfileService.
+  validate_consistency`：dangling component / topic mismatch / activity kind
+  mismatch）；
+- fingerprint 带 `fingerprint_version`：仅同版本才比较**字段** hash（列集合变化时不误报），
+  `ids_hash` 不受列变化影响始终比较；旧 snapshot（无版本）仍可用于 id 集合校验；
 - v20 不自动创建任何 Project / Requirement / PROJECT evidence。
 
 ### Migration Gate（GUI 启动）
