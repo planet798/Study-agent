@@ -39,6 +39,8 @@ from .practice_dialogs import (
     ManageProjectTopicsDialog,
     MilestoneEditorDialog,
     OutputEditorDialog,
+    PracticeTopicEvidenceDialog,
+    RevokeEvidenceDialog,
 )
 from .styles import apply_secondary_button_text
 
@@ -49,6 +51,20 @@ def _secondary(text: str, slot) -> QPushButton:
     apply_secondary_button_text(btn)
     btn.clicked.connect(slot)
     return btn
+
+
+def _clear_layout(layout) -> None:
+    """递归清空 layout（含嵌套 QHBoxLayout 行）。"""
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.setParent(None)
+            w.deleteLater()
+            continue
+        child = item.layout()
+        if child is not None:
+            _clear_layout(child)
 
 
 _FILTERS = (
@@ -62,12 +78,13 @@ _FILTERS = (
 
 class PracticeProjectsPage(QWidget):
     def __init__(self, practice_service, route_repo, skill_repo, plan_repo,
-                 parent=None):
+                 capability_service=None, parent=None):
         super().__init__(parent)
         self.service = practice_service
         self.route_repo = route_repo
         self.skill_repo = skill_repo
         self.plan_repo = plan_repo
+        self.capability_service = capability_service
         self._build_ui()
         self.refresh()
 
@@ -112,12 +129,7 @@ class PracticeProjectsPage(QWidget):
     # ---------- 渲染 ----------
 
     def refresh(self) -> None:
-        while self.list_layout.count():
-            item = self.list_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        _clear_layout(self.list_layout)
 
         status = self.filter_combo.currentData()
         if status is None:
@@ -156,11 +168,19 @@ class PracticeProjectsPage(QWidget):
         prog = self.service.get_project_progress(project["id"])
         ms_txt = (f"{prog['milestones_done']} / {prog['milestones_total']}"
                   if prog["has_milestones"] else "尚未设置里程碑")
+        evidence_txt = ""
+        if self.capability_service is not None:
+            try:
+                n = self.capability_service.count_active_by_project(project["id"])
+                evidence_txt = f"项目能力证据：{n}"
+            except Exception:  # noqa: BLE001
+                evidence_txt = ""
         meta = QLabel(
             f"状态：{project_status_label(project['status'])}　"
             f"类型：{project_type_label(project['project_type'])}\n"
             f"关联路线：{' · '.join(route_names) or '—'}\n"
             f"里程碑：{ms_txt}　成果：{prog['output_count']}"
+            + (f"　{evidence_txt}" if evidence_txt else "")
         )
         meta.setObjectName("TaskMeta")
         meta.setWordWrap(True)
@@ -208,7 +228,7 @@ class PracticeProjectsPage(QWidget):
     def _open_detail(self, project: dict) -> None:
         dlg = PracticeProjectDetailDialog(
             project["id"], self.service, self.route_repo, self.skill_repo,
-            self.plan_repo, parent=self,
+            self.plan_repo, self.capability_service, parent=self,
         )
         dlg.exec()
         self.refresh()
@@ -240,13 +260,14 @@ class PracticeProjectsPage(QWidget):
 
 class PracticeProjectDetailDialog(QDialog):
     def __init__(self, project_id, service, route_repo, skill_repo, plan_repo,
-                 parent=None):
+                 capability_service=None, parent=None):
         super().__init__(parent)
         self.project_id = project_id
         self.service = service
         self.route_repo = route_repo
         self.skill_repo = skill_repo
         self.plan_repo = plan_repo
+        self.capability_service = capability_service
         self.setWindowTitle("实践项目")
         self.setModal(True)
         self.resize(680, 640)
@@ -278,12 +299,7 @@ class PracticeProjectDetailDialog(QDialog):
 
     def refresh(self) -> None:
         value = self.scroll.verticalScrollBar().value()
-        while self.body_layout.count():
-            item = self.body_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        _clear_layout(self.body_layout)
         detail = self.service.get_project_detail(self.project_id)
         p = detail["project"]
         self.title_label.setText(p["name"])
@@ -305,6 +321,7 @@ class PracticeProjectDetailDialog(QDialog):
         self._topics_section(detail["topics"])
         self._milestones_section(detail["milestones"])
         self._outputs_section(detail["outputs"])
+        self._evidence_section()
         self.body_layout.addStretch()
         QTimer.singleShot(0, lambda: self._restore_scroll(value))
         QTimer.singleShot(60, lambda: self._restore_scroll(value))
@@ -419,6 +436,106 @@ class PracticeProjectDetailDialog(QDialog):
                 "删除", lambda _=False, oo=o: self._delete_output(oo)
             ))
             self.body_layout.addLayout(row)
+
+    # ---------- Phase 5：项目能力证据 ----------
+
+    def _evidence_section(self) -> None:
+        head = QHBoxLayout()
+        head.addWidget(self._section("【项目能力证据】"))
+        head.addStretch()
+        self.body_layout.addLayout(head)
+        if self.capability_service is None:
+            lbl = QLabel("未启用项目能力证据")
+            lbl.setObjectName("TaskMeta")
+            self.body_layout.addWidget(lbl)
+            return
+        candidates = self.capability_service.list_evidence_candidates(
+            self.project_id
+        )
+        if not candidates:
+            lbl = QLabel(
+                "项目尚未关联 Topic；关联后可逐 Topic 确认项目使用证据。"
+            )
+            lbl.setObjectName("TaskMeta")
+            lbl.setWordWrap(True)
+            self.body_layout.addWidget(lbl)
+            return
+        for c in candidates:
+            row = QHBoxLayout()
+            if c["has_active_evidence"]:
+                ev = self.capability_service.get_topic_evidence(
+                    c["active_evidence_id"]
+                ) or {}
+                outputs = " · ".join(ev.get("output_labels") or [])
+                lbl = QLabel(
+                    f"{c['topic_name']}\n✓ 已在真实项目中使用\n"
+                    f"支撑成果：{outputs or '—'}\n"
+                    f"项目使用：{ev.get('usage_description') or ''}"
+                )
+                row.addWidget(lbl, stretch=1)
+                row.addWidget(_secondary(
+                    "查看证据",
+                    lambda _=False, cc=c: self._view_topic_evidence(cc),
+                ))
+                row.addWidget(_secondary(
+                    "撤销证据",
+                    lambda _=False, cc=c: self._revoke_topic_evidence(cc),
+                ))
+            else:
+                if c["eligible"]:
+                    status = "可确认项目能力证据"
+                else:
+                    status = (
+                        "尚未确认项目使用证据"
+                        + (f"（{c['reason_label']}）" if c["reason_label"] else "")
+                    )
+                lbl = QLabel(f"{c['topic_name']}\n{status}")
+                row.addWidget(lbl, stretch=1)
+                btn = _secondary(
+                    "确认项目使用",
+                    lambda _=False, cc=c: self._confirm_topic_evidence(cc),
+                )
+                btn.setEnabled(bool(c["eligible"]))
+                row.addWidget(btn)
+            lbl.setObjectName("TaskMeta")
+            lbl.setWordWrap(True)
+            self.body_layout.addLayout(row)
+
+    def _confirm_topic_evidence(self, candidate) -> None:
+        project = self.service.projects.get(self.project_id)
+        outputs = self.service.outputs.list_by_project(self.project_id)
+        route = None
+        if candidate.get("route_id") is not None and self.route_repo is not None:
+            route = self.route_repo.get(candidate["route_id"])
+        dlg = PracticeTopicEvidenceDialog(
+            project, candidate["topic_id"], candidate["topic_name"],
+            getattr(route, "name", "") if route else "", outputs,
+            self.capability_service, parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.refresh()
+
+    def _view_topic_evidence(self, candidate) -> None:
+        from .capability_dialog import CapabilityEvidenceDialog
+
+        CapabilityEvidenceDialog(
+            candidate["topic_name"], candidate["knowledge_point_id"],
+            self.capability_service.capability_service,
+            practice_capability_service=self.capability_service, parent=self,
+        ).exec()
+
+    def _revoke_topic_evidence(self, candidate) -> None:
+        dlg = RevokeEvidenceDialog(candidate["topic_name"], parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.capability_service.revoke_project_topic_evidence(
+                candidate["active_evidence_id"], dlg.reason()
+            )
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "撤销失败", str(e))
+            return
+        self.refresh()
 
     # ---------- manage ----------
 

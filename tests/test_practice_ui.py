@@ -167,9 +167,14 @@ class TestBoundaries:
         for i in range(10):
             env.service.add_output(p["id"], "result", f"out{i}", uri=f"u{i}")
         env.service.set_status(p["id"], "completed")
-        # PROJECT 仍不可生成，capability 不变
-        assert cap.can_generate_project() is False
+        # Phase 5：没有用户显式确认的 PracticeTopicEvidence，绝不产生 Level 5。
+        # can_generate_project() 现在为 True（唯一路径是 PracticeTopicEvidence），
+        # 但“project completed + outputs”本身不会写任何 capability。
+        assert cap.can_generate_project() is True
         assert cap.get_current_level(lora.id) == 0
+        assert env.conn.execute(
+            "SELECT COUNT(*) FROM capability_evidence WHERE is_active = 1"
+        ).fetchone()[0] == 0
 
     def test_planner_scheduler_do_not_reference_practice(self):
         import app.services.daily_planner_service as dps

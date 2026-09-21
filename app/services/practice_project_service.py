@@ -9,6 +9,11 @@
 - Practice 不是 LearningRoute，也不影响 Planner / Scheduler / Review /
   Mastery / Capability；
 - 不自动创建项目，不自动生成 LearningOutcome / capability evidence。
+
+Phase 5 追加保护：
+- Output 被 active PracticeTopicEvidence 引用时：禁止删除、锁定关键字段修改；
+- Topic 存在 active evidence 时禁止解除关联；
+- 项目只要产生过 PracticeTopicEvidence（含已撤销历史）就禁止物理删除。
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from ..database.practice_repository import (
     PracticeMilestoneRepository,
     PracticeOutputRepository,
     PracticeProjectRepository,
+    PracticeTopicEvidenceRepository,
 )
 from ..database.study_plan_repository import StudyPlanRepository
 from ..utils.date_utils import now_iso
@@ -71,6 +77,7 @@ class PracticeProjectService:
         route_repo: LearningRouteRepository | None = None,
         plan_repo: StudyPlanRepository | None = None,
         skill_repo=None,
+        evidence_repo: PracticeTopicEvidenceRepository | None = None,
     ):
         self.conn = conn
         self.projects = project_repo or PracticeProjectRepository(conn)
@@ -79,6 +86,7 @@ class PracticeProjectService:
         self.route_repo = route_repo or LearningRouteRepository(conn)
         self.plan_repo = plan_repo or StudyPlanRepository(conn)
         self.skill_repo = skill_repo
+        self.evidence_repo = evidence_repo or PracticeTopicEvidenceRepository(conn)
 
     # ================= Project =================
 
@@ -166,8 +174,17 @@ class PracticeProjectService:
         )
 
     def delete_project(self, project_id: int) -> bool:
-        """仅空壳项目允许物理删除；有 milestone/output/relation 必须归档。"""
+        """仅空壳项目允许物理删除；有 milestone/output/relation 必须归档。
+
+        Phase 5：只要产生过 PracticeTopicEvidence（含已撤销的历史行），
+        项目就是历史能力证据来源，禁止物理删除。
+        """
         self._require(project_id)
+        if self.evidence_repo.has_any_evidence(project_id):
+            raise PracticeError(
+                "该项目已产生项目能力证据（含已撤销历史），不能物理删除；"
+                "请改为归档。"
+            )
         if self.projects.has_history(project_id):
             raise PracticeError(
                 "该项目已有里程碑 / 成果 / 关联，不能物理删除；请改为归档。"
@@ -296,12 +313,25 @@ class PracticeProjectService:
 
     def remove_topic(self, project_id: int, topic_id: int) -> bool:
         self._require(project_id)
+        if self.evidence_repo.has_active_topic_reference(project_id, topic_id):
+            raise PracticeError(
+                "该 Topic 存在生效的项目使用证据，不能解除关联；"
+                "请先撤销对应能力证据。"
+            )
         return self.projects.remove_topic(project_id, topic_id)
 
     def set_topics(self, project_id: int, topic_ids: list[int]) -> dict:
         self._require(project_id)
         for tid in topic_ids:
             self._assert_topic_in_project_routes(project_id, tid)
+        removed = set(self.projects.list_topic_ids(project_id)) - set(
+            int(t) for t in topic_ids
+        )
+        for tid in removed:
+            if self.evidence_repo.has_active_topic_reference(project_id, tid):
+                raise PracticeError(
+                    "被移除的 Topic 存在生效的项目使用证据，请先撤销能力证据。"
+                )
         try:
             self.conn.execute("BEGIN")
             self.conn.execute(
@@ -429,6 +459,10 @@ class PracticeProjectService:
             project_id, output_type, title, description, uri, details
         )
 
+    _EVIDENCE_LOCKED_OUTPUT_FIELDS = (
+        "output_type", "uri", "details", "description",
+    )
+
     def update_output(self, output_id: int, **fields) -> dict:
         o = self.outputs.get(output_id)
         if o is None:
@@ -438,10 +472,25 @@ class PracticeProjectService:
             raise PracticeError("非法成果类型")
         _assert_no_secret(fields.get("uri"), fields.get("title"),
                           fields.get("description"))
+        if self.evidence_repo.has_active_output_reference(output_id):
+            locked = [
+                k for k in self._EVIDENCE_LOCKED_OUTPUT_FIELDS
+                if k in fields
+            ]
+            if locked:
+                raise PracticeError(
+                    "该成果正在支持项目能力证据，不能修改类型 / 链接 / "
+                    "结构化信息 / 说明；请先撤销对应能力证据。"
+                )
         return self.outputs.update(output_id, **fields)
 
     def delete_output(self, output_id: int) -> bool:
-        # Phase 4 尚无 Capability 引用；集中入口，Phase 5 可收紧为 soft delete
+        """Phase 5：被 active PracticeTopicEvidence 引用的成果禁止物理删除。"""
+        if self.evidence_repo.has_active_output_reference(output_id):
+            raise PracticeError(
+                "该成果正在支持项目能力证据，不能删除；"
+                "请先撤销对应能力证据。"
+            )
         return self.outputs.delete(output_id)
 
     def output_count(self, project_id: int) -> int:

@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1233,6 +1233,75 @@ def _migrate_v18(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[18] = _migrate_v18
+
+
+# ============================================================
+# v19：Practice → Capability（Phase 5）
+# ============================================================
+#
+# PracticeTopicEvidence 是原始事实实体：
+#   “用户确认某 Topic 在某 Project 中被真实使用，并由哪些 Output 支撑”。
+# CapabilityEvidence 只是根据该事实得出的 Level 5 结论：
+#   capability_evidence.practice_topic_evidence_id → practice_topic_evidence.id
+#
+# 不修改 mastery / review / tasks / activity / scheduler。
+# 不自动创建任何 PROJECT evidence（必须用户显式确认）。
+
+_V19_SQL = """
+CREATE TABLE IF NOT EXISTS practice_topic_evidence (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id         INTEGER NOT NULL REFERENCES practice_projects(id),
+    topic_id           INTEGER NOT NULL REFERENCES study_topics(id),
+    knowledge_point_id INTEGER NOT NULL REFERENCES knowledge_points(id),
+    usage_description  TEXT    NOT NULL,
+    is_active          INTEGER NOT NULL DEFAULT 1,
+    created_at         TEXT    NOT NULL DEFAULT '',
+    revoked_at         TEXT,
+    revocation_reason  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_evidence_project
+    ON practice_topic_evidence(project_id);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_evidence_topic
+    ON practice_topic_evidence(topic_id);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_evidence_kp
+    ON practice_topic_evidence(knowledge_point_id);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_evidence_active
+    ON practice_topic_evidence(is_active);
+-- 一个 Project + Topic 只允许一个 active evidence；历史（revoked）行保留。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_topic_evidence_active_unique
+    ON practice_topic_evidence(project_id, topic_id) WHERE is_active = 1;
+
+CREATE TABLE IF NOT EXISTS practice_topic_evidence_outputs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    evidence_id INTEGER NOT NULL
+                REFERENCES practice_topic_evidence(id) ON DELETE CASCADE,
+    output_id   INTEGER NOT NULL
+                REFERENCES practice_outputs(id) ON DELETE CASCADE,
+    created_at  TEXT    NOT NULL DEFAULT '',
+    UNIQUE(evidence_id, output_id)
+);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_evidence_outputs_evidence
+    ON practice_topic_evidence_outputs(evidence_id);
+CREATE INDEX IF NOT EXISTS idx_practice_topic_evidence_outputs_output
+    ON practice_topic_evidence_outputs(output_id);
+"""
+
+
+def _migrate_v19(conn: sqlite3.Connection) -> None:
+    """v19：PracticeTopicEvidence + evidence→output 关系 + capability 引用列。"""
+    conn.executescript(_V19_SQL)
+    # capability_evidence 引用原始事实（NULL 表示非实践证据）
+    add_column_if_not_exists(
+        conn, "capability_evidence", "practice_topic_evidence_id", "INTEGER"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_capability_evidence_practice "
+        "ON capability_evidence(practice_topic_evidence_id)"
+    )
+    conn.commit()
+
+
+_MIGRATIONS[19] = _migrate_v19
 
 
 def get_schema_version(conn) -> int:

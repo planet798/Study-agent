@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         topic_learning_service=None,
         capability_service=None,
         practice_service=None,
+        practice_capability_service=None,
     ):
         super().__init__()
         self.task_service = task_service
@@ -170,6 +171,8 @@ class MainWindow(QMainWindow):
         self.capability_service = capability_service
         # Phase 4：Practice / Project Layer（可选）
         self.practice_service = practice_service
+        # Phase 5：Practice → Capability（可选）
+        self.practice_capability_service = practice_capability_service
         # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
@@ -329,7 +332,8 @@ class MainWindow(QMainWindow):
             from .summary_pages import MonthlySummaryPage
 
             self.monthly_page = MonthlySummaryPage(
-                self.summary_service, today_provider=self.today_provider
+                self.summary_service, today_provider=self.today_provider,
+                practice_capability_service=self.practice_capability_service,
             )
             self.stack.addWidget(self.monthly_page)
             self.monthly_page_index = self.stack.count() - 1
@@ -351,6 +355,7 @@ class MainWindow(QMainWindow):
                 capability_service=self.capability_service,
                 outcome_service=self.outcome_service,
                 practice_service=self.practice_service,
+                practice_capability_service=self.practice_capability_service,
             )
             self.stack.addWidget(self.routes_page)
             self.routes_page_index = self.stack.count() - 1
@@ -368,6 +373,7 @@ class MainWindow(QMainWindow):
                 getattr(self.route_service, "route_repo", None),
                 self.skill_service.skill_repo if self.skill_service else None,
                 self.practice_service.plan_repo,
+                capability_service=self.practice_capability_service,
             )
             self.stack.addWidget(self.practice_page)
             self.practice_page_index = self.stack.count() - 1

@@ -7,7 +7,7 @@ import sqlite3
 
 class TestSchemaV18:
     def test_version_and_tables(self, conn):
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 18
         tables = {
             r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -104,7 +104,7 @@ class TestSequentialMigrationV18:
         route_repo = LearningRouteRepository(conn)
         skill_repo = SkillRepository(conn)
         CanonicalRouteService(conn, route_repo, plan_repo, skill_repo).ensure_all()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 18
         # v18 只建表，不自动创建任何用户 Project
         assert conn.execute(
             "SELECT COUNT(*) FROM practice_projects"
@@ -123,6 +123,6 @@ class TestSequentialMigrationV18:
 
         path = tmp_path / "idem.db"
         conn = get_connection(path)
-        assert migrate(conn) == 18
-        assert migrate(conn) == 18
+        assert migrate(conn) >= 18
+        assert migrate(conn) >= 18
         conn.close()

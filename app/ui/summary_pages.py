@@ -87,10 +87,12 @@ def _add_pair(lay: QVBoxLayout, label: str, value: str) -> None:
 class MonthlySummaryPage(QWidget):
     """月总结页面：选择月份 + 统计 + 分类排行榜 + AI。"""
 
-    def __init__(self, summary_service, today_provider=None, parent=None):
+    def __init__(self, summary_service, today_provider=None,
+                 practice_capability_service=None, parent=None):
         super().__init__(parent)
         self.summary_service = summary_service
         self.today_provider = today_provider or _default_today
+        self.practice_capability_service = practice_capability_service
         y, m = self._current_ym()
         self.year, self.month = y, m
         self._build_ui()
@@ -145,6 +147,15 @@ class MonthlySummaryPage(QWidget):
         self.route_label.setWordWrap(True)
         self.route_label.setObjectName("TaskMeta")
         outer.addWidget(self.route_label)
+
+        # Phase 5：本月项目能力证据（只计数，不平均 Capability）
+        self.practice_title = QLabel("项目能力证据")
+        self.practice_title.setObjectName("SectionTitle")
+        outer.addWidget(self.practice_title)
+        self.practice_label = QLabel("")
+        self.practice_label.setWordWrap(True)
+        self.practice_label.setObjectName("TaskMeta")
+        outer.addWidget(self.practice_label)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -231,12 +242,40 @@ class MonthlySummaryPage(QWidget):
             "\n".join(route_lines) if route_lines else "暂无路线数据"
         )
 
+        self._render_practice_evidence(result)
+
         while self.ai_layout.count():
             item = self.ai_layout.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
         self.ai_layout.addWidget(_ai_section(result.get("ai_summary")))
+
+    def _render_practice_evidence(self, result: dict) -> None:
+        """本月新增项目能力证据：只显示计数与 Topic 名称，绝不平均 Capability。"""
+        if self.practice_capability_service is None:
+            self.practice_label.setText("未启用项目能力证据")
+            return
+        try:
+            rows = self.practice_capability_service.list_active_created()
+        except Exception:  # noqa: BLE001
+            self.practice_label.setText("未启用项目能力证据")
+            return
+        start, end = result["start"], result["end"]
+        month_rows = [r for r in rows if start <= (r["created_at"] or "")[:10] <= end]
+        if not month_rows:
+            self.practice_label.setText("本月新增项目能力证据：PROJECT：0")
+            return
+        names = []
+        for r in month_rows:
+            topic = self.practice_capability_service.plan_repo.get_topic(
+                int(r["topic_id"])
+            )
+            names.append(getattr(topic, "name", "") if topic else "—")
+        self.practice_label.setText(
+            f"本月新增项目能力证据：PROJECT：{len(month_rows)}\n"
+            + "、".join(n for n in names if n)
+        )
 
     def _prev(self) -> None:
         if self.month == 1:

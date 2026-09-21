@@ -62,7 +62,8 @@ class RouteDetailDialog(QDialog):
                  progress_service=None, today_provider=None,
                  ai_route_service=None, skill_service=None,
                  topic_learning_service=None, capability_service=None,
-                 outcome_service=None, practice_service=None):
+                 outcome_service=None, practice_service=None,
+                 practice_capability_service=None):
         super().__init__(parent)
         self.route = route
         self.route_service = route_service
@@ -75,6 +76,7 @@ class RouteDetailDialog(QDialog):
         self.capability_service = capability_service
         self.outcome_service = outcome_service
         self.practice_service = practice_service
+        self.practice_capability_service = practice_capability_service
         self._ai_worker = None
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
@@ -338,6 +340,7 @@ class RouteDetailDialog(QDialog):
 
         CapabilityEvidenceDialog(
             ks.name, ks.knowledge_point_id, self.capability_service,
+            practice_capability_service=self.practice_capability_service,
             parent=self,
         ).exec()
 
@@ -790,7 +793,8 @@ class LearningRoutesPage(QWidget):
                  progress_service=None, today_provider=None,
                  ai_route_service=None, skill_service=None,
                  topic_learning_service=None, capability_service=None,
-                 outcome_service=None, practice_service=None):
+                 outcome_service=None, practice_service=None,
+                 practice_capability_service=None):
         super().__init__(parent)
         self.route_service = route_service
         self.route_plan_service = route_plan_service
@@ -802,6 +806,7 @@ class LearningRoutesPage(QWidget):
         self.capability_service = capability_service
         self.outcome_service = outcome_service
         self.practice_service = practice_service
+        self.practice_capability_service = practice_capability_service
         self.show_archived = False
         self._build_ui()
         self.refresh()
@@ -1059,6 +1064,7 @@ class LearningRoutesPage(QWidget):
             capability_service=self.capability_service,
             outcome_service=self.outcome_service,
             practice_service=self.practice_service,
+            practice_capability_service=self.practice_capability_service,
         )
         dlg.exec()
         self.refresh()

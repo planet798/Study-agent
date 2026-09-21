@@ -131,3 +131,32 @@ def milestone_status_label(value: str | None) -> str:
 
 def output_type_label(value: str | None) -> str:
     return OUTPUT_TYPE_LABELS.get(value or "", value or "")
+
+
+# ============================================================
+# Phase 5：项目能力证据（PracticeTopicEvidence）
+# ============================================================
+#
+# 只有“qualifying project artifact”能作为 PROJECT 能力的主要支撑：
+#   repository / code / result / benchmark / checkpoint / demo /
+#   paper_reproduction
+# 以下只能作为辅助材料：
+#   report / readme / dataset / other
+# 注意：只有 README / Dataset / Report 不能单独产生 PROJECT。
+
+QUALIFYING_PROJECT_OUTPUT_TYPES: tuple[str, ...] = (
+    "repository", "code", "result", "benchmark", "checkpoint", "demo",
+    "paper_reproduction",
+)
+
+SUPPORTING_PROJECT_OUTPUT_TYPES: tuple[str, ...] = (
+    "report", "readme", "dataset", "other",
+)
+
+
+def is_qualifying_project_output_type(value: str | None) -> bool:
+    return (value or "") in QUALIFYING_PROJECT_OUTPUT_TYPES
+
+
+def is_supporting_project_output_type(value: str | None) -> bool:
+    return (value or "") in SUPPORTING_PROJECT_OUTPUT_TYPES

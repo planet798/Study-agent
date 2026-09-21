@@ -466,3 +466,264 @@ class PracticeOutputRepository:
             (int(project_id),),
         ).fetchone()
         return int(row[0])
+
+
+class PracticeTopicEvidenceRepository:
+    """PracticeTopicEvidence 数据访问（Phase 5）。
+
+    所有 SQL 集中在此。默认 commit，但事务类调用可传 commit=False，
+    以便与 CapabilityEvidence 在同一事务内原子创建/撤销。
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    # ---------- 转换 ----------
+
+    @staticmethod
+    def _from_row(row) -> Optional[dict]:
+        if row is None:
+            return None
+        d = dict(row)
+        d["is_active"] = bool(d.get("is_active"))
+        return d
+
+    # ---------- practice_topic_evidence ----------
+
+    def create(
+        self,
+        *,
+        project_id: int,
+        topic_id: int,
+        knowledge_point_id: int,
+        usage_description: str,
+        commit: bool = True,
+    ) -> dict:
+        usage_description = (usage_description or "").strip()
+        if not usage_description:
+            raise ValueError("项目使用说明不能为空")
+        cur = self.conn.execute(
+            "INSERT INTO practice_topic_evidence "
+            "(project_id, topic_id, knowledge_point_id, usage_description,"
+            " is_active, created_at, revoked_at, revocation_reason) "
+            "VALUES (?, ?, ?, ?, 1, ?, NULL, NULL)",
+            (int(project_id), int(topic_id), int(knowledge_point_id),
+             usage_description, now_iso()),
+        )
+        if commit:
+            self.conn.commit()
+        return self.get(cur.lastrowid)
+
+    def get(self, evidence_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM practice_topic_evidence WHERE id = ?",
+            (int(evidence_id),),
+        ).fetchone()
+        return self._from_row(row)
+
+    def get_active_by_project_topic(
+        self, project_id: int, topic_id: int
+    ) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM practice_topic_evidence "
+            "WHERE project_id = ? AND topic_id = ? AND is_active = 1 "
+            "ORDER BY id DESC LIMIT 1",
+            (int(project_id), int(topic_id)),
+        ).fetchone()
+        return self._from_row(row)
+
+    def list_by_project(
+        self, project_id: int, active_only: bool = False
+    ) -> list[dict]:
+        sql = "SELECT * FROM practice_topic_evidence WHERE project_id = ?"
+        if active_only:
+            sql += " AND is_active = 1"
+        sql += " ORDER BY id ASC"
+        rows = self.conn.execute(sql, (int(project_id),)).fetchall()
+        return [self._from_row(r) for r in rows]
+
+    def list_by_topic(
+        self, topic_id: int, active_only: bool = False
+    ) -> list[dict]:
+        sql = "SELECT * FROM practice_topic_evidence WHERE topic_id = ?"
+        if active_only:
+            sql += " AND is_active = 1"
+        sql += " ORDER BY id ASC"
+        rows = self.conn.execute(sql, (int(topic_id),)).fetchall()
+        return [self._from_row(r) for r in rows]
+
+    def list_by_kp(
+        self, knowledge_point_id: int, active_only: bool = False
+    ) -> list[dict]:
+        sql = "SELECT * FROM practice_topic_evidence WHERE knowledge_point_id = ?"
+        if active_only:
+            sql += " AND is_active = 1"
+        sql += " ORDER BY id ASC"
+        rows = self.conn.execute(sql, (int(knowledge_point_id),)).fetchall()
+        return [self._from_row(r) for r in rows]
+
+    def revoke(
+        self, evidence_id: int, reason: str = "", commit: bool = True
+    ) -> Optional[dict]:
+        """撤销（不物理删除，保留历史行）。"""
+        if self.get(evidence_id) is None:
+            return None
+        self.conn.execute(
+            "UPDATE practice_topic_evidence SET is_active = 0, revoked_at = ?,"
+            " revocation_reason = ? WHERE id = ?",
+            (now_iso(), reason or "", int(evidence_id)),
+        )
+        if commit:
+            self.conn.commit()
+        return self.get(evidence_id)
+
+    def has_active_topic_reference(self, project_id: int, topic_id: int) -> bool:
+        return self.get_active_by_project_topic(project_id, topic_id) is not None
+
+    def has_any_evidence(self, project_id: int) -> bool:
+        """含 revoked 历史行：决定项目能否物理删除。"""
+        row = self.conn.execute(
+            "SELECT 1 FROM practice_topic_evidence WHERE project_id = ? LIMIT 1",
+            (int(project_id),),
+        ).fetchone()
+        return row is not None
+
+    def count_active_by_project(self, project_id: int) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM practice_topic_evidence "
+            "WHERE project_id = ? AND is_active = 1",
+            (int(project_id),),
+        ).fetchone()
+        return int(row[0])
+
+    def count_active_by_topic(self, topic_id: int) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM practice_topic_evidence "
+            "WHERE topic_id = ? AND is_active = 1",
+            (int(topic_id),),
+        ).fetchone()
+        return int(row[0])
+
+    def count_active_by_kp(self, knowledge_point_id: int) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM practice_topic_evidence "
+            "WHERE knowledge_point_id = ? AND is_active = 1",
+            (int(knowledge_point_id),),
+        ).fetchone()
+        return int(row[0])
+
+    def count_created_between(self, start: str, end: str) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM practice_topic_evidence "
+            "WHERE created_at >= ? AND created_at <= ?",
+            (start, end),
+        ).fetchone()
+        return int(row[0])
+
+    def list_active_created(self) -> list[dict]:
+        """active evidence 的 (topic_id, created_at) 轻量列表（月总结用）。"""
+        rows = self.conn.execute(
+            "SELECT topic_id, created_at FROM practice_topic_evidence "
+            "WHERE is_active = 1 ORDER BY id ASC"
+        ).fetchall()
+        return [{"topic_id": int(r[0]), "created_at": r[1]} for r in rows]
+
+    # ---------- evidence ↔ outputs ----------
+
+    def add_output(
+        self, evidence_id: int, output_id: int, commit: bool = True
+    ) -> bool:
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO practice_topic_evidence_outputs "
+            "(evidence_id, output_id, created_at) VALUES (?, ?, ?)",
+            (int(evidence_id), int(output_id), now_iso()),
+        )
+        if commit:
+            self.conn.commit()
+        return cur.rowcount > 0
+
+    def list_output_ids(self, evidence_id: int) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT output_id FROM practice_topic_evidence_outputs "
+            "WHERE evidence_id = ? ORDER BY output_id",
+            (int(evidence_id),),
+        ).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def list_outputs(self, evidence_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT o.* FROM practice_outputs o "
+            "JOIN practice_topic_evidence_outputs l ON l.output_id = o.id "
+            "WHERE l.evidence_id = ? ORDER BY o.id ASC",
+            (int(evidence_id),),
+        ).fetchall()
+        return [PracticeOutputRepository._from_row(r) for r in rows]
+
+    def has_active_output_reference(self, output_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM practice_topic_evidence_outputs l "
+            "JOIN practice_topic_evidence e ON e.id = l.evidence_id "
+            "WHERE l.output_id = ? AND e.is_active = 1 LIMIT 1",
+            (int(output_id),),
+        ).fetchone()
+        return row is not None
+
+    # ---------- knowledge_points（Phase 5 确定性路径） ----------
+
+    def find_knowledge_point_by_topic(self, topic_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM knowledge_points WHERE topic_id = ? "
+            "ORDER BY id ASC LIMIT 1",
+            (int(topic_id),),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def find_knowledge_point_by_name_route(
+        self, name: str, route_id: int | None
+    ) -> Optional[dict]:
+        if route_id is None:
+            row = self.conn.execute(
+                "SELECT * FROM knowledge_points WHERE name = ? "
+                "AND route_id IS NULL ORDER BY id ASC LIMIT 1",
+                (name,),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT * FROM knowledge_points WHERE name = ? AND route_id = ? "
+                "ORDER BY id ASC LIMIT 1",
+                (name, int(route_id)),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def link_knowledge_point_to_topic(
+        self, knowledge_point_id: int, topic_id: int, commit: bool = False
+    ) -> Optional[dict]:
+        """只补 topic 关系；不改 mastery / review / assessment。"""
+        self.conn.execute(
+            "UPDATE knowledge_points SET topic_id = ?, updated_at = ? WHERE id = ?",
+            (int(topic_id), now_iso(), int(knowledge_point_id)),
+        )
+        if commit:
+            self.conn.commit()
+        return self.find_knowledge_point_by_topic(topic_id)
+
+    def insert_topic_linked_knowledge_point(
+        self, *, topic_id: int, route_id: int, name: str,
+        description: str = "", commit: bool = False,
+    ) -> dict:
+        """确定性创建 topic-linked KP：mastery=0 / 无 assessment / 无 review。"""
+        ts = now_iso()
+        cur = self.conn.execute(
+            "INSERT INTO knowledge_points "
+            "(topic_id, route_id, name, description, first_learned_at,"
+            " last_assessed_at, mastery_estimate, review_count, next_review_date,"
+            " interval_days, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, NULL, NULL, 0.0, 0, NULL, 0, ?, ?)",
+            (int(topic_id), int(route_id), name, description or "", ts, ts),
+        )
+        if commit:
+            self.conn.commit()
+        row = self.conn.execute(
+            "SELECT * FROM knowledge_points WHERE id = ?", (cur.lastrowid,)
+        ).fetchone()
+        return dict(row)

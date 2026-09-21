@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -473,3 +474,150 @@ class OutputEditorDialog(QDialog):
             self.error_label.setVisible(True)
             return
         self.accept()
+
+
+class PracticeTopicEvidenceDialog(QDialog):
+    """确认项目使用 → 形成 PROJECT 能力证据（Phase 5）。
+
+    文案原则：不写“系统已验证”；表达“用户提供并确认真实产出”。
+    """
+
+    def __init__(self, project, topic_id, topic_name, route_name, outputs,
+                 capability_service, parent=None):
+        super().__init__(parent)
+        self._service = capability_service
+        self._project = project
+        self._topic_id = int(topic_id)
+        self._outputs = outputs
+        self.setWindowTitle("确认项目使用证据")
+        self.setModal(True)
+        self.resize(560, 620)
+
+        root = QVBoxLayout(self)
+        info = QLabel(
+            f"项目：{project.get('name', '')}\n"
+            f"Topic：{topic_name}\n"
+            f"Route：{route_name or '—'}"
+        )
+        info.setObjectName("TaskMeta")
+        info.setWordWrap(True)
+        root.addWidget(info)
+
+        hint = QLabel(
+            "【项目使用证据】请如实填写该 Topic 在项目中的真实使用方式，"
+            "并选择支撑成果。系统不会自动验证外部链接，"
+            "证据来自你的确认与真实产出。"
+        )
+        hint.setObjectName("TaskMeta")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        root.addWidget(QLabel("项目使用说明 *"))
+        self.usage_edit = QPlainTextEdit()
+        self.usage_edit.setPlaceholderText(
+            "例如：使用 LoRA 对 Qwen 模型进行参数高效微调，"
+            "完成 adapter 训练、保存、加载和评估。"
+        )
+        self.usage_edit.setFixedHeight(90)
+        root.addWidget(self.usage_edit)
+
+        root.addWidget(QLabel("选择支撑成果（至少一个可作为主要证据）"))
+        self.output_list = QListWidget()
+        for o in outputs:
+            role = self._service.output_role_label(o)
+            label = f"{output_type_label(o.get('output_type'))} · {o.get('title')}　[{role}]"
+            it = QListWidgetItem(label)
+            it.setData(Qt.ItemDataRole.UserRole, int(o["id"]))
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(
+                Qt.CheckState.Checked if role == "主要证据"
+                else Qt.CheckState.Unchecked
+            )
+            self.output_list.addItem(it)
+        root.addWidget(self.output_list, stretch=1)
+
+        self.confirm_check = QCheckBox(
+            "我确认该 Topic 确实在此项目中实际使用，并由以上项目成果支撑。"
+        )
+        root.addWidget(self.confirm_check)
+
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #e74c3c;")
+        self.error_label.setWordWrap(True)
+        self.error_label.setVisible(False)
+        root.addWidget(self.error_label)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "形成项目能力证据"
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def selected_output_ids(self) -> list[int]:
+        return _checked_ids(self.output_list)
+
+    def _on_accept(self) -> None:
+        if not self.usage_edit.toPlainText().strip():
+            self._err("必须填写项目使用说明。")
+            return
+        if not self.selected_output_ids():
+            self._err("至少选择一个支撑成果。")
+            return
+        if not self.confirm_check.isChecked():
+            self._err("必须显式确认该 Topic 确实在此项目中实际使用。")
+            return
+        try:
+            self._result = self._service.create_project_topic_evidence(
+                self._project["id"], self._topic_id,
+                self.selected_output_ids(),
+                self.usage_edit.toPlainText().strip(),
+                confirmed=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            self._err(str(e))
+            return
+        self.accept()
+
+    def result_evidence(self) -> dict:
+        return getattr(self, "_result", {})
+
+    def _err(self, msg: str) -> None:
+        self.error_label.setText(msg)
+        self.error_label.setVisible(True)
+
+
+class RevokeEvidenceDialog(QDialog):
+    """撤销项目使用证据（保留历史行，仅置 is_active=0）。"""
+
+    def __init__(self, topic_name, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"撤销项目使用证据 · {topic_name}")
+        self.setModal(True)
+        self.resize(440, 220)
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel(
+            "撤销后当前能力会回落到其它仍生效的证据；\n"
+            "原始证据与产出关系会保留为历史，不会被物理删除。"
+        ))
+        root.addWidget(QLabel("撤销原因（可选）"))
+        self.reason_edit = QPlainTextEdit()
+        self.reason_edit.setFixedHeight(70)
+        root.addWidget(self.reason_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("撤销证据")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def reason(self) -> str:
+        return self.reason_edit.toPlainText().strip()

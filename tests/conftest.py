@@ -284,3 +284,51 @@ def practice_env(conn):
         r6=route_repo.get_by_key("R6_CS_FUNDAMENTALS"),
         group=route_repo.get_by_key("JOB_PREP"),
     )
+
+
+# ============================================================
+# Phase 5：Practice → Capability fixtures
+# ============================================================
+
+
+@pytest.fixture()
+def practice_capability_env(practice_env):
+    """在 practice_env 基础上构建 PracticeCapabilityService。"""
+    from types import SimpleNamespace
+
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.database.practice_repository import (
+        PracticeOutputRepository,
+        PracticeProjectRepository,
+        PracticeTopicEvidenceRepository,
+    )
+    from app.services.capability_service import CapabilityService
+    from app.services.practice_capability_service import (
+        PracticeCapabilityService,
+    )
+
+    conn = practice_env.conn
+    evidence_repo = PracticeTopicEvidenceRepository(conn)
+    cap = CapabilityService(
+        conn, CapabilityEvidenceRepository(conn),
+        practice_evidence_repo=evidence_repo,
+        practice_project_repo=PracticeProjectRepository(conn),
+    )
+    pc = PracticeCapabilityService(
+        conn,
+        evidence_repo=evidence_repo,
+        service=cap,
+        project_repo=PracticeProjectRepository(conn),
+        output_repo=PracticeOutputRepository(conn),
+        plan_repo=practice_env.plan_repo,
+        route_repo=practice_env.route_repo,
+    )
+    return SimpleNamespace(
+        conn=conn, repo=practice_env.repo, plan_repo=practice_env.plan_repo,
+        route_repo=practice_env.route_repo, skill_repo=practice_env.skill_repo,
+        service=practice_env.service, pc=pc, cap=cap,
+        evidence_repo=evidence_repo,
+        r1=practice_env.r1, r2=practice_env.r2, r3=practice_env.r3,
+        r4=practice_env.r4, r5=practice_env.r5, r6=practice_env.r6,
+        group=practice_env.group,
+    )

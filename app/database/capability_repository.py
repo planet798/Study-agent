@@ -44,10 +44,16 @@ class CapabilityEvidenceRepository:
         source_task_id: int | None = None,
         assessment_attempt_id: int | None = None,
         learning_outcome_id: int | None = None,
+        practice_topic_evidence_id: int | None = None,
         description: str = "",
         details: dict | None = None,
+        commit: bool = True,
     ) -> dict:
-        """幂等写入：同一 evidence_key 只保留“最强”证据，绝不降级。"""
+        """幂等写入：同一 evidence_key 只保留“最强”证据，绝不降级。
+
+        commit=False 时不提交，供上层在同一事务内原子写入
+        （PracticeTopicEvidence + CapabilityEvidence）。
+        """
         if not is_valid_evidence_level(capability_level):
             raise ValueError(f"非法 capability_level: {capability_level!r}")
         if not evidence_key:
@@ -62,36 +68,43 @@ class CapabilityEvidenceRepository:
                     "evidence_type = ?, source_task_id = COALESCE(?, source_task_id),"
                     " assessment_attempt_id = COALESCE(?, assessment_attempt_id),"
                     " learning_outcome_id = COALESCE(?, learning_outcome_id),"
+                    " practice_topic_evidence_id = COALESCE(?,"
+                    " practice_topic_evidence_id),"
                     " description = ?, details_json = ?, is_active = 1, "
                     " revoked_at = NULL, revocation_reason = NULL "
                     "WHERE id = ?",
                     (
                         int(capability_level), evidence_type, source_task_id,
                         assessment_attempt_id, learning_outcome_id,
+                        practice_topic_evidence_id,
                         description or "", details_json, int(existing["id"]),
                     ),
                 )
-                self.conn.commit()
+                if commit:
+                    self.conn.commit()
             return self.get(existing["id"])
         ts = now_iso()
         cur = self.conn.execute(
             "INSERT INTO capability_evidence "
             "(knowledge_point_id, capability_level, evidence_type, evidence_key,"
             " source_task_id, assessment_attempt_id, learning_outcome_id,"
+            " practice_topic_evidence_id,"
             " description, details_json, is_active, created_at,"
             " revoked_at, revocation_reason) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL)",
             (
                 int(knowledge_point_id), int(capability_level), evidence_type,
                 evidence_key, source_task_id, assessment_attempt_id,
-                learning_outcome_id, description or "", details_json, ts,
+                learning_outcome_id, practice_topic_evidence_id,
+                description or "", details_json, ts,
             ),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return self.get(cur.lastrowid)
 
     def revoke(
-        self, evidence_id: int, reason: str = ""
+        self, evidence_id: int, reason: str = "", commit: bool = True
     ) -> Optional[dict]:
         """撤销证据（不物理删除）。"""
         comp = self.get(evidence_id)
@@ -102,8 +115,19 @@ class CapabilityEvidenceRepository:
             "revocation_reason = ? WHERE id = ?",
             (now_iso(), reason or "", int(evidence_id)),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return self.get(evidence_id)
+
+    def get_by_practice_topic_evidence(
+        self, practice_topic_evidence_id: int
+    ) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM capability_evidence "
+            "WHERE practice_topic_evidence_id = ? ORDER BY id ASC LIMIT 1",
+            (int(practice_topic_evidence_id),),
+        ).fetchone()
+        return self._from_row(row)
 
     # ---------- 读 ----------
 

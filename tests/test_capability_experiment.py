@@ -172,4 +172,10 @@ class TestProjectNeverGenerated:
         )
         assert cap.get_current_level(kp["id"]) == EXPERIMENT
         assert cap.get_current_level(kp["id"]) < PROJECT
-        assert cap.can_generate_project() is False
+        # Phase 5：Level 5 现可由 PracticeTopicEvidence 显式确认产生，
+        # 但 experiment 路径自身永远不能产生 level=5。
+        assert cap.can_generate_project() is True
+        assert conn.execute(
+            "SELECT COUNT(*) FROM capability_evidence "
+            "WHERE capability_level = 5 AND is_active = 1"
+        ).fetchone()[0] == 0

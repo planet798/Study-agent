@@ -4,7 +4,10 @@
 - Task(正式学习, done, 有 kp)      → AWARE(1)
 - Assessment(judged, 题型+单题通过) → EXPLAIN(2) / IMPLEMENT(3)
 - learning_outcomes(kind=experiment) + done experiment task + 真实产物 → EXPERIMENT(4)
-- PROJECT(5) 本阶段不产生
+- PracticeTopicEvidence(用户显式确认) → PROJECT(5)（Phase 5）
+
+PROJECT 的**唯一** production path 是 `sync_from_practice_topic_evidence`；
+Task / Assessment / Experiment 三条路径永远不能产生 level=5。
 
 与 mastery 彻底分开：
 - 不使用 mastery 阈值；
@@ -21,6 +24,10 @@ from typing import Optional
 
 from ..database.assessment_repository import AssessmentRepository
 from ..database.capability_repository import CapabilityEvidenceRepository
+from ..database.practice_repository import (
+    PracticeProjectRepository,
+    PracticeTopicEvidenceRepository,
+)
 from ..database.repository import TaskRepository
 from ..database.skill_repository import LearningOutcomeRepository
 from .capability import (
@@ -28,6 +35,7 @@ from .capability import (
     EVIDENCE_TYPE_ASSESSMENT,
     EVIDENCE_TYPE_EXPERIMENT_OUTCOME,
     EVIDENCE_TYPE_LEARNING_ACTIVITY,
+    EVIDENCE_TYPE_PRACTICE_PROJECT,
     EXPLAIN,
     IMPLEMENT,
     PROJECT,
@@ -42,6 +50,16 @@ _FORMAL_TASK_TYPE = "new"
 _FORMAL_SOURCES = ("generated", "manual")
 
 
+def _guard_non_practice_level(level: int) -> int:
+    """非 Practice 路径不得产生 Level 5（防回归）。"""
+    level = int(level)
+    if level >= PROJECT:
+        raise ValueError(
+            "只有 PracticeTopicEvidence 路径能产生 Level 5 PROJECT"
+        )
+    return level
+
+
 class CapabilityService:
     def __init__(
         self,
@@ -50,12 +68,18 @@ class CapabilityService:
         task_repo: TaskRepository | None = None,
         assessment_repo: AssessmentRepository | None = None,
         outcome_repo: LearningOutcomeRepository | None = None,
+        practice_evidence_repo: PracticeTopicEvidenceRepository | None = None,
+        practice_project_repo: PracticeProjectRepository | None = None,
     ):
         self.conn = conn
         self.repo = evidence_repo or CapabilityEvidenceRepository(conn)
         self.task_repo = task_repo or TaskRepository(conn)
         self.assessment_repo = assessment_repo or AssessmentRepository(conn)
         self.outcome_repo = outcome_repo or LearningOutcomeRepository(conn)
+        self.practice_evidence_repo = \
+            practice_evidence_repo or PracticeTopicEvidenceRepository(conn)
+        self.practice_project_repo = \
+            practice_project_repo or PracticeProjectRepository(conn)
 
     # ================= current capability =================
 
@@ -107,7 +131,7 @@ class CapabilityService:
             return None
         return self.repo.create_or_update_by_key(
             knowledge_point_id=task.knowledge_point_id,
-            capability_level=AWARE,
+            capability_level=_guard_non_practice_level(AWARE),
             evidence_type=EVIDENCE_TYPE_LEARNING_ACTIVITY,
             evidence_key=f"task:{task.id}",
             source_task_id=task.id,
@@ -137,7 +161,7 @@ class CapabilityService:
         details["attempt_id"] = attempt_id
         return self.repo.create_or_update_by_key(
             knowledge_point_id=kp_id,
-            capability_level=level,
+            capability_level=_guard_non_practice_level(level),
             evidence_type=EVIDENCE_TYPE_ASSESSMENT,
             evidence_key=f"assessment:{attempt_id}",
             assessment_attempt_id=attempt_id,
@@ -200,7 +224,7 @@ class CapabilityService:
             return None
         return self.repo.create_or_update_by_key(
             knowledge_point_id=kp_id,
-            capability_level=4,  # EXPERIMENT
+            capability_level=_guard_non_practice_level(4),  # EXPERIMENT
             evidence_type=EVIDENCE_TYPE_EXPERIMENT_OUTCOME,
             evidence_key=f"experiment_outcome:{outcome_id}",
             learning_outcome_id=outcome_id,
@@ -313,9 +337,62 @@ class CapabilityService:
                 stats["conflicts"] += 1
         return stats
 
-    # ================= 禁止 PROJECT =================
+    # ================= PracticeTopicEvidence → PROJECT（Phase 5） =================
+
+    def sync_from_practice_topic_evidence(
+        self, practice_topic_evidence_id: int, commit: bool = True
+    ) -> Optional[dict]:
+        """**唯一合法产生 Level 5 PROJECT 的 production path**。
+
+        只读取用户已确认的 PracticeTopicEvidence + 其 Outputs；
+        不自动遍历项目 Topic，也不因为 project completed 而触发。
+        其它 sync（task / assessment / experiment）永远不能产生 level=5。
+        """
+        evidence = self.practice_evidence_repo.get(practice_topic_evidence_id)
+        if evidence is None or not evidence.get("is_active"):
+            return None
+        kp_id = evidence.get("knowledge_point_id")
+        if kp_id is None:
+            return None
+        project = self.practice_project_repo.get(evidence["project_id"])
+        output_ids = self.practice_evidence_repo.list_output_ids(
+            practice_topic_evidence_id
+        )
+        project_name = (project or {}).get("name", "")
+        topic = self.conn.execute(
+            "SELECT name FROM study_topics WHERE id = ?",
+            (int(evidence["topic_id"]),),
+        ).fetchone()
+        topic_name = topic[0] if topic else ""
+        return self.repo.create_or_update_by_key(
+            knowledge_point_id=int(kp_id),
+            capability_level=PROJECT,
+            evidence_type=EVIDENCE_TYPE_PRACTICE_PROJECT,
+            evidence_key=f"practice_topic_evidence:{int(practice_topic_evidence_id)}",
+            practice_topic_evidence_id=int(practice_topic_evidence_id),
+            description=f"已在真实项目中使用：{project_name}",
+            details={
+                "practice_topic_evidence_id": int(practice_topic_evidence_id),
+                "project_id": int(evidence["project_id"]),
+                "topic_id": int(evidence["topic_id"]),
+                "topic_name": topic_name,
+                "output_ids": output_ids,
+            },
+            commit=commit,
+        )
+
+    # ================= 其它路径禁止产生 PROJECT =================
 
     @staticmethod
     def can_generate_project() -> bool:
-        """Phase 3 明确禁止生成 Level 5 PROJECT。"""
-        return False
+        """Phase 5：Level 5 现在可由 PracticeTopicEvidence 显式确认后产生。
+
+        注意：这不代表 task / assessment / experiment 路径可以产生 level=5；
+        它们只能产生 level<=4。
+        """
+        return True
+
+    # 保留旧名以便外部检查（语义与 can_generate_project 相同）
+    @staticmethod
+    def project_requires_practice_evidence() -> bool:
+        return True

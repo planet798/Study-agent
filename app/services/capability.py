@@ -12,7 +12,8 @@
 重要：
 - Level 0 不写数据库；current capability = MAX(active level) 或 0。
 - Capability 不是递增进度条，也不由 mastery 阈值推断。
-- Level 5 PROJECT 在 Phase 3 不允许生成（Phase 4 Practice 才有来源）。
+- Level 5 PROJECT 只能由 Practice 层的 PracticeTopicEvidence 经用户显式确认后产生
+  （Phase 5）；Task / Assessment / Experiment 路径永远不能产生 Level 5。
 """
 
 from __future__ import annotations
@@ -47,12 +48,15 @@ EVIDENCE_TYPE_LEARNING_ACTIVITY = "learning_activity"
 EVIDENCE_TYPE_ASSESSMENT = "assessment"
 EVIDENCE_TYPE_EXPERIMENT_OUTCOME = "experiment_outcome"
 EVIDENCE_TYPE_MANUAL_VERIFIED_EXPERIMENT = "manual_verified_experiment"
+# Phase 5：真实项目使用证据（唯一能产生 Level 5 的来源）
+EVIDENCE_TYPE_PRACTICE_PROJECT = "practice_project"
 
 ALL_EVIDENCE_TYPES = (
     EVIDENCE_TYPE_LEARNING_ACTIVITY,
     EVIDENCE_TYPE_ASSESSMENT,
     EVIDENCE_TYPE_EXPERIMENT_OUTCOME,
     EVIDENCE_TYPE_MANUAL_VERIFIED_EXPERIMENT,
+    EVIDENCE_TYPE_PRACTICE_PROJECT,
 )
 
 MIN_EVIDENCE_LEVEL = 1

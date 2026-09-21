@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..services.capability import capability_label
+from ..services.capability import EVIDENCE_TYPE_PRACTICE_PROJECT, capability_label
 
 
 def _readonly_box(text: str) -> QPlainTextEdit:
@@ -34,10 +34,19 @@ def _readonly_box(text: str) -> QPlainTextEdit:
 
 
 class CapabilityEvidenceDialog(QDialog):
-    """某个知识点的 capability 证据时间线（只读）。"""
+    """某个知识点的 capability 证据时间线（只读）。
 
-    def __init__(self, kp_name: str, kp_id: int, capability_service, parent=None):
+    Phase 5：practice_project 类型证据会展示项目使用说明与支撑产出；
+    且其 revoke 必须路由到 PracticeCapabilityService（保证原始事实同步撤销）。
+    """
+
+    def __init__(self, kp_name: str, kp_id: int, capability_service,
+                 practice_capability_service=None, parent=None):
         super().__init__(parent)
+        self.kp_name = kp_name
+        self.kp_id = int(kp_id)
+        self.capability_service = capability_service
+        self.practice_capability_service = practice_capability_service
         self.setWindowTitle(f"能力证据 · {kp_name}")
         self.setModal(True)
         self.resize(640, 520)
@@ -56,7 +65,7 @@ class CapabilityEvidenceDialog(QDialog):
         scroll.setWidget(body)
         root.addWidget(scroll, stretch=1)
 
-        self._render(capability_service, kp_id)
+        self._render(capability_service, self.kp_id)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
@@ -64,7 +73,16 @@ class CapabilityEvidenceDialog(QDialog):
         buttons.accepted.connect(self.accept)
         root.addWidget(buttons)
 
+    def _clear_body(self) -> None:
+        while self.body_layout.count():
+            item = self.body_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
     def _render(self, service, kp_id: int) -> None:
+        self._clear_body()
         cap = service.get_current_capability(kp_id)
         self.current_label.setText(
             f"当前能力：{cap['label']}（{cap['name']}）"
@@ -78,17 +96,60 @@ class CapabilityEvidenceDialog(QDialog):
             self.body_layout.addStretch()
             return
         for e in active:
-            level = int(e["capability_level"])
-            src = e.get("evidence_type")
-            desc = e.get("description") or ""
-            ts = (e.get("created_at") or "")[:10]
-            block = QLabel(
-                f"{ts}\n{capability_label(level)}\n来源：{src}\n{desc}"
-            )
-            block.setObjectName("TaskMeta")
-            block.setWordWrap(True)
-            self.body_layout.addWidget(block)
+            self._add_evidence_block(e)
         self.body_layout.addStretch()
+
+    def _add_evidence_block(self, e: dict) -> None:
+        level = int(e["capability_level"])
+        desc = e.get("description") or ""
+        ts = (e.get("created_at") or "")[:10]
+        if e.get("evidence_type") == EVIDENCE_TYPE_PRACTICE_PROJECT \
+                and self.practice_capability_service is not None:
+            pte_id = e.get("practice_topic_evidence_id")
+            info = self.practice_capability_service.get_topic_evidence(pte_id) \
+                if pte_id else None
+            if info is not None:
+                outputs = " · ".join(info.get("output_labels") or [])
+                block = QLabel(
+                    f"{ts}\n已在真实项目中使用\n"
+                    f"来源：{info.get('project_name') or '—'}\n"
+                    f"项目使用：{info.get('usage_description') or '—'}\n"
+                    f"支撑产出：{outputs or '—'}"
+                )
+                block.setObjectName("TaskMeta")
+                block.setWordWrap(True)
+                self.body_layout.addWidget(block)
+                revoke = QPushButton("撤销证据")
+                revoke.setObjectName("SecondaryButton")
+                revoke.clicked.connect(
+                    lambda _=False, pte=pte_id: self._revoke_practice(pte)
+                )
+                self.body_layout.addWidget(revoke)
+                return
+        block = QLabel(
+            f"{ts}\n{capability_label(level)}\n来源：{e.get('evidence_type')}\n{desc}"
+        )
+        block.setObjectName("TaskMeta")
+        block.setWordWrap(True)
+        self.body_layout.addWidget(block)
+
+    def _revoke_practice(self, pte_id: int) -> None:
+        if not pte_id:
+            return
+        if QMessageBox.question(
+            self, "撤销项目使用证据",
+            "撤销后当前能力会回落到其它仍生效的证据；\n"
+            "原始证据会保留为历史。确定撤销吗？",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.practice_capability_service.revoke_project_topic_evidence(
+                int(pte_id), "用户在能力证据面板撤销"
+            )
+        except Exception as ex:  # noqa: BLE001
+            QMessageBox.warning(self, "撤销失败", str(ex))
+            return
+        self._render(self.capability_service, self.kp_id)
 
 
 class ExperimentOutcomeDialog(QDialog):

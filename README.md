@@ -273,3 +273,46 @@ python -m app.main six-routes apply --db "...\\study_agent.db"
 
 正常启动时，应用会自动执行 `seed + apply_if_safe`（无 conflict 才迁移），
 因此通常无需手动运行 CLI。迁移是幂等的：重复运行不会重复 seed / 迁移。
+
+## Capability Evidence（能力证据）
+
+Capability 与 Mastery 是两个独立维度：Capability 只由真实证据推导，
+不使用 mastery 阈值，也不修改 mastery / review。
+
+| Level | 含义 | 来源 |
+| --- | --- | --- |
+| 0 | UNLEARNED 未学习 | 无证据 |
+| 1 | AWARE 知道概念 | 完成的正式学习任务 |
+| 2 | EXPLAIN 能够解释 | 验收（概念题） |
+| 3 | IMPLEMENT 能够写代码 | 验收（实现题） |
+| 4 | EXPERIMENT 完成独立实验 | 实验成果（含可验证产物） |
+| 5 | PROJECT 已在真实项目中使用 | PracticeTopicEvidence（用户显式确认） |
+
+`current capability = MAX(active evidence level)`；撤销证据后自动回落到其它仍生效的证据。
+
+### Practice → Capability（v19）
+
+Level 5 **只能**由实践项目的“项目使用证据”产生，且必须同时满足：
+
+1. 项目状态为 `completed`（未归档）；
+2. Topic 已关联该项目，且 Topic 所属路线在项目关联路线内；
+3. 用户填写非空的“项目使用说明”；
+4. 至少选择一个属于该项目的“支撑成果”，其中至少一个是 qualifying artifact
+   （repository / code / result / benchmark / checkpoint / demo / paper_reproduction，
+   且结构有效，例如 Repository 必须有链接）；
+5. 用户**显式勾选确认**。
+
+数据链：`PracticeProject → Project Topic → PracticeTopicEvidence → selected Outputs
+→ CapabilityEvidence(evidence_type='practice_project', evidence_key='practice_topic_evidence:<id>')`。
+
+- 不会因为项目 completed / 成果数量 / 关联 Topic 自动产生 Level 5；
+- 不自动遍历项目 Topic（必须逐 Topic 确认）；
+- 已存在的 Phase 4 项目**不会自动 backfill**；
+- 撤销 = `is_active=0` + `revoked_at` + `revocation_reason`，历史行保留，
+  并同步撤销对应 capability evidence；
+- 被 active evidence 引用的 Output 禁止删除、禁止修改类型/链接/详情/说明；
+  被引用的 Topic 关联禁止解除；项目只要产生过证据（含已撤销历史）禁止物理删除；
+- archive / reopen 项目不会撤销或降低已产生的历史能力证据。
+
+Project Skill / Activity / Curriculum / Mastery / Review / Planner / Scheduler
+均**不**因 PROJECT evidence 改变。
