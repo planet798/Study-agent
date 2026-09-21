@@ -602,9 +602,11 @@ class SkillService:
                 phase_topics = []
         if linked & {t.id for t in phase_topics}:
             return "current", 1.0
-        # 下一阶段：按 start_date 排序中紧邻 current 的那一个
+        # 下一阶段：按 start_date 排序中紧邻 current 的那一个。
+        # 直接用 phase.plan_id 定位同一 route 的 plan（不再使用 route_id=None
+        # → first active plan 的模糊回退）。
         try:
-            plan = self.plan_repo.get_active_plan()
+            plan = self.plan_repo.get_plan(int(phase.plan_id))
             phases = self.plan_repo.list_phases(plan.id) if plan else []
         except Exception:  # noqa: BLE001
             phases = []

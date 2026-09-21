@@ -377,22 +377,37 @@ current phase / legal topics（next activity · Tier · reasons · market factor
 ### 正式库逐级迁移（Windows）
 
 ```bash
-# 1) 备份（不覆盖，带时间戳）
+# 1) 备份（SQLite Backup API，正确包含 WAL 中已提交的数据；不覆盖）
 python -m app.main db-release backup --db "D:\\Projects\\study-agent\\data\\study_agent.db"
 
-# 2) 迁移前只读盘点（不会迁移 schema）
+# 2) 迁移前只读盘点（mode=ro + query_only，不会迁移 schema）
 python -m app.main db-release inventory --db "...\\study_agent.db" --save before.json
 
 # 3) 逐级迁移 v14→v20 + canonical seed（可选 capability backfill）
 python -m app.main db-release migrate --db "...\\study_agent.db" --before before.json --apply-capability
 
-# 4) 完整性校验（route / evidence / before-after 行数）
+# 4) 完整性校验（route / evidence / 指纹 / integrity_check / foreign_key_check）
 python -m app.main db-release verify --db "...\\study_agent.db" --before before.json
 ```
 
-- inventory/verify 使用 SQLite read-only 连接，零写入；
-- `migrate` 逐级执行 v15→v20 并打印每级版本，canonical seed/迁移遇 conflict 立即停止；
+- **备份**使用 `sqlite3.Connection.backup()`，一致性包含 `-wal`；`shutil.copy2` 会丢失仍在 WAL 中已提交的事务；
+- **inventory/verify/planner-diagnostic** 均以 `mode=ro` + `PRAGMA query_only=ON` 打开，零写入；
+- **migrate 先做 pre-flight**：在临时副本（Backup API）上跑一遍完整的 schema+canonical
+  迁移；若发现 conflict（如同一 route 多个 active plan、route_key 重复、六路线 topic
+  conflict）→ **正式库不做任何修改**（版本停在原处）并以非零退出；
+- **six-routes preview** 同样在临时副本上计算，正式库字节不变；`six-routes apply`
+  也先 pre-flight，通过后才修改正式库；
+- **verify** 除行数外，还比较历史表的 id 集合 hash 与关键字段 hash（同数量静默篡改/
+  替换也能发现），并运行 `PRAGMA integrity_check` / `PRAGMA foreign_key_check`；
+  `route_id` 有意不入指纹（canonical MOVE 会合法更新它，跨 route 一致性单独校验）；
 - v20 不自动创建任何 Project / Requirement / PROJECT evidence。
+
+### Migration Gate（GUI 启动）
+
+若 `data/study_agent.db` 已存在且 `user_version < SCHEMA_VERSION`，GUI **拒绝启动**
+并打印上面的 `db-release` 步骤（退出码 3），避免绕过备份/校验流程自动升级。
+新库（文件不存在/空库）与已是最新版本不受影响。开发/测试可用
+`--allow-auto-migrate`（或 `STUDY_AGENT_ALLOW_AUTO_MIGRATE=1`）跳过门禁。
 
 ### Legacy 边界（v1 stabilization）
 

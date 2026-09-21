@@ -450,8 +450,14 @@ class StudyPlanService:
 
         route 隔离：只加载本路线（或兼容旧数据的未绑定计划）的 active plan，
         绝不会把其它路线的 phases/topics 混进来。
+
+        canonical 模式：当本 Service 未解析出 route_id 时，
+        **绝不回退到第一个 active plan**（那是旧单路线行为），直接返回 None。
         """
-        plan = self.plan_repo.get_active_plan(route_id=self._resolved_route_id())
+        route_id = self._resolved_route_id()
+        if route_id is None and self._canonical_routes_present():
+            return None
+        plan = self.plan_repo.get_active_plan(route_id=route_id)
         if plan is None:
             return None
         return self.plan_repo.get_plan_with_phases(plan.id)

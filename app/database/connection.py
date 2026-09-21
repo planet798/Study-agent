@@ -29,13 +29,18 @@ def get_raw_connection(
 ) -> sqlite3.Connection:
     """打开连接但**不自动迁移**（供发布/诊断工具使用）。
 
-    - read_only=True：以 SQLite read-only URI 打开，保证零写入（inventory/verify）；
+    - read_only=True：SQLite read-only URI（mode=ro）+ `PRAGMA query_only=ON`，
+      双重保证零写入（inventory / verify / planner-diagnostic）；
     - read_only=False：普通可写连接，但不会执行 migrate（由调用方显式迁移）。
     """
     path = resolve_db_path(db_path)
     if read_only:
+        if not Path(path).exists():
+            raise FileNotFoundError(f"数据库不存在: {path}")
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
+        # 双保险：即使代码路径尝试写入也直接失败
+        conn.execute("PRAGMA query_only = ON")
         return conn
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
@@ -43,6 +48,13 @@ def get_raw_connection(
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
+
+
+def get_readonly_connection(
+    db_path: str | Path | None = None
+) -> sqlite3.Connection:
+    """真正只读连接（mode=ro + query_only=ON）的显式入口。"""
+    return get_raw_connection(db_path, read_only=True)
 
 
 def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:

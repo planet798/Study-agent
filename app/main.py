@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -31,6 +32,7 @@ from app.ai.summary import AISummaryGenerator
 from app.database.connection import (
     get_connection,
     get_raw_connection,
+    get_readonly_connection,
     resolve_db_path,
 )
 from app.database.repository import TaskRepository
@@ -478,10 +480,19 @@ def _run_six_routes_cli(argv) -> int:
       study-agent six-routes preview   [--db PATH] [--json]
       study-agent six-routes apply     [--db PATH] [--strict] [--json]
       study-agent six-routes seed      [--db PATH]
+
+    安全性（v1 stabilization）：
+    - inventory：真正只读连接（mode=ro + query_only）；旧 schema 缺列时
+      在临时只读副本上盘点，绝不修改正式库；
+    - preview：在临时可写副本上模拟 migrate + seed，正式库零修改；
+    - apply：先在不接触正式库的副本上 pre-flight；conflict 时直接中止，
+      不会对正式库做任何业务修改。
     """
     import json as _json
+    import sqlite3
 
     from app.database.learning_route_repository import LearningRouteRepository
+    from app.database.schema import migrate_stepwise
     from app.database.skill_repository import SkillRepository
     from app.database.study_plan_repository import StudyPlanRepository
     from app.services.canonical_route_service import CanonicalRouteService
@@ -500,83 +511,124 @@ def _run_six_routes_cli(argv) -> int:
     )
     args, _ = parser.parse_known_args(argv)
 
-    conn = get_connection(args.db)
-    try:
+    from app.diagnostics import release_migration as rm
+
+    def _services(conn):
         route_repo = LearningRouteRepository(conn)
         plan_repo = StudyPlanRepository(conn)
         skill_repo = SkillRepository(conn)
         svc = CanonicalRouteService(conn, route_repo, plan_repo, skill_repo)
         mig = RouteMigrationService(conn, route_repo, plan_repo)
+        return route_repo, plan_repo, skill_repo, svc, mig
 
-        if args.action == "inventory":
-            inv = mig.inventory()
-            if args.json:
-                print(_json.dumps(inv, ensure_ascii=False, indent=2))
-            else:
-                print(f"schema_version: {inv['schema_version']}")
-                print(f"legacy_route_id: {inv['legacy_route_id']}")
-                for r in inv["routes"]:
-                    print(f"  route[{r['id']}] key={r.get('route_key')} "
-                          f"{r['name']} ({r['status']}, p={r['priority']}, "
-                          f"planning={r['planning_enabled']})")
-                print(f"counts: plans={inv['plans'].__len__()} "
-                      f"topics={inv['study_topics']} tasks={inv['tasks']} "
-                      f"kp={inv['knowledge_points']} "
-                      f"assessments={inv['assessment_attempts']} "
-                      f"reviews={inv['review_schedule']} "
-                      f"planner_decisions={inv['planner_decisions']} "
-                      f"skills={inv['skills']} "
-                      f"outcomes={inv['learning_outcomes']}")
-                if inv.get("duplicate_active_plans"):
-                    print("  !! duplicate active plans:",
-                          inv["duplicate_active_plans"])
-            return 0
+    def _print_inventory(inv):
+        if args.json:
+            print(_json.dumps(inv, ensure_ascii=False, indent=2))
+            return
+        print(f"schema_version: {inv['schema_version']}")
+        print(f"legacy_route_id: {inv['legacy_route_id']}")
+        for r in inv["routes"]:
+            print(f"  route[{r['id']}] key={r.get('route_key')} "
+                  f"{r['name']} ({r['status']}, p={r['priority']}, "
+                  f"planning={r['planning_enabled']})")
+        print(f"counts: plans={len(inv['plans'])} "
+              f"topics={inv['study_topics']} tasks={inv['tasks']} "
+              f"kp={inv['knowledge_points']} "
+              f"assessments={inv['assessment_attempts']} "
+              f"reviews={inv['review_schedule']} "
+              f"planner_decisions={inv['planner_decisions']} "
+              f"skills={inv['skills']} "
+              f"outcomes={inv['learning_outcomes']}")
+        if inv.get("duplicate_active_plans"):
+            print("  !! duplicate active plans:", inv["duplicate_active_plans"])
 
-        # preview / apply / seed 需要先置备 migration 目标（routes+plans+phases）
-        svc.ensure_pre_migration()
+    def _print_preview(preview):
+        if args.json:
+            payload = {
+                "summary": preview.summary(),
+                "entries": [
+                    {
+                        "old_topic_id": e.old_topic_id,
+                        "old_name": e.old_name,
+                        "action": e.action,
+                        "target_route": e.target_route_name,
+                        "target_phase": e.target_phase,
+                        "tasks": e.task_count,
+                        "kp": e.kp_count,
+                        "assessments": e.assessment_count,
+                        "reviews": e.review_count,
+                        "conflicts": e.conflicts,
+                    }
+                    for e in preview.entries
+                ],
+            }
+            print(_json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+        s = preview.summary()
+        print(f"preview: MOVE={s['move']} "
+              f"(migratable={s['move_migratable']}) "
+              f"SPLIT_NEW={s['split_new']} "
+              f"KEEP_LEGACY={s['keep_legacy']} "
+              f"MANUAL_REVIEW={s['manual_review']} "
+              f"conflicts={s['conflicts']}")
+        for e in preview.entries:
+            tag = e.action
+            extra = (f" conflicts={e.conflicts}" if e.conflicts else "")
+            target = f" -> {e.target_route_name}/{e.target_phase}" \
+                if e.target_route_name else ""
+            print(f"  [{tag}] topic#{e.old_topic_id} {e.old_name}"
+                  f"{target} (tasks={e.task_count}, kp={e.kp_count}, "
+                  f"assess={e.assessment_count}, "
+                  f"reviews={e.review_count}){extra}")
 
-        if args.action == "preview":
+    # ---------- inventory：真正只读 ----------
+    if args.action == "inventory":
+        try:
+            conn = get_readonly_connection(args.db)
+            try:
+                inv = _services(conn)[4].inventory()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            # 旧 schema（如 v14 无 route_key）→ 在临时只读副本上尝试
+            try:
+                with rm.readonly_copy(args.db) as c:
+                    inv = _services(c)[4].inventory()
+            except sqlite3.Error as e:
+                print(
+                    "six-routes inventory 需要 v15+ schema"
+                    f"（当前数据库尚未迁移：{e}）。\n"
+                    "请先运行：python -m app.main db-release inventory --db "
+                    f'"{args.db}"'  # 只读盘点兼容旧 schema
+                )
+                return 2
+        _print_inventory(inv)
+        return 0
+
+    # ---------- preview：临时副本上模拟，正式库零修改 ----------
+    if args.action == "preview":
+        with rm.working_copy(args.db, migrate=True) as c:
+            _, _, _, svc, mig = _services(c)
+            svc.ensure_pre_migration()
             preview = mig.preview()
-            if args.json:
-                payload = {
-                    "summary": preview.summary(),
-                    "entries": [
-                        {
-                            "old_topic_id": e.old_topic_id,
-                            "old_name": e.old_name,
-                            "action": e.action,
-                            "target_route": e.target_route_name,
-                            "target_phase": e.target_phase,
-                            "tasks": e.task_count,
-                            "kp": e.kp_count,
-                            "assessments": e.assessment_count,
-                            "reviews": e.review_count,
-                            "conflicts": e.conflicts,
-                        }
-                        for e in preview.entries
-                    ],
-                }
-                print(_json.dumps(payload, ensure_ascii=False, indent=2))
-            else:
-                s = preview.summary()
-                print(f"preview: MOVE={s['move']} "
-                      f"(migratable={s['move_migratable']}) "
-                      f"SPLIT_NEW={s['split_new']} "
-                      f"KEEP_LEGACY={s['keep_legacy']} "
-                      f"MANUAL_REVIEW={s['manual_review']} "
-                      f"conflicts={s['conflicts']}")
-                for e in preview.entries:
-                    tag = e.action
-                    extra = (f" conflicts={e.conflicts}" if e.conflicts else "")
-                    target = f" -> {e.target_route_name}/{e.target_phase}" \
-                        if e.target_route_name else ""
-                    print(f"  [{tag}] topic#{e.old_topic_id} {e.old_name}"
-                          f"{target} (tasks={e.task_count}, kp={e.kp_count}, "
-                          f"assess={e.assessment_count}, "
-                          f"reviews={e.review_count}){extra}")
-            return 1 if preview.has_conflicts else 0
+            _print_preview(preview)
+        return 1 if preview.has_conflicts else 0
 
-        if args.action == "apply":
+    # ---------- apply：先 pre-flight，再改正式库 ----------
+    if args.action == "apply":
+        pre = rm.dry_run_on_copy(args.db)
+        if not pre.get("ok"):
+            print(
+                "apply aborted (preflight failed): "
+                f"stage={pre.get('stage')} conflicts={pre.get('conflicts')} "
+                f"source_problems={pre.get('source_problems')} "
+                f"error={pre.get('error')}"
+            )
+            return 1
+        conn = get_raw_connection(args.db)
+        try:
+            migrate_stepwise(conn)
+            _, _, _, svc, mig = _services(conn)
             result = mig.apply(allow_partial=not args.strict)
             if args.json:
                 print(_json.dumps({
@@ -597,7 +649,6 @@ def _run_six_routes_cli(argv) -> int:
                 for sk in result.get("skipped", []):
                     print(f"  skipped topic#{sk.get('old_topic_id')} "
                           f"conflicts={sk.get('conflicts')}")
-            # 迁移后补齐 topics/skills/links
             svc.ensure_topics(svc.ensure_pre_migration()["routes"])
             svc.ensure_extra_skills()
             svc.ensure_route_skills(svc.ensure_pre_migration()["routes"])
@@ -606,8 +657,14 @@ def _run_six_routes_cli(argv) -> int:
                     result.get("reason") == "conflicts_present":
                 return 1
             return 0
+        finally:
+            conn.close()
 
-        # seed：完整 ensure_all（含 apply_if_safe）
+    # ---------- seed：显式完整 ensure_all ----------
+    conn = get_raw_connection(args.db)
+    try:
+        migrate_stepwise(conn)
+        _, _, _, svc, _ = _services(conn)
         res = svc.ensure_all()
         print(f"seed: routes={res['route_ids']} "
               f"route_skills=+{res['route_skill_links']} "
@@ -687,7 +744,7 @@ def _run_planner_diagnostic_cli(argv) -> int:
         run_planner_diagnostic,
     )
 
-    conn = get_raw_connection(args.db)
+    conn = get_raw_connection(args.db, read_only=True)
     try:
         data = run_planner_diagnostic(
             conn, plan_date=args.date, route_key=args.route
@@ -759,8 +816,32 @@ def _run_db_release_cli(argv) -> int:
             if args.before and Path(args.before).exists():
                 before = _json.loads(Path(args.before).read_text(encoding="utf-8"))
             else:
-                before = rm.inventory(conn)
-            stats = _run_release_migrate(conn, apply_capability=args.apply_capability)
+                # 迁移前先用只读连接盘点（不触发任何迁移）
+                ro = get_readonly_connection(args.db)
+                try:
+                    before = rm.inventory(ro)
+                finally:
+                    ro.close()
+            # pre-flight：在临时副本上验证，正式库尚未发生任何修改
+            pre = rm.dry_run_on_copy(args.db)
+            if not pre.get("ok"):
+                print(_json.dumps({
+                    "aborted": True,
+                    "stage": pre.get("stage"),
+                    "conflicts": pre.get("conflicts"),
+                    "source_problems": pre.get("source_problems"),
+                    "error": pre.get("error"),
+                    "before": before,
+                }, ensure_ascii=False, indent=2) if args.json else
+                    f"migrate aborted (preflight): stage={pre.get('stage')} "
+                    f"conflicts={pre.get('conflicts')} "
+                    f"source_problems={pre.get('source_problems')} "
+                    f"error={pre.get('error')}")
+                return 1
+            stats = _run_release_migrate(
+                conn, apply_capability=args.apply_capability,
+                skip_preflight=True,
+            )
             after = rm.inventory(conn)
             report = {
                 "migration": stats,
@@ -789,8 +870,100 @@ def _run_db_release_cli(argv) -> int:
         conn.close()
 
 
-def _run_release_migrate(conn, apply_capability: bool = False) -> dict:
-    """schema 逐级迁移 → canonical seed/迁移（→ 可选 capability backfill）。"""
+MIGRATION_GATE_ALLOW_FLAG = "--allow-auto-migrate"
+
+
+def migration_gate_status(db_path) -> dict:
+    """GUI 启动前的旧库迁移闸门（只读探测）。
+
+    - 不存在的 DB / 新空库：允许（正常创建）；
+    - user_version >= SCHEMA_VERSION：允许；
+    - 旧版本（已存在且有业务表）：**禁止**自动升级，返回指引。
+    """
+    import sqlite3
+
+    from app.database.schema import SCHEMA_VERSION
+
+    path = Path(db_path)
+    if not path.exists():
+        return {"blocked": False, "version": None, "reason": "new_db"}
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            has_business = bool(conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='tasks' LIMIT 1"
+            ).fetchone())
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return {"blocked": False, "version": None, "reason": "unreadable"}
+    if version >= SCHEMA_VERSION:
+        return {"blocked": False, "version": version, "reason": "current"}
+    if version == 0 and not has_business:
+        return {"blocked": False, "version": version, "reason": "empty_db"}
+    return {
+        "blocked": True,
+        "version": version,
+        "target": SCHEMA_VERSION,
+        "db_path": str(path),
+        "reason": "old_schema",
+    }
+
+
+def migration_gate_message(status: dict) -> str:
+    db = status.get("db_path", "data/study_agent.db")
+    v = status.get("version")
+    target = status.get("target")
+    return (
+        "=" * 68 + "\n"
+        f"检测到旧版本数据库（schema v{v} < v{target}）。\n"
+        "为避免绕过备份/校验流程自动升级，GUI 启动已停止。\n\n"
+        "请先在命令行执行（按顺序）：\n"
+        f'  python -m app.main db-release backup    --db "{db}"\n'
+        f'  python -m app.main db-release inventory --db "{db}" --save before.json\n'
+        f'  python -m app.main db-release migrate   --db "{db}" --before before.json --apply-capability\n'
+        f'  python -m app.main db-release verify    --db "{db}" --before before.json\n\n'
+        "全部通过后再启动 GUI。\n"
+        f"（开发/测试如需直接自动迁移，加 {MIGRATION_GATE_ALLOW_FLAG}）\n"
+        + "=" * 68
+    )
+
+
+def _conn_db_path(conn) -> str | None:
+    """从连接取主 DB 文件路径（用于 pre-flight 副本）。"""
+    try:
+        for _seq, name, path in conn.execute("PRAGMA database_list"):
+            if name == "main" and path:
+                return str(path)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _run_release_migrate(
+    conn, apply_capability: bool = False, skip_preflight: bool = False
+) -> dict:
+    """schema 逐级迁移 → canonical seed/迁移（→ 可选 capability backfill）。
+
+    默认先在不接触正式库的临时副本上 pre-flight；conflict/错误时抛异常，
+    保证正式库在任何业务修改前就中止。
+    """
+    if not skip_preflight:
+        db_path = _conn_db_path(conn)
+        if db_path:
+            from app.diagnostics import release_migration as _rm
+
+            pre = _rm.dry_run_on_copy(db_path)
+            if not pre.get("ok"):
+                raise RuntimeError(
+                    "migration preflight failed: "
+                    f"stage={pre.get('stage')} "
+                    f"conflicts={pre.get('conflicts')} "
+                    f"source_problems={pre.get('source_problems')} "
+                    f"error={pre.get('error')}"
+                )
     from app.database.assessment_repository import AssessmentRepository
     from app.database.capability_repository import CapabilityEvidenceRepository
     from app.database.learning_route_repository import LearningRouteRepository
@@ -873,22 +1046,41 @@ def _migrate_text(report: dict) -> str:
     ]
     v = report["verify"]
     lines.append(f"verify.ok: {v['ok']}")
+    lines.append(f"integrity_check: {v.get('integrity_check')}")
+    lines.append(f"foreign_key_problems: {len(v.get('foreign_key_problems') or [])}")
     if v["route_problems"]:
         lines.append(f"route_problems: {v['route_problems']}")
     if v["evidence_problems"]:
         lines.append(f"evidence_problems: {v['evidence_problems']}")
     if v["history_decreases"]:
         lines.append(f"history_decreases: {v['history_decreases']}")
+    if v.get("history_fingerprint_changes"):
+        lines.append(
+            f"history_fingerprint_changes: {v['history_fingerprint_changes']}"
+        )
+    if v.get("history_id_changes"):
+        lines.append(f"history_id_changes: {v['history_id_changes']}")
     return "\n".join(lines)
 
 
 def _verify_text(result: dict) -> str:
     lines = [f"schema_version: {result['schema_version']}",
              f"verify.ok: {result['ok']}"]
+    lines.append(f"integrity_check: {result.get('integrity_check')}")
+    lines.append(
+        f"foreign_key_problems: {result.get('foreign_key_problems')}"
+    )
     lines.append(f"route_problems: {result['route_problems']}")
     lines.append(f"evidence_problems: {result['evidence_problems']}")
     if result.get("before"):
         lines.append(f"history_decreases: {result['history_decreases']}")
+        lines.append(
+            f"history_fingerprint_changes: "
+            f"{result.get('history_fingerprint_changes')}"
+        )
+        lines.append(
+            f"history_id_changes: {result.get('history_id_changes')}"
+        )
     return "\n".join(lines)
 
 
@@ -917,7 +1109,19 @@ def main() -> int:
     if date_arg is not None:
         set_today_provider(date_arg)
 
-    # 2) Qt 只接收过滤后的参数（--date 及其取值已在 parse_date_arg 中剔除），
+    # 2) Migration Gate：旧版本正式 DB 禁止绕过备份/校验流程自动升级
+    allow_auto_migrate = (
+        MIGRATION_GATE_ALLOW_FLAG in sys.argv[1:]
+        or os.environ.get("STUDY_AGENT_ALLOW_AUTO_MIGRATE") == "1"
+    )
+    qt_args = [a for a in qt_args if a != MIGRATION_GATE_ALLOW_FLAG]
+    gate = migration_gate_status(resolve_db_path())
+    if gate.get("blocked") and not allow_auto_migrate:
+        print(migration_gate_message(gate))
+        print("migration gate: blocked (run db-release backup/migrate/verify first)")
+        return 3
+
+    # 3) Qt 只接收过滤后的参数（--date 及其取值已在 parse_date_arg 中剔除），
     #    避免 Qt 把开发参数当成未知选项报错。
     app = QApplication([sys.argv[0]] + qt_args)
     app.setApplicationName("Study Agent")
