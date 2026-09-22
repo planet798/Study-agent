@@ -20,6 +20,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtWidgets import QWidget
 
 from . import tokens as _tokens
 
@@ -200,13 +201,39 @@ class ThemeManager(QObject):
         self._install_system_listener(app)
         theme = self.effective_theme
         qss = render_theme(theme)
-        app.setStyleSheet(qss)
+        # 先 palette 后 stylesheet：确保 QSS polish 时已经看到当前主题 palette，
+        # 避免“切换一次后残留上一主题”的一步延迟。
         app.setPalette(_palette_for(theme))
+        app.setStyleSheet(qss)
+        self._refresh_existing_widgets(app)
         changed = theme != self._last_emitted
         self._last_emitted = theme
         if changed:
             self.theme_changed.emit(theme)
         return theme
+
+    @staticmethod
+    def _refresh_existing_widgets(app) -> None:
+        """让已存在的顶层窗口立即针对新 palette/QSS re-polish。
+
+        只处理 top-level widgets（数量很少），不递归手工 repolish 所有 child；
+        ``setStyleSheet`` 本身会对整棵树 repolish。这是确定性的、一次完成的刷新，
+        不依赖第二次 apply / timer / 用户再次点击。
+        """
+        try:
+            for widget in app.topLevelWidgets():
+                if widget is None:
+                    continue
+                style = widget.style()
+                style.unpolish(widget)
+                style.polish(widget)
+                widget.update()
+                # 递归 update（只调度重绘，开销小），确保 QSS 背景的 viewport /
+                # 自绘 surface 在本次切换后立即重绘，不残留上一主题像素。
+                for child in widget.findChildren(QWidget):
+                    child.update()
+        except Exception:  # noqa: BLE001 - 刷新失败不影响主题已应用
+            pass
 
     def _install_system_listener(self, app) -> None:
         """监听系统深浅色变化（SYSTEM 模式下自动 apply）。

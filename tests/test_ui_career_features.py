@@ -418,19 +418,21 @@ class TestReadableButtons:
                                                         plan_repo):
         from PySide6.QtGui import QColor, QPalette
 
+        from app.ui.design.theme_manager import theme_manager
+
         w = self._window_with_all(qtbot, conn, plan_repo)
         targets = ("添加今日 JD 技术汇总", "查看历史 JD")
         found = self._buttons_by_text(w)
         assert set(targets) <= set(found)
+        # UI-5 fix：次级按钮跟随当前主题 accent（不再写死 light 蓝）
+        expected = QColor(theme_manager().tokens()["accent"]).getRgb()[:3]
         for text in targets:
             btn = found[text]
             assert btn.objectName() == "SecondaryButton", text
             c = btn.palette().color(
                 QPalette.ColorGroup.Active, QPalette.ColorRole.ButtonText
             )
-            assert (c.red(), c.green(), c.blue()) == QColor(
-                "#2c6fbb"
-            ).getRgb()[:3], f"{text} 文字应为主题蓝"
+            assert (c.red(), c.green(), c.blue()) == expected, text
 
     def test_shared_secondary_style_covers_all_states(self):
         from app.ui.styles import APP_STYLE

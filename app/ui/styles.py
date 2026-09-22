@@ -33,6 +33,15 @@ def apply_secondary_button_text(button) -> None:
     """把“完成 / 打开链接”等次级按钮文字强制为蓝字（legacy helper）。
 
     Windows 原生 QPushButton 样式可能不采纳 QSS 的 color 属性；这里显式设置
-    palette 的 ButtonText。只影响文字颜色，不改尺寸 / 边框 / 布局。
+    palette 的 ButtonText。颜色**读取当前主题 accent**（避免 Dark 下新构造的
+    legacy 按钮拿到 Light accent）；但调用时读取无法响应后续主题变化，
+    因此新代码必须使用 ``SAButton``（其内部监听 theme_changed）。
+    只影响文字颜色，不改尺寸 / 边框 / 布局。
     """
-    apply_button_text_palette(button, SECONDARY_TEXT_COLOR)
+    from .design.theme_manager import theme_manager
+
+    try:
+        color = theme_manager().tokens()["accent"]
+    except Exception:  # noqa: BLE001 - 未初始化时回退 legacy 常量
+        color = SECONDARY_TEXT_COLOR
+    apply_button_text_palette(button, color)

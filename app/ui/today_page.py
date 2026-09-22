@@ -104,9 +104,18 @@ class TodayPage(QWidget):
 
         # ----- Task list -----
         self.scroll = QScrollArea()
+        self.scroll.setObjectName("SATodayScroll")
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll.viewport().setObjectName("SATodayViewport")
+        self.scroll.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground, True
+        )
         self.list_container = QWidget()
+        self.list_container.setObjectName("SATodayListContainer")
+        self.list_container.setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground, True
+        )
         self.list_layout = QVBoxLayout(self.list_container)
         self.list_layout.setContentsMargins(0, 0, 6, 0)
         self.list_layout.setSpacing(_spacing.SM)

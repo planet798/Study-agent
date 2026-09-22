@@ -56,7 +56,7 @@ from .components.navigation import key_value
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
-from .styles import apply_secondary_button_text
+from .components.button import SAButton
 from .task_widget import TaskWidget
 from .today_page import TodayPage
 
@@ -1086,15 +1086,11 @@ class MainWindow(QMainWindow):
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
         if self.jd_summary_service is not None:
-            add_btn = QPushButton("添加今日 JD 技术汇总")
-            add_btn.setObjectName("SecondaryButton")
-            apply_secondary_button_text(add_btn)
+            add_btn = SAButton("添加今日 JD 技术汇总", variant="secondary", size="small")
             add_btn.clicked.connect(self._on_add_jd_summary)
             btn_row.addWidget(add_btn)
         if self.jd_service is not None:
-            hist_btn = QPushButton("查看历史 JD")
-            hist_btn.setObjectName("SecondaryButton")
-            apply_secondary_button_text(hist_btn)
+            hist_btn = SAButton("查看历史 JD", variant="secondary", size="small")
             hist_btn.clicked.connect(self._on_view_history_jd)
             btn_row.addWidget(hist_btn)
         btn_row.addStretch()
@@ -1121,15 +1117,11 @@ class MainWindow(QMainWindow):
                 f"近30天 {c['frequency_30d'] * 100:.0f}%"
             )
             info.setObjectName("TaskMeta")
-            add_btn = QPushButton("加入技能体系")
-            add_btn.setObjectName("SecondaryButton")
-            apply_secondary_button_text(add_btn)
+            add_btn = SAButton("加入技能体系", variant="secondary", size="small")
             add_btn.clicked.connect(
                 lambda _=False, cid=c["id"]: self._on_accept_candidate(cid)
             )
-            ign_btn = QPushButton("忽略")
-            ign_btn.setObjectName("SecondaryButton")
-            apply_secondary_button_text(ign_btn)
+            ign_btn = SAButton("忽略", variant="secondary", size="small")
             ign_btn.clicked.connect(
                 lambda _=False, cid=c["id"]: self._on_ignore_candidate(cid)
             )

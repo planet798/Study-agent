@@ -672,3 +672,18 @@ QLabel#SAValueStrong {
     color: {{text_primary}};
     font-weight: 600;
 }
+
+/* ---- Today scroll surface (theme-stable, semantic tokens only) ---- */
+QScrollArea#SATodayScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#SATodayScroll QWidget#SATodayViewport {
+    background-color: {{background}};
+}
+QWidget#SATodayListContainer {
+    background-color: {{background}};
+}
+QWidget#SACareerSection {
+    background: transparent;
+}
