@@ -35,7 +35,14 @@ from PySide6.QtWidgets import (
 
 from ..ai.prompt_registry import PromptRegistry, PromptValidationError
 from ..services.prompt_preview_service import PromptPreviewService
+from .components.button import SAButton, SAIconButton
+from .components.card import SACard
+from .components.info_banner import SAInfoBanner
 from .components.section_header import SASectionHeader
+from .components.status_badge import SAStatusBadge
+from .components.tag import SATag
+from .design import icons as _icons
+from .design import typography as _type
 from .design import theme_preferences as _theme_prefs
 from .design.theme_manager import ThemeMode, theme_manager
 from .ai_settings_dialogs import (
@@ -71,24 +78,23 @@ class AIProfilesPanel(QWidget):
         layout.setSpacing(8)
 
         top = QHBoxLayout()
-        self.add_btn = QPushButton("＋ 添加 API 配置")
-        self.add_btn.setObjectName("PrimaryButton")
+        self.add_btn = SAButton(
+            "添加 API 配置", variant="primary",
+            icon_name=_icons.IconName.ADD,
+        )
         self.add_btn.clicked.connect(self._on_add)
         top.addWidget(self.add_btn)
 
-        self.legacy_btn = QPushButton("保存为配置")
-        self.legacy_btn.setObjectName("SecondaryButton")
-        apply_secondary_button_text(self.legacy_btn)
+        self.legacy_btn = SAButton("保存为配置", variant="secondary")
         self.legacy_btn.clicked.connect(self._on_import_legacy)
         top.addWidget(self.legacy_btn)
 
         top.addStretch()
         layout.addLayout(top)
 
-        self.source_label = QLabel("")
-        self.source_label.setObjectName("TaskMeta")
-        self.source_label.setWordWrap(True)
-        layout.addWidget(self.source_label)
+        self.source_banner = SAInfoBanner("", "", variant="info")
+        self.source_label = self.source_banner.description_label()
+        layout.addWidget(self.source_banner)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -113,10 +119,9 @@ class AIProfilesPanel(QWidget):
         form.addWidget(self.info_label)
 
         btn_row1 = QHBoxLayout()
-        self.set_active_btn = QPushButton("设为当前")
-        self.set_active_btn.setObjectName("PrimaryButton")
+        self.set_active_btn = SAButton("设为当前", variant="primary")
         self.set_active_btn.clicked.connect(self._on_set_active)
-        self.test_btn = QPushButton("测试连接")
+        self.test_btn = SAButton("测试连接", variant="secondary")
         self.test_btn.clicked.connect(self._on_test_connection)
         btn_row1.addWidget(self.set_active_btn)
         btn_row1.addWidget(self.test_btn)
@@ -124,12 +129,11 @@ class AIProfilesPanel(QWidget):
         form.addLayout(btn_row1)
 
         btn_row2 = QHBoxLayout()
-        self.edit_key_btn = QPushButton("修改 Key")
+        self.edit_key_btn = SAButton("修改 Key", variant="secondary")
         self.edit_key_btn.clicked.connect(self._on_edit_key)
-        self.rename_btn = QPushButton("重命名")
+        self.rename_btn = SAButton("重命名", variant="subtle")
         self.rename_btn.clicked.connect(self._on_rename)
-        self.delete_btn = QPushButton("删除")
-        self.delete_btn.setObjectName("DangerButton")
+        self.delete_btn = SAButton("删除", variant="danger")
         self.delete_btn.clicked.connect(self._on_delete)
         btn_row2.addWidget(self.edit_key_btn)
         btn_row2.addWidget(self.rename_btn)
@@ -150,15 +154,26 @@ class AIProfilesPanel(QWidget):
     # ---------- 数据 ----------
 
     def refresh(self) -> None:
+        if self.service is None:
+            self._set_unavailable("AI 配置不可用（未注入 AIConfigService）。")
+            return
         current_id = self._selected_id()
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
         profiles = self.service.list_profiles()
         select_row = 0
         for i, p in enumerate(profiles):
-            marker = "● " if p.is_active else "○ "
-            item = QListWidgetItem(f"{marker}{p.display_name}\n    {p.base_url or '（无 Base URL）'}")
+            suffix = "  当前" if p.is_active else ""
+            item = QListWidgetItem(
+                f"{p.display_name}{suffix}\n    "
+                f"{p.base_url or '（无 Base URL）'}"
+            )
             item.setData(Qt.ItemDataRole.UserRole, p.id)
+            if p.is_active:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setToolTip("当前配置")
             self.list_widget.addItem(item)
             if current_id is not None and p.id == current_id:
                 select_row = i
@@ -170,6 +185,20 @@ class AIProfilesPanel(QWidget):
         self._update_source_banner()
         self._load_selected()
 
+    def _set_unavailable(self, message: str) -> None:
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        self.list_widget.blockSignals(False)
+        self.detail_title.setText("不可用")
+        self.info_label.setText("")
+        self.test_result_label.setText("")
+        for b in (self.add_btn, self.legacy_btn, self.set_active_btn,
+                  self.test_btn, self.edit_key_btn, self.rename_btn,
+                  self.delete_btn):
+            b.setEnabled(False)
+        self.source_banner.set_variant("warning")
+        self.source_label.setText(message)
+
     def _selected_id(self):
         item = self.list_widget.currentItem()
         if item is None:
@@ -177,6 +206,8 @@ class AIProfilesPanel(QWidget):
         return item.data(Qt.ItemDataRole.UserRole)
 
     def _update_source_banner(self) -> None:
+        if self.service is None:
+            return
         count = self.service.profile_count()
         has_selection = count > 0 and self.service.get_active_profile() is None
         cfg = self.service.get_runtime_config()
@@ -184,6 +215,7 @@ class AIProfilesPanel(QWidget):
             legacy_ok = self.service.is_legacy_configured()
             self.legacy_btn.setVisible(True)
             self.legacy_btn.setEnabled(legacy_ok)
+            self.source_banner.set_variant("info" if legacy_ok else "warning")
             if legacy_ok:
                 self.source_label.setText(
                     "当前正在使用环境变量配置（DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / "
@@ -192,10 +224,11 @@ class AIProfilesPanel(QWidget):
                 )
             else:
                 self.source_label.setText(
-                    "当前无可用 AI 配置。请点击【＋ 添加 API 配置】。"
+                    "当前无可用 AI 配置。请点击【添加 API 配置】。"
                 )
         else:
             self.legacy_btn.setVisible(False)
+            self.source_banner.set_variant("info")
             if cfg.profile_name:
                 self.source_label.setText(
                     f"当前使用的配置：{cfg.profile_name}（source={cfg.source}）"
@@ -424,6 +457,9 @@ class PromptManagerPanel(QWidget):
 
         self.status_label = QLabel("")
         form.addWidget(self.status_label)
+        self.status_tag = SATag("", "neutral")
+        self.status_tag.setVisible(False)
+        form.addWidget(self.status_tag, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.var_label = QLabel("")
         self.var_label.setWordWrap(True)
@@ -434,18 +470,20 @@ class PromptManagerPanel(QWidget):
         form.addWidget(self.var_label)
 
         self.editor = QPlainTextEdit()
+        self.editor.setObjectName("SAPromptEditor")
+        self.editor.setFont(_type.font_for(_type.MONOSPACE))
+        self.editor.setAccessibleName("Prompt 编辑器")
         self.editor.setPlaceholderText("选择左侧 Prompt 后可在此编辑…")
         form.addWidget(self.editor, stretch=1)
 
         row = QHBoxLayout()
-        self.save_btn = QPushButton("保存修改")
-        self.save_btn.setObjectName("PrimaryButton")
+        self.save_btn = SAButton("保存修改", variant="primary")
         self.save_btn.clicked.connect(self._on_save)
-        self.reset_btn = QPushButton("恢复默认")
+        self.reset_btn = SAButton("恢复默认", variant="subtle")
         self.reset_btn.clicked.connect(self._on_reset)
-        self.default_btn = QPushButton("查看系统默认")
+        self.default_btn = SAButton("查看系统默认", variant="subtle")
         self.default_btn.clicked.connect(self._on_view_default)
-        self.preview_btn = QPushButton("最终 Prompt 预览")
+        self.preview_btn = SAButton("最终 Prompt 预览", variant="secondary")
         self.preview_btn.clicked.connect(self._on_preview)
         for b in (self.save_btn, self.reset_btn, self.default_btn, self.preview_btn):
             row.addWidget(b)
@@ -469,6 +507,21 @@ class PromptManagerPanel(QWidget):
     # ---------- 数据 ----------
 
     def refresh(self) -> None:
+        if self.registry is None:
+            self.tree.clear()
+            self.name_label.setText("Prompt 管理不可用")
+            self.desc_label.setText("未注入 PromptRegistry。")
+            self.status_label.setText("")
+            self.status_tag.setVisible(False)
+            self.var_label.setText("")
+            self.editor.setPlainText("")
+            self.editor.setEnabled(False)
+            for b in (self.save_btn, self.reset_btn, self.default_btn,
+                      self.preview_btn):
+                b.setEnabled(False)
+            self.route_combo.clear()
+            self.route_combo.setEnabled(False)
+            return
         self.tree.clear()
         by_cat = self.registry.by_category()
         for category, defs in by_cat.items():
@@ -487,6 +540,7 @@ class PromptManagerPanel(QWidget):
         self.name_label.setText("请选择 Prompt")
         self.desc_label.setText("")
         self.status_label.setText("")
+        self.status_tag.setVisible(False)
         self.var_label.setText("")
         self.editor.setPlainText("")
 
@@ -523,6 +577,9 @@ class PromptManagerPanel(QWidget):
             "当前状态：用户自定义（可在下方修改，或恢复默认）"
             if customized else "当前状态：系统默认"
         )
+        self.status_tag.setText("已自定义" if customized else "系统默认")
+        self.status_tag.set_variant("warning" if customized else "neutral")
+        self.status_tag.setVisible(True)
         required = ", ".join(f"{{{{{v}}}}}" for v in definition.required_variables) or "（无）"
         optional = ", ".join(f"{{{{{v}}}}}" for v in definition.optional_variables) or "（无）"
         self.var_label.setText(f"必需变量：{required}\n可选变量：{optional}")
@@ -651,7 +708,7 @@ class AISettingsPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 0, 4, 0)
 
-        # ---- 外观（UI-2 最小入口：Light / Dark / System） ----
+        # ---- 外观（独立于 AI service，始终可用） ----
         self.theme_settings = theme_settings
         appearance = QWidget()
         appearance_row = QHBoxLayout(appearance)
@@ -661,6 +718,7 @@ class AISettingsPage(QWidget):
         self.theme_combo.addItem("跟随系统", ThemeMode.SYSTEM.value)
         self.theme_combo.addItem("浅色", ThemeMode.LIGHT.value)
         self.theme_combo.addItem("深色", ThemeMode.DARK.value)
+        self.theme_combo.setAccessibleName("界面主题")
         current = theme_manager().current_mode
         idx = self.theme_combo.findData(
             current.value if isinstance(current, ThemeMode) else str(current)
@@ -669,9 +727,11 @@ class AISettingsPage(QWidget):
         self.theme_combo.currentIndexChanged.connect(self._on_theme_combo_changed)
         appearance_row.addWidget(self.theme_combo)
         appearance_row.addStretch()
-        layout.addWidget(
+        appearance_card = SACard()
+        appearance_card.add_widget(
             SASectionHeader("外观", trailing=appearance)
         )
+        layout.addWidget(appearance_card)
 
         hint = QLabel(
             "模型 / API 决定“连接谁”，Prompt 管理决定“告诉模型什么”。"

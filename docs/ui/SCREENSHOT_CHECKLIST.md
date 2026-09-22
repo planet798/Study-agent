@@ -105,6 +105,13 @@ docs/ui/screenshots/
 - Route detail 是否不再是纯文本堆叠；knowledge row 是否 Mastery/Capability 分离。
 - 学习活动是否以文本状态展示（无 ✓ ○ ◇ 符号）。
 
+## 5b. UI-4 后人工重点检查（Practice / Monthly / Settings）
+
+**Practice**：四类进度是否分开（Readiness / Milestone / Output / Evidence）；状态徽标；empty state；
+detail 是否不再是 `【】` 文本堆叠；readiness 不是能力百分比；L5 只来自 active confirmed evidence。
+**Monthly**：4 个核心指标；时间是否小时/分；分类行；无 weekly 文案；AI 不可用 banner；空月份。
+**Settings**：无 AI service 仍可切换主题；profile 无 ●○；Key 不回显；editor monospace；Light/Dark。
+
 ---
 
 ## 6. UI-0 状态

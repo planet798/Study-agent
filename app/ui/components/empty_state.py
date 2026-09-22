@@ -67,6 +67,12 @@ class SAEmptyState(QWidget):
     def set_title(self, title: str) -> None:
         self._title_label.setText(title)
 
+    def title(self) -> str:
+        return self._title_label.text()
+
+    def description(self) -> str:
+        return self._desc_label.text()
+
     def set_description(self, description: str) -> None:
         self._desc_label.setText(description)
         self._desc_label.setVisible(bool(description))

@@ -593,7 +593,7 @@ UI-0  Audit + Blueprint                ← done (b32bee2)
 UI-1  Design Tokens / ThemeManager / Icon system / Foundation Components  ← done (bdec9a0)
 UI-2  App Shell / Sidebar / Page Header / Light-Dark-System  ← done (21b4092, 详见 APP_SHELL.md)
 UI-3  Today / Learning Routes  ← done (详见 TODAY_DESIGN.md / ROUTES_DESIGN.md)
-UI-4  Practice / Monthly / Settings
+UI-4  Practice / Monthly / Settings  ← done (详见 PRACTICE_DESIGN.md / MONTHLY_DESIGN.md / SETTINGS_DESIGN.md)
 UI-5  States / Micro-interactions / DPI / Accessibility / Polish
 ```
 

@@ -324,21 +324,18 @@ class MainWindow(QMainWindow):
         else:
             self.nav_practice_btn.setEnabled(False)
 
-        # ----- AI 设置页（可选） -----
-        if self.ai_config_service is not None and self.prompt_registry is not None:
-            from .ai_settings_page import AISettingsPage
+        # ----- 设置页（含外观，始终可用；AI 服务可选） -----
+        from .ai_settings_page import AISettingsPage
 
-            self.ai_settings_page = AISettingsPage(
-                self.ai_config_service,
-                self.prompt_registry,
-                preview_service=self.prompt_preview_service,
-                theme_settings=self.theme_settings,
-            )
-            self.stack.addWidget(self.ai_settings_page)
-            self.ai_settings_page_index = self.stack.count() - 1
-            self.nav_ai_btn.setEnabled(True)
-        else:
-            self.nav_ai_btn.setEnabled(False)
+        self.ai_settings_page = AISettingsPage(
+            self.ai_config_service,
+            self.prompt_registry,
+            preview_service=self.prompt_preview_service,
+            theme_settings=self.theme_settings,
+        )
+        self.stack.addWidget(self.ai_settings_page)
+        self.ai_settings_page_index = self.stack.count() - 1
+        self.nav_ai_btn.setEnabled(True)
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("")

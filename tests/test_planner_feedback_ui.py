@@ -42,7 +42,7 @@ class TestProjectDetailReadiness:
         )
         dlg = _detail(env, project["id"], qtbot)
         joined = "\n".join(_labels(dlg))
-        assert "【学习准备】" in joined
+        assert "学习准备" in joined
         assert "学习准备度：0 / 1 已满足" in joined
         assert "vLLM 与 PagedAttention" in joined
         assert "要求：能够写代码（3）" in joined
@@ -60,7 +60,7 @@ class TestProjectDetailReadiness:
         dlg = _detail(env, project["id"], qtbot)
         joined = "\n".join(_labels(dlg))
         assert "学习准备度：1 / 1 已满足" in joined
-        assert "✓ 已满足" in joined
+        assert "已满足" in joined
 
     def test_not_set_requirement_hint(self, practice_readiness_env, qtbot):
         env = practice_readiness_env

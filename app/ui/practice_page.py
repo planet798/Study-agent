@@ -43,13 +43,29 @@ from .practice_dialogs import (
     PracticeTopicRequirementDialog,
     RevokeEvidenceDialog,
 )
-from .styles import apply_secondary_button_text
+from .components.button import SAButton
+from .components.card import SACard
+from .components.empty_state import SAEmptyState
+from .components.progress_bar import SAProgressBar
+from .components.section_header import SASectionHeader
+from .components.status_badge import SAStatusBadge
+from .components.tag import SATag
+from .design import icons as _icons
+from .design import spacing as _spacing
+
+
+def _project_status_key(status: str) -> str:
+    if status == STATUS_ARCHIVED:
+        return "archived"
+    if status == STATUS_COMPLETED:
+        return "completed"
+    if status == STATUS_IN_PROGRESS:
+        return "in_progress"
+    return "planned"
 
 
 def _secondary(text: str, slot) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setObjectName("SecondaryButton")
-    apply_secondary_button_text(btn)
+    btn = SAButton(text, variant="secondary", size="small")
     btn.clicked.connect(slot)
     return btn
 
@@ -104,16 +120,27 @@ class PracticeProjectsPage(QWidget):
         self.filter_combo.currentIndexChanged.connect(lambda *_: self.refresh())
         head.addWidget(self.filter_combo)
         head.addStretch()
-        head.addWidget(_secondary("＋ 新建项目", self._on_create))
+        self.create_btn = SAButton(
+            "新建项目", variant="secondary", icon_name=_icons.IconName.ADD
+        )
+        self.create_btn.clicked.connect(self._on_create)
+        head.addWidget(self.create_btn)
         root.addLayout(head)
 
         hint = QLabel(
-            "实践项目用于把多条路线 / 技能 / Topic 组合成可验证的真实成果；"
-            "项目不参与每日排程与能力等级判定。"
+            "实践项目用于沉淀真实成果与能力证据；"
+            "学习准备度可帮助确定项目相关知识的下一学习步骤。"
         )
         hint.setObjectName("TaskMeta")
         hint.setWordWrap(True)
         root.addWidget(hint)
+        hint2 = QLabel(
+            "项目证据不会直接改变 Mastery；"
+            "显式确认的项目使用证据可形成 PROJECT 级能力证据。"
+        )
+        hint2.setObjectName("TaskMeta")
+        hint2.setWordWrap(True)
+        root.addWidget(hint2)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -121,8 +148,16 @@ class PracticeProjectsPage(QWidget):
         self.list_container = QWidget()
         self.list_layout = QVBoxLayout(self.list_container)
         self.list_layout.setContentsMargins(0, 0, 6, 0)
-        self.list_layout.setSpacing(6)
+        self.list_layout.setSpacing(_spacing.SM)
         self.scroll.setWidget(self.list_container)
+        self.empty_state = SAEmptyState(
+            title="还没有实践项目",
+            description="创建项目，把学习路线、技能和 Topic 转化为可验证成果。",
+            icon_name=_icons.IconName.PROJECT,
+            action=None,
+        )
+        self.empty_state.setVisible(False)
+        root.addWidget(self.empty_state)
         root.addWidget(self.scroll, stretch=1)
 
     # ---------- 渲染 ----------
@@ -135,55 +170,59 @@ class PracticeProjectsPage(QWidget):
             projects = self.service.projects.list_active()
         else:
             projects = self.service.list_projects(status=status)
-        if not projects:
-            empty = QLabel("暂无实践项目")
-            empty.setObjectName("EmptyHint")
-            self.list_layout.addWidget(empty)
+        self.empty_state.setVisible(not projects)
         for p in projects:
             self.list_layout.addWidget(self._project_card(p))
         self.list_layout.addStretch()
 
     def _project_card(self, project: dict) -> QWidget:
-        card = QFrame()
-        card.setObjectName("TaskCard")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(3)
+        card = SACard(variant="interactive")
+        lay = card.body_layout
 
         top = QHBoxLayout()
         name = QLabel(project["name"])
         name.setObjectName("TaskTitle")
+        name.setWordWrap(True)
         top.addWidget(name)
         top.addStretch()
+        top.addWidget(SAStatusBadge(_project_status_key(project["status"])))
         lay.addLayout(top)
 
-        route_ids = self.service.projects.list_route_ids(project["id"])
-        route_names = []
-        if self.route_repo is not None:
-            for rid in route_ids:
-                r = self.route_repo.get(rid)
-                if r is not None:
-                    route_names.append(r.name)
+        type_row = QHBoxLayout()
+        type_row.setSpacing(6)
+        type_row.addWidget(
+            SATag(project_type_label(project["project_type"]), "neutral")
+        )
+        route_names = self._project_route_names(project["id"])
+        for name_ in route_names:
+            type_row.addWidget(SATag(name_, "accent"))
+        type_row.addStretch()
+        lay.addLayout(type_row)
+
         prog = self.service.get_project_progress(project["id"])
-        ms_txt = (f"{prog['milestones_done']} / {prog['milestones_total']}"
-                  if prog["has_milestones"] else "尚未设置里程碑")
-        evidence_txt = ""
+        ms_txt = (
+            f"{prog['milestones_done']} / {prog['milestones_total']}"
+            if prog["has_milestones"] else "尚未设置里程碑"
+        )
+        evidence_n = 0
         if self.capability_service is not None:
             try:
-                n = self.capability_service.count_active_by_project(project["id"])
-                evidence_txt = f"项目能力证据：{n}"
+                evidence_n = self.capability_service.count_active_by_project(
+                    project["id"]
+                )
             except Exception:  # noqa: BLE001
-                evidence_txt = ""
-        meta = QLabel(
-            f"状态：{project_status_label(project['status'])}　"
-            f"类型：{project_type_label(project['project_type'])}\n"
-            f"关联路线：{' · '.join(route_names) or '—'}\n"
-            f"里程碑：{ms_txt}　成果：{prog['output_count']}"
-            + (f"　{evidence_txt}" if evidence_txt else "")
-        )
-        meta.setObjectName("TaskMeta")
-        meta.setWordWrap(True)
-        lay.addWidget(meta)
+                evidence_n = 0
+        metrics = QHBoxLayout()
+        metrics.setSpacing(12)
+        metrics.addWidget(self._meta(f"里程碑：{ms_txt}"))
+        metrics.addWidget(self._meta(f"成果：{prog['output_count']}"))
+        metrics.addWidget(self._meta(f"项目能力证据：{evidence_n}"))
+        metrics.addStretch()
+        lay.addLayout(metrics)
+
+        readiness_txt = self._project_readiness_text(project["id"])
+        if readiness_txt:
+            lay.addWidget(self._meta(readiness_txt))
 
         row = QHBoxLayout()
         row.addWidget(_secondary(
@@ -203,6 +242,39 @@ class PracticeProjectsPage(QWidget):
         row.addStretch()
         lay.addLayout(row)
         return card
+
+    @staticmethod
+    def _meta(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("TaskMeta")
+        lbl.setWordWrap(True)
+        return lbl
+
+    def _project_route_names(self, project_id) -> list[str]:
+        names: list[str] = []
+        if self.route_repo is None:
+            return names
+        try:
+            route_ids = self.service.projects.list_route_ids(project_id)
+        except Exception:  # noqa: BLE001
+            return names
+        for rid in route_ids:
+            r = self.route_repo.get(rid)
+            if r is not None:
+                names.append(r.name)
+        return names
+
+    def _project_readiness_text(self, project_id) -> str:
+        if self.readiness_service is None:
+            return ""
+        try:
+            readiness = self.readiness_service.get_project_readiness(project_id)
+        except Exception:  # noqa: BLE001
+            return ""
+        return (
+            f"学习准备度：{readiness['satisfied_count']} / "
+            f"{readiness['total_count']} 已满足"
+        )
 
     # ---------- 操作 ----------
 
@@ -299,6 +371,19 @@ class PracticeProjectDetailDialog(QDialog):
         lbl.setObjectName("SectionTitle")
         return lbl
 
+    @staticmethod
+    def _value_pair(lay, label: str, value: str) -> None:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        key = QLabel(label)
+        key.setObjectName("SAValueLabel")
+        val = QLabel(value if value else "—")
+        val.setObjectName("SAValueStrong")
+        val.setWordWrap(True)
+        row.addWidget(key)
+        row.addWidget(val, stretch=1)
+        lay.addLayout(row)
+
     def refresh(self) -> None:
         value = self.scroll.verticalScrollBar().value()
         _clear_layout(self.body_layout)
@@ -308,15 +393,16 @@ class PracticeProjectDetailDialog(QDialog):
         prog = self.service.get_project_progress(self.project_id)
         ms_txt = (f"{prog['milestones_done']} / {prog['milestones_total']}"
                   if prog["has_milestones"] else "尚未设置里程碑")
-        overview = QLabel(
-            f"【项目概览】\n状态：{project_status_label(p['status'])}　"
-            f"类型：{project_type_label(p['project_type'])}\n"
-            f"目标：{p.get('goal') or '—'}\n描述：{p.get('description') or '—'}\n"
-            f"里程碑：{ms_txt}　成果：{prog['output_count']}"
-        )
-        overview.setObjectName("TaskMeta")
-        overview.setWordWrap(True)
-        self.body_layout.addWidget(overview)
+        card = SACard()
+        card.add_widget(SASectionHeader("概览"))
+        lay = card.body_layout
+        self._value_pair(lay, "状态", project_status_label(p['status']))
+        self._value_pair(lay, "类型", project_type_label(p['project_type']))
+        self._value_pair(lay, "目标", p.get('goal') or '—')
+        self._value_pair(lay, "描述", p.get('description') or '—')
+        self._value_pair(lay, "里程碑", ms_txt)
+        self._value_pair(lay, "成果", str(prog['output_count']))
+        self.body_layout.addWidget(card)
 
         self._routes_section(detail["routes"])
         self._skills_section(detail["skills"])
@@ -345,7 +431,7 @@ class PracticeProjectDetailDialog(QDialog):
 
     def _routes_section(self, routes) -> None:
         head = QHBoxLayout()
-        head.addWidget(self._section("【关联学习路线】"))
+        head.addWidget(self._section("关联学习路线"))
         head.addStretch()
         head.addWidget(_secondary("管理路线", self._manage_routes))
         self.body_layout.addLayout(head)
@@ -357,7 +443,7 @@ class PracticeProjectDetailDialog(QDialog):
 
     def _skills_section(self, skills) -> None:
         head = QHBoxLayout()
-        head.addWidget(self._section("【关联技能】"))
+        head.addWidget(self._section("关联技能"))
         head.addStretch()
         head.addWidget(_secondary("管理技能", self._manage_skills))
         self.body_layout.addLayout(head)
@@ -369,7 +455,7 @@ class PracticeProjectDetailDialog(QDialog):
 
     def _topics_section(self, topics) -> None:
         head = QHBoxLayout()
-        head.addWidget(self._section("【关联 Topic】"))
+        head.addWidget(self._section("关联 Topic"))
         head.addStretch()
         head.addWidget(_secondary("管理 Topic", self._manage_topics))
         self.body_layout.addLayout(head)
@@ -381,9 +467,9 @@ class PracticeProjectDetailDialog(QDialog):
 
     def _milestones_section(self, milestones) -> None:
         head = QHBoxLayout()
-        head.addWidget(self._section("【里程碑】"))
+        head.addWidget(self._section("里程碑"))
         head.addStretch()
-        head.addWidget(_secondary("＋ 新增里程碑", self._add_milestone))
+        head.addWidget(_secondary("新增里程碑", self._add_milestone))
         self.body_layout.addLayout(head)
         if not milestones:
             lbl = QLabel("尚未设置里程碑")
@@ -414,9 +500,9 @@ class PracticeProjectDetailDialog(QDialog):
 
     def _outputs_section(self, outputs) -> None:
         head = QHBoxLayout()
-        head.addWidget(self._section("【项目成果】"))
+        head.addWidget(self._section("项目成果"))
         head.addStretch()
-        head.addWidget(_secondary("＋ 新增成果", self._add_output))
+        head.addWidget(_secondary("新增成果", self._add_output))
         self.body_layout.addLayout(head)
         if not outputs:
             lbl = QLabel("暂无项目成果")
@@ -425,10 +511,12 @@ class PracticeProjectDetailDialog(QDialog):
             return
         for o in outputs:
             row = QHBoxLayout()
-            uri = f"　{o['uri']}" if o.get("uri") else ""
-            lbl = QLabel(
-                f"[{output_type_label(o['output_type'])}] {o['title']}{uri}"
+            row.setSpacing(8)
+            row.addWidget(
+                SATag(output_type_label(o['output_type']), "neutral")
             )
+            uri = f"　{o['uri']}" if o.get("uri") else ""
+            lbl = QLabel(f"{o['title']}{uri}")
             lbl.setObjectName("TaskMeta")
             lbl.setWordWrap(True)
             row.addWidget(lbl, stretch=1)
@@ -444,7 +532,7 @@ class PracticeProjectDetailDialog(QDialog):
 
     def _readiness_section(self) -> None:
         head = QHBoxLayout()
-        head.addWidget(self._section("【学习准备】"))
+        head.addWidget(self._section("学习准备"))
         head.addStretch()
         self.body_layout.addLayout(head)
         if self.readiness_service is None:
@@ -477,9 +565,9 @@ class PracticeProjectDetailDialog(QDialog):
         for st in statuses:
             row = QHBoxLayout()
             if st.satisfied:
-                state = "✓ 已满足"
+                state = "已满足"
             else:
-                state = f"⚠ 能力缺口（{st.reason_label}）"
+                state = f"能力缺口（{st.reason_label}）"
             lines = [
                 st.topic_name,
                 f"要求：{st.target_capability_label}（{st.target_capability_level}）",
@@ -538,7 +626,7 @@ class PracticeProjectDetailDialog(QDialog):
 
     def _evidence_section(self) -> None:
         head = QHBoxLayout()
-        head.addWidget(self._section("【项目能力证据】"))
+        head.addWidget(self._section("项目能力证据"))
         head.addStretch()
         self.body_layout.addLayout(head)
         if self.capability_service is None:
@@ -565,7 +653,7 @@ class PracticeProjectDetailDialog(QDialog):
                 ) or {}
                 outputs = " · ".join(ev.get("output_labels") or [])
                 lbl = QLabel(
-                    f"{c['topic_name']}\n✓ 已在真实项目中使用\n"
+                    f"{c['topic_name']}\n已确认项目使用证据\n"
                     f"支撑成果：{outputs or '—'}\n"
                     f"项目使用：{ev.get('usage_description') or ''}"
                 )

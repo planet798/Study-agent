@@ -80,10 +80,10 @@ class TestPracticeDetail:
                                uri="https://github.com/x/y")
         dlg = self._detail(env, p["id"], qtbot)
         joined = "\n".join(_labels(dlg))
-        assert "【项目概览】" in joined
-        assert "【关联学习路线】" in joined
-        assert "【里程碑】" in joined
-        assert "【项目成果】" in joined
+        assert "概览" in joined
+        assert "关联学习路线" in joined
+        assert "里程碑" in joined
+        assert "项目成果" in joined
         assert "GitHub repo" in joined
 
     def test_milestone_progress_updates(self, practice_env, qtbot):

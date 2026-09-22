@@ -39,7 +39,7 @@ class TestProjectDetailEvidence:
         r = ready_lora(env)
         dlg = _detail(env, r.project["id"], qtbot)
         joined = "\n".join(_labels(dlg))
-        assert "【项目能力证据】" in joined
+        assert "项目能力证据" in joined
         assert r.lora.name in joined
         assert "可确认项目能力证据" in joined
         assert "确认项目使用" in joined
@@ -61,7 +61,7 @@ class TestProjectDetailEvidence:
                         usage="完成 LoRA adapter 训练与推理")
         dlg = _detail(env, r.project["id"], qtbot)
         joined = "\n".join(_labels(dlg))
-        assert "✓ 已在真实项目中使用" in joined
+        assert "已确认项目使用证据" in joined
         assert "Repository · Benchmark · Checkpoint" in joined
         assert "完成 LoRA adapter 训练与推理" in joined
         assert "撤销证据" in joined
@@ -72,12 +72,12 @@ class TestProjectDetailEvidence:
         r = ready_lora(env)
         ev = create_evidence(env, r.project, r.lora, [r.repo["id"]])
         dlg = _detail(env, r.project["id"], qtbot)
-        assert "✓ 已在真实项目中使用" in "\n".join(_labels(dlg))
+        assert "已确认项目使用证据" in "\n".join(_labels(dlg))
         env.pc.revoke_project_topic_evidence(ev["id"], "r")
         dlg.refresh()
         labels = _labels(dlg)
         joined = "\n".join(labels)
-        assert "✓ 已在真实项目中使用" not in joined
+        assert "已确认项目使用证据" not in joined
         assert "曾有已撤销证据（可重新确认）" in joined
         # 撤销按钮消失（精确匹配，避免匹配到“曾有已撤销证据”文案）
         assert "撤销证据" not in labels
