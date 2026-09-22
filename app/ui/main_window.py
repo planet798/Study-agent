@@ -43,7 +43,7 @@ from ..services.manual_task_service import ManualTaskService
 from ..services.task_review_service import TaskReviewService
 from ..services.task_service import TaskService
 from ..utils.date_utils import add_days, today as _default_today
-from ..database.schema import STATUS_CANCELLED
+from ..database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_NOT_DONE
 from .ai_worker import (
     AIReviewWorker,
     AIRouteBuilderWorker,
@@ -58,6 +58,7 @@ from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
 from .styles import apply_secondary_button_text
 from .task_widget import TaskWidget
+from .today_page import TodayPage
 
 POSTPONE_WARNING = "该任务已经连续延期 3 次，请考虑拆分任务或调整计划。"
 
@@ -235,94 +236,34 @@ class MainWindow(QMainWindow):
         self.nav_ai_btn = self.sidebar.item(PageKey.SETTINGS)
         self.sidebar.page_requested.connect(self._on_nav_requested)
 
-        # ----- 今日页 -----
-        today_page = QWidget()
-        root_today = QVBoxLayout(today_page)
-        root_today.setContentsMargins(4, 0, 4, 0)
-        root_today.setSpacing(10)
+        # ----- 今日页（View 已抽到 TodayPage，MainWindow 只做编排） -----
+        self.today_page = TodayPage()
+        self.stack.addWidget(self.today_page)
 
         # 日期进入统一 PageHeader；date_label 仍是同一个 label，日期业务逻辑不变。
         self.date_label = self.page_header.subtitle_label()
 
-        section = QLabel("今日学习任务")
-        section.setObjectName("SectionTitle")
-        root_today.addWidget(section)
+        # compatibility aliases（旧测试 / 旧代码依赖）
+        self.scroll = self.today_page.scroll
+        self.list_container = self.today_page.list_container
+        self.list_layout = self.today_page.list_layout
+        self.empty_hint = self.today_page.empty_hint
+        self.route_filter_combo = self.today_page.route_filter_combo
+        self.route_stats_label = self.today_page.route_stats_label
+        self.phase_container = self.today_page.phase_container
+        self.phase_label = self.today_page.phase_label
+        self.phase_goal_label = self.today_page.phase_goal_label
+        self.planner_container = self.today_page.planner_container
+        self.planner_status_label = self.today_page.planner_status_label
+        self.planner_note_label = self.today_page.planner_note_label
+        self.planner_replan_btn = self.today_page.planner_replan_btn
+        self.add_task_btn = self.today_page.add_task_btn
 
-        # 手动添加今日学习任务（不依赖 Agent 规划）+ 路线筛选
-        add_row = QHBoxLayout()
-        add_row.addWidget(QLabel("路线筛选"))
-        self.route_filter_combo = QComboBox()
-        self.route_filter_combo.currentIndexChanged.connect(
+        self.today_page.add_task_requested.connect(self._on_add_learning_task)
+        self.today_page.route_filter_changed.connect(
             self._on_route_filter_changed
         )
-        add_row.addWidget(self.route_filter_combo)
-        add_row.addStretch()
-        self.add_task_btn = QPushButton("＋ 添加学习任务")
-        self.add_task_btn.setObjectName("SecondaryButton")
-        apply_secondary_button_text(self.add_task_btn)
-        self.add_task_btn.clicked.connect(self._on_add_learning_task)
-        add_row.addWidget(self.add_task_btn)
-        root_today.addLayout(add_row)
-
-        self.route_stats_label = QLabel("")
-        self.route_stats_label.setObjectName("TaskMeta")
-        root_today.addWidget(self.route_stats_label)
-
-        # 当前学习阶段（StudyPlanService 可选注入；不注入则隐藏）
-        self.phase_container = QWidget()
-        phase_box = QVBoxLayout(self.phase_container)
-        phase_box.setContentsMargins(0, 0, 0, 0)
-        phase_box.setSpacing(2)
-        self.phase_label = QLabel("")
-        self.phase_label.setObjectName("TaskMeta")
-        self.phase_goal_label = QLabel("")
-        self.phase_goal_label.setObjectName("TaskMeta")
-        phase_box.addWidget(self.phase_label)
-        phase_box.addWidget(self.phase_goal_label)
-        root_today.addWidget(self.phase_container)
-
-        # AI 今日规划区域（DailyPlannerService 可选注入；不注入则隐藏）
-        self.planner_container = QWidget()
-        planner_box = QVBoxLayout(self.planner_container)
-        planner_box.setContentsMargins(0, 0, 0, 0)
-        planner_box.setSpacing(4)
-        self.planner_status_label = QLabel("AI 状态：AI 不可用")
-        self.planner_status_label.setObjectName("TaskMeta")
-        self.planner_note_label = QLabel(
-            "今日计划由 AI 根据最近 7 天学习情况调整"
-        )
-        self.planner_note_label.setObjectName("TaskMeta")
-        self.planner_replan_btn = QPushButton("重新规划今天")
-        self.planner_replan_btn.clicked.connect(self._on_replan)
-        self.planner_row = QHBoxLayout()
-        self.planner_row.setSpacing(10)
-        self.planner_row.addWidget(self.planner_status_label)
-        self.planner_row.addWidget(self.planner_note_label)
-        self.planner_row.addStretch()
-        self.planner_row.addWidget(self.planner_replan_btn)
-        planner_box.addLayout(self.planner_row)
-        root_today.addWidget(self.planner_container)
-
-        # 滚动任务列表
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll.setStyleSheet("background: transparent;")
-        self.list_container = QWidget()
-        self.list_layout = QVBoxLayout(self.list_container)
-        self.list_layout.setContentsMargins(0, 0, 6, 0)
-        self.list_layout.setSpacing(6)
-        self.list_layout.addStretch()
-        self.scroll.setWidget(self.list_container)
-        root_today.addWidget(self.scroll, stretch=1)
-
-        # 空状态提示
-        self.empty_hint = QLabel("今天还没有学习任务。")
-        self.empty_hint.setObjectName("EmptyHint")
-        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root_today.addWidget(self.empty_hint)
-
-        self.stack.addWidget(today_page)
+        self.today_page.replan_requested.connect(self._on_replan)
         self.monthly_page_index = None
         self.routes_page_index = None
         self.ai_settings_page_index = None
@@ -580,6 +521,26 @@ class MainWindow(QMainWindow):
         ]
         self._update_route_stats(tasks, selected_route)
 
+        # Today Summary metrics（只从已获取的 tasks 推导，不新增 DB query）
+        effective_tasks = [
+            t for t in tasks
+            if t.status != STATUS_CANCELLED
+            and self._matches_route(t, selected_route)
+        ]
+        pending = [
+            t for t in effective_tasks
+            if t.status in (STATUS_ACTIVE, STATUS_NOT_DONE)
+        ]
+        pending_minutes = sum(int(t.estimated_minutes or 0) for t in pending)
+        due_reviews = sum(
+            1 for t in effective_tasks
+            if t.task_type == "review"
+            and t.status in (STATUS_ACTIVE, STATUS_NOT_DONE)
+        )
+        self.today_page.set_summary_metrics(
+            len(pending), pending_minutes, due_reviews
+        )
+
         # 1) 今日新知识
         self._add_section_header("今日新知识")
         for t in new_tasks:
@@ -599,7 +560,11 @@ class MainWindow(QMainWindow):
             else:
                 self._add_section_hint("暂无可复习内容")
 
-        # Phase E：职业 / 技能 / JD 面板（可选注入，异常不崩溃）
+        # Phase E：职业 / 技能 / JD 面板（secondary section，排在任务之后）
+        if (self.skill_service is not None
+                or self.jd_summary_service is not None
+                or self.jd_service is not None):
+            self._add_section_header("职业信号")
         self._add_skill_overview()
         self._add_jd_trend_panel()
 
@@ -1582,6 +1547,7 @@ class MainWindow(QMainWindow):
                 )
                 self.planner_note_label.setText(f"可自动规划：{names}")
                 self.planner_replan_btn.setEnabled(True)
+                self.today_page.planner_banner.set_variant("info")
             else:
                 self.planner_status_label.setText(
                     "AI 状态：当前没有可自动规划的学习路线"
@@ -1590,6 +1556,7 @@ class MainWindow(QMainWindow):
                     "请在“学习路线”中启用自动规划或创建学习计划"
                 )
                 self.planner_replan_btn.setEnabled(False)
+                self.today_page.planner_banner.set_variant("warning")
             self.planner_container.setVisible(True)
             return
         if self.daily_planner_service is None:
@@ -1600,15 +1567,18 @@ class MainWindow(QMainWindow):
                 f"AI 状态：{self._planning_route_name()} 自动规划已暂停"
             )
             self.planner_replan_btn.setEnabled(False)
+            self.today_page.planner_banner.set_variant("warning")
             self.planner_container.setVisible(True)
             return
         planner = self.daily_planner_service.planner
         if planner is not None and planner.is_configured():
             self.planner_status_label.setText("AI 状态：AI 已启用")
             self.planner_replan_btn.setEnabled(True)
+            self.today_page.planner_banner.set_variant("info")
         else:
             self.planner_status_label.setText("AI 状态：AI 不可用")
             self.planner_replan_btn.setEnabled(False)
+            self.today_page.planner_banner.set_variant("warning")
         self.planner_container.setVisible(True)
 
     # ---------- AI 重新规划 ----------

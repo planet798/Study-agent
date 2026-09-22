@@ -59,9 +59,9 @@ class TestRouteDetailChips:
         chips = dlg._activity_chips(lora.id)
         for label in ("理论", "代码理解", "实验"):
             assert label in chips
-        # required pending = ○，optional pending = ◇
-        assert "○" in chips
-        assert "◇" in chips
+        # required pending = 必需，optional pending = 可选
+        assert "必需" in chips
+        assert "可选" in chips
 
     def test_chips_show_complete(self, activity_env, qtbot):
         from app.services.learning_route_service import LearningRouteService
@@ -88,7 +88,7 @@ class TestRouteDetailChips:
         )
         qtbot.addWidget(dlg)
         chips = dlg._activity_chips(lora.id)
-        assert "理论 ✓" in chips
+        assert "理论 · 已完成" in chips
 
 
 class TestProfileEditor:

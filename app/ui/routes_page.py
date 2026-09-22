@@ -30,6 +30,11 @@ from ..services.learning_route_service import RouteValidationError
 from ..services.route_plan_service import RouteStructureError
 from ..utils.date_utils import today as _default_today
 from .dialogs import show_warning
+from .components.button import SAButton
+from .components.card import SACard
+from .components.progress_bar import SAProgressBar
+from .components.status_badge import SAStatusBadge
+from .components.tag import SATag
 from .route_builder_dialogs import (
     AIRouteBuilderDialog,
     RouteDraftPreviewDialog,
@@ -48,9 +53,8 @@ from .styles import apply_secondary_button_text
 
 
 def _secondary(text: str, on_click) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setObjectName("SecondaryButton")
-    apply_secondary_button_text(btn)
+    """UI-3：Routes 区域按钮迁移到 SAButton（secondary）。"""
+    btn = SAButton(text, variant="secondary", size="small")
     btn.clicked.connect(on_click)
     return btn
 
@@ -249,13 +253,20 @@ class RouteDetailDialog(QDialog):
                     ks.capability_label if ks.has_capability_evidence
                     else "暂无能力证据"
                 )
-                lbl = QLabel(
-                    f"{ks.name}　{ks.status}{extra}　Mastery：{mastery_txt}"
-                    f"　Capability：{cap_txt}"
-                )
-                lbl.setObjectName("TaskMeta")
-                lbl.setWordWrap(True)
-                row.addWidget(lbl, stretch=1)
+                info = QVBoxLayout()
+                info.setContentsMargins(0, 0, 0, 0)
+                info.setSpacing(2)
+                title_lbl = QLabel(f"{ks.name}　{ks.status}{extra}")
+                title_lbl.setObjectName("TaskTitle")
+                title_lbl.setWordWrap(True)
+                info.addWidget(title_lbl)
+                mastery_lbl = QLabel(f"Mastery：{mastery_txt}")
+                mastery_lbl.setObjectName("TaskMeta")
+                info.addWidget(mastery_lbl)
+                cap_lbl = QLabel(f"Capability：{cap_txt}")
+                cap_lbl.setObjectName("TaskMeta")
+                info.addWidget(cap_lbl)
+                row.addLayout(info, stretch=1)
                 if self.capability_service is not None and ks.knowledge_point_id:
                     row.addWidget(_secondary(
                         "查看证据",
@@ -388,11 +399,8 @@ class RouteDetailDialog(QDialog):
             self.refresh()
 
     def _phase_card(self, phase, done_ids) -> QWidget:
-        card = QFrame()
-        card.setObjectName("TaskCard")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(12, 8, 12, 8)
-        lay.setSpacing(4)
+        card = SACard()
+        lay = card.body_layout
 
         head = QHBoxLayout()
         name = QLabel(f"阶段 {phase.order_index or '—'}：{phase.name}")
@@ -421,11 +429,12 @@ class RouteDetailDialog(QDialog):
             lay.addWidget(empty)
         for topic in phase.topics:
             row = QHBoxLayout()
-            mark = "✔ " if topic.id in done_ids else ""
-            text = f"{mark}{topic.name}（预计 {topic.estimated_minutes} 分钟）"
+            text = f"{topic.name}（预计 {topic.estimated_minutes} 分钟）"
             lbl = QLabel(text)
             lbl.setWordWrap(True)
             row.addWidget(lbl, stretch=1)
+            if topic.id in done_ids:
+                row.addWidget(SAStatusBadge("completed"))
             # Phase 2：学习活动 chips
             if self.topic_learning_service is not None:
                 chips = self._activity_chips(topic.id)
@@ -462,12 +471,12 @@ class RouteDetailDialog(QDialog):
         parts = []
         for s in statuses:
             if s["complete"]:
-                mark = "✓"
+                status = "已完成"
             elif s["required"]:
-                mark = "○"
+                status = "必需"
             else:
-                mark = "◇"
-            parts.append(f"{s['label']} {mark}")
+                status = "可选"
+            parts.append(f"{s['label']} · {status}")
         return "　".join(parts)
 
     def _on_edit_profile(self, topic) -> None:
@@ -922,11 +931,8 @@ class LearningRoutesPage(QWidget):
         return lbl
 
     def _group_card(self, route, active_children) -> QWidget:
-        card = QFrame()
-        card.setObjectName("TaskCard")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(3)
+        card = SACard()
+        lay = card.body_layout
         name = QLabel(route.name)
         name.setObjectName("TaskTitle")
         lay.addWidget(name)
@@ -965,32 +971,83 @@ class LearningRoutesPage(QWidget):
         return card
 
     def _route_card(self, route) -> QWidget:
-        card = QFrame()
-        card.setObjectName("TaskCard")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(3)
+        card = SACard(variant="interactive")
+        lay = card.body_layout
 
+        # 标题行：名称 + route key + 状态徽标
+        head = QHBoxLayout()
         name = QLabel(route.name)
         name.setObjectName("TaskTitle")
-        lay.addWidget(name)
+        name.setWordWrap(True)
+        head.addWidget(name)
+        route_key = getattr(route, "route_key", None)
+        if route_key:
+            key_lbl = QLabel(str(route_key).split("_")[0])
+            key_lbl.setObjectName("SARouteKey")
+            head.addWidget(key_lbl)
+        head.addStretch()
+        head.addWidget(self._route_status_badge(route))
+        lay.addLayout(head)
 
-        planning = "已启用" if route.planning_enabled else "暂停"
+        # 上下文：当前阶段 / 当前 Topic / 下一步
         current = self._current_phase_name(route.id)
+        current_topic = self._current_topic(route.id)
+        next_activity = self._next_activity_label(
+            getattr(current_topic, "id", None)
+        )
+        planning = "已启用" if route.planning_enabled else "暂停"
+        context = QLabel(
+            f"当前阶段：{current}\n"
+            f"当前 Topic：{getattr(current_topic, 'name', None) or '—'}\n"
+            f"下一步：{next_activity or '—'}\n"
+            f"优先级：{priority_text(route.priority)}　自动规划：{planning}"
+        )
+        context.setObjectName("TaskMeta")
+        context.setWordWrap(True)
+        lay.addWidget(context)
+
+        # 课程进度
         progress = (
             self.route_plan_service.route_progress(route.id)
             if self.route_plan_service is not None
             else {"done": 0, "total": 0}
         )
-        status = "已归档" if route.is_archived else "进行中"
-        meta = QLabel(
-            f"优先级：{priority_stars(route.priority)}　状态：{status}　"
-            f"自动规划：{planning}\n"
-            f"当前阶段：{current}　已完成 Topic："
-            f"{progress['done']} / {progress['total']}"
+        total = int(progress.get("total") or 0)
+        done = int(progress.get("done") or 0)
+        pct = int(round(done * 100 / total)) if total else 0
+        lay.addWidget(
+            SAProgressBar(value=pct, label=f"课程进度 {done}/{total}")
         )
-        meta.setObjectName("TaskMeta")
-        lay.addWidget(meta)
+
+        # Mastery（连续）与 Capability（离散）必须分开
+        rp = self._route_progress(route.id)
+        if rp is not None and getattr(rp, "has_assessment", False):
+            lay.addWidget(
+                SAProgressBar(value=rp.mastery_percent, label="掌握度 Mastery")
+            )
+        else:
+            mastery_lbl = QLabel("掌握度：暂无验收数据")
+            mastery_lbl.setObjectName("TaskMeta")
+            lay.addWidget(mastery_lbl)
+
+        cap_row = QHBoxLayout()
+        cap_title = QLabel("能力 Capability")
+        cap_title.setObjectName("TaskMeta")
+        cap_row.addWidget(cap_title)
+        cap_label = self._route_capability_label(rp)
+        if cap_label:
+            cap_row.addWidget(SATag(cap_label, "info"))
+        else:
+            cap_none = QLabel("暂无能力证据")
+            cap_none.setObjectName("TaskMeta")
+            cap_row.addWidget(cap_none)
+        cap_row.addStretch()
+        if rp is not None:
+            review_lbl = QLabel(f"待复习 {rp.due_review_count}")
+            review_lbl.setObjectName("TaskMeta")
+            cap_row.addWidget(review_lbl)
+        lay.addLayout(cap_row)
+
         if route.goal:
             goal = QLabel(f"目标：{route.goal}")
             goal.setObjectName("TaskMeta")
@@ -1023,6 +1080,68 @@ class LearningRoutesPage(QWidget):
             ))
         lay.addLayout(row)
         return card
+
+    # ---------- Route card helpers ----------
+
+    def _structure(self, route_id):
+        if self.route_plan_service is None:
+            return None
+        try:
+            return self.route_plan_service.get_structure(route_id)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _route_progress(self, route_id):
+        if self.progress_service is None:
+            return None
+        try:
+            return self.progress_service.get_progress(
+                route_id, self.today_provider()
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _current_topic(self, route_id):
+        structure = self._structure(route_id)
+        if structure is None or not structure.phases:
+            return None
+        done_ids = self._complete_topic_ids()
+        for phase in structure.phases:
+            for topic in phase.topics:
+                if topic.id not in done_ids:
+                    return topic
+        last = structure.phases[-1]
+        return last.topics[-1] if last.topics else None
+
+    def _next_activity_label(self, topic_id) -> str:
+        if self.topic_learning_service is None or topic_id is None:
+            return ""
+        try:
+            statuses = self.topic_learning_service.get_component_status(topic_id)
+        except Exception:  # noqa: BLE001
+            return ""
+        for s in statuses:
+            if s.get("required") and not s.get("complete"):
+                return s.get("label") or ""
+        return ""
+
+    @staticmethod
+    def _route_capability_label(rp) -> str:
+        if rp is None:
+            return ""
+        for ks in getattr(rp, "knowledge", []) or []:
+            if getattr(ks, "has_capability_evidence", False) \
+                    and ks.capability_label:
+                return ks.capability_label
+        return ""
+
+    @staticmethod
+    def _route_status_badge(route) -> SAStatusBadge:
+        if route.is_archived:
+            return SAStatusBadge("archived")
+        if not route.planning_enabled:
+            return SAStatusBadge("paused")
+        return SAStatusBadge("active")
 
     def _current_phase_name(self, route_id: int) -> str:
         if self.route_plan_service is None:

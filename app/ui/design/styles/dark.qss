@@ -593,3 +593,82 @@ QLabel#SAPageSubtitle {
     font-size: 13px;
     color: {{text_secondary}};
 }
+
+/* ---- SAStatCard ---- */
+QFrame#SAStatCard {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_medium}};
+}
+QLabel#SAStatValue {
+    color: {{text_primary}};
+}
+QLabel#SAStatLabel {
+    color: {{text_secondary}};
+}
+QLabel#SAStatHelper {
+    color: {{text_tertiary}};
+    font-size: {{font_size_caption}};
+}
+
+/* ---- SAProgressBar ---- */
+QProgressBar#SAProgressBar {
+    background-color: {{surface_alt}};
+    border: none;
+    border-radius: {{radius_small}};
+}
+QProgressBar#SAProgressBar::chunk {
+    background-color: {{accent}};
+    border-radius: {{radius_small}};
+}
+QLabel#SAProgressLabel {
+    color: {{text_secondary}};
+}
+QLabel#SAProgressValue {
+    color: {{text_primary}};
+    font-weight: 600;
+}
+
+/* ---- SAInfoBanner ---- */
+QFrame#SAInfoBanner {
+    border-radius: {{radius_medium}};
+    border: 1px solid {{border_subtle}};
+    background-color: {{surface_alt}};
+}
+QFrame#SAInfoBanner[saBannerVariant="info"] {
+    background-color: {{info_background}};
+    border-color: {{info}};
+}
+QFrame#SAInfoBanner[saBannerVariant="warning"] {
+    background-color: {{warning_background}};
+    border-color: {{warning}};
+}
+QFrame#SAInfoBanner[saBannerVariant="danger"] {
+    background-color: {{danger_background}};
+    border-color: {{danger}};
+}
+QFrame#SAInfoBanner[saBannerVariant="success"] {
+    background-color: {{success_background}};
+    border-color: {{success}};
+}
+QLabel#SAInfoBannerTitle {
+    color: {{text_primary}};
+    font-weight: 600;
+}
+QLabel#SAInfoBannerDescription {
+    color: {{text_secondary}};
+    font-size: {{font_size_caption}};
+}
+
+/* ---- Route card helper labels ---- */
+QLabel#SARouteKey {
+    color: {{text_tertiary}};
+    font-size: {{font_size_caption}};
+}
+QLabel#SAValueLabel {
+    color: {{text_secondary}};
+}
+QLabel#SAValueStrong {
+    color: {{text_primary}};
+    font-weight: 600;
+}

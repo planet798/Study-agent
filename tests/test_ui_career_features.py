@@ -443,9 +443,9 @@ class TestReadableButtons:
     def test_reference_buttons_not_regressed(self, qtbot, conn, plan_repo):
         w = self._window_with_all(qtbot, conn, plan_repo)
         found = self._buttons_by_text(w)
-        # 已有按钮样式保持不变
-        assert found["完成"].objectName() == "SecondaryButton"
+        # UI-3：完成按钮升为主操作
+        assert found["完成"].objectName() == "PrimaryButton"
         assert found["未完成"].objectName() == "DangerButton"
-        # “重新规划今天”仍是普通按钮（无 PrimaryButton 白字；非滚动区）
-        assert w.planner_replan_btn.objectName() == ""
+        # 重新规划今天为次级按钮（SAButton secondary）
+        assert w.planner_replan_btn.objectName() == "SecondaryButton"
         assert w.planner_replan_btn.text() == "重新规划今天"

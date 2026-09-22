@@ -591,8 +591,8 @@ No route / No task / No project / No AI profile / No assessment / No monthly dat
 ```
 UI-0  Audit + Blueprint                ← done (b32bee2)
 UI-1  Design Tokens / ThemeManager / Icon system / Foundation Components  ← done (bdec9a0)
-UI-2  App Shell / Sidebar / Page Header / Light-Dark-System  ← done (this phase, 详见 APP_SHELL.md)
-UI-3  Today / Learning Routes
+UI-2  App Shell / Sidebar / Page Header / Light-Dark-System  ← done (21b4092, 详见 APP_SHELL.md)
+UI-3  Today / Learning Routes  ← done (详见 TODAY_DESIGN.md / ROUTES_DESIGN.md)
 UI-4  Practice / Monthly / Settings
 UI-5  States / Micro-interactions / DPI / Accessibility / Polish
 ```

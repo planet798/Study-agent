@@ -62,13 +62,13 @@ class TestTaskRouteLabel:
         t = env["repo"].create("任务", scheduled_date=TODAY, route_id=env["default"].id)
         w = TaskWidget(env["repo"].get(t.id), route_name="搜广推 + LLM")
         qtbot.addWidget(w)
-        assert w.route_tag_label.text() == "【搜广推 + LLM】"
+        assert w.route_tag_label.text() == "搜广推 + LLM"
 
     def test_null_route_shows_unclassified(self, env, qtbot):
         t = env["repo"].create("任务", scheduled_date=TODAY)
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
-        assert w.route_tag_label.text() == "【未分类】"
+        assert w.route_tag_label.text() == "未分类"
 
 
 # ================= 20~23：今日筛选 =================

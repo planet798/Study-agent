@@ -165,14 +165,14 @@ class TestSourceTags:
         t = env["svc"].create_todo("刷题", scheduled_date=TODAY)
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
-        assert w.source_tag_label.text() == "【自定义】"
+        assert w.source_tag_label.text() == "自定义"
 
     def test_manual_knowledge_tag(self, conn, qtbot):
         env = _env(conn)
         t = env["svc"].create_knowledge_task("强化学习基础", scheduled_date=TODAY)
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
-        assert w.source_tag_label.text() == "【自定义知识】"
+        assert w.source_tag_label.text() == "自定义知识"
 
     def test_agent_generated_tag(self, conn, qtbot):
         env = _env(conn)
@@ -180,7 +180,7 @@ class TestSourceTags:
                                source="generated", task_type="new")
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
-        assert w.source_tag_label.text() == "【Agent规划】"
+        assert w.source_tag_label.text() == "Agent 规划"
 
 
 # ================= 对话框数据 =================

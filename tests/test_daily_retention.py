@@ -336,7 +336,7 @@ class TestUi:
                         knowledge_point_id=kp["id"])
         w = TaskWidget(repo.get(t.id))
         qtbot.addWidget(w)
-        assert w.review_tag_label.text() == "【每日巩固】"
+        assert w.review_tag_label.text() == "每日巩固"
         assert w.review_tag_label.isHidden() is False
 
     def test_due_review_tag(self, qtbot, repo, arepo):
@@ -345,7 +345,7 @@ class TestUi:
                         task_type="review", knowledge_point_id=kp["id"])
         w = TaskWidget(repo.get(t.id))
         qtbot.addWidget(w)
-        assert w.review_tag_label.text() == "【到期复习】"
+        assert w.review_tag_label.text() == "到期复习"
 
     def test_new_task_has_no_review_tag(self, qtbot, repo):
         t = repo.create(title="新知识", scheduled_date=TODAY)
@@ -368,7 +368,7 @@ class TestUi:
         qtbot.addWidget(w)
         labels = [lbl.text() for lbl in w.list_container.findChildren(QLabel)]
         assert "今日复习" in labels
-        assert "【每日巩固】" in labels
+        assert "每日巩固" in labels
         assert "暂无可复习内容" not in labels
 
     def test_window_empty_state_without_history(self, qtbot, repo, task_service,

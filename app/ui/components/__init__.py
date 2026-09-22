@@ -13,4 +13,9 @@ __all__ = [
     "tag",
     "status_badge",
     "empty_state",
+    "stat_card",
+    "progress_bar",
+    "info_banner",
+    "navigation",
+    "page_header",
 ]

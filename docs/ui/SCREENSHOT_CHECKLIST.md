@@ -88,7 +88,26 @@ docs/ui/screenshots/
 
 ---
 
-## 5. UI-0 状态
+## 5. UI-3 后人工重点检查（Today / Routes）
+
+**Today**
+- 信息是否首先聚焦今日任务（Summary → Focus → Review）。
+- Career Signals 是否退居任务之后（secondary）。
+- Task Card 信息是否清晰：路线/活动/来源/复习标签、时间、优先级。
+- 按钮是否过多；完成/验收/未完成/移除层级是否清楚。
+- 长标题 / 长描述是否截断；review 与 new 是否易区分。
+- Light / Dark 下 StatCard / TaskCard / Tag / Banner 是否都清晰。
+
+**Routes**
+- R1–R6 是否一眼可扫；分组 heading 与普通路线是否区分。
+- Mastery（百分比条）与 Capability（离散 Tag）是否不会混淆。
+- paused / archived 状态是否容易理解。
+- Route detail 是否不再是纯文本堆叠；knowledge row 是否 Mastery/Capability 分离。
+- 学习活动是否以文本状态展示（无 ✓ ○ ◇ 符号）。
+
+---
+
+## 6. UI-0 状态
 
 - [x] 已确认 offscreen 最小探针可用（不足以自动截取生产页面）
 - [ ] 用户在 Windows 完成 #1–#12 截图（UI-1 开始前）
