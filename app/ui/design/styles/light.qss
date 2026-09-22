@@ -524,3 +524,72 @@ QLabel#SAEmptyDescription {
     color: {{text_secondary}};
     font-size: {{font_size_caption}};
 }
+
+/* ---- App Shell / Sidebar / PageHeader ---- */
+QWidget#SANavigationSidebar {
+    background-color: {{surface_alt}};
+    border-right: 1px solid {{border_subtle}};
+}
+QWidget#SAWorkspace {
+    background-color: {{background}};
+}
+QLabel#SABrandTitle {
+    font-size: 15px;
+    font-weight: 600;
+    color: {{text_primary}};
+}
+QPushButton#SANavigationItem {
+    background-color: transparent;
+    border: none;
+    border-left: 3px solid transparent;
+    border-radius: {{radius_small}};
+    padding: 8px 10px;
+    text-align: left;
+    color: {{text_secondary}};
+    font-weight: normal;
+}
+QPushButton#SANavigationItem:hover {
+    background-color: {{surface_hover}};
+    color: {{text_primary}};
+}
+QPushButton#SANavigationItem:pressed {
+    background-color: {{surface_pressed}};
+}
+QPushButton#SANavigationItem:checked {
+    background-color: {{surface_selected}};
+    border-left: 3px solid {{accent}};
+    color: {{text_primary}};
+    font-weight: 600;
+}
+QPushButton#SANavigationItem:focus {
+    border: 1px solid {{focus}};
+    border-left: 3px solid {{focus}};
+}
+QPushButton#SANavigationItem:disabled {
+    color: {{text_disabled}};
+    background-color: transparent;
+}
+QPushButton#SANavigationItem[collapsed="true"] {
+    padding: 8px;
+    text-align: center;
+}
+QFrame#SADivider {
+    background-color: {{border_subtle}};
+    border: none;
+}
+QWidget#SAPageHeader {
+    background-color: {{background}};
+}
+QFrame#SAPageHeaderDivider {
+    background-color: {{border_subtle}};
+    border: none;
+}
+QLabel#SAPageTitle {
+    font-size: 22px;
+    font-weight: 600;
+    color: {{text_primary}};
+}
+QLabel#SAPageSubtitle {
+    font-size: 13px;
+    color: {{text_secondary}};
+}

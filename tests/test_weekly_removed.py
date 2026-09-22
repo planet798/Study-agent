@@ -29,7 +29,7 @@ def test_no_weekly_nav_or_page(qtbot, repo, task_service, date_service):
     assert not hasattr(w, "nav_weekly_btn")
     assert not hasattr(w, "weekly_page")
     assert w.nav_today_btn.text() == "今日"
-    assert w.nav_monthly_btn.text() == "月总结"
+    assert w.nav_monthly_btn.text() == "月度回顾"
     assert w.nav_monthly_btn.isEnabled() is True
     # 今日页正常
     assert w.stack.currentIndex() == 0

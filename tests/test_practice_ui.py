@@ -130,13 +130,13 @@ class TestNavigation:
         qtbot.addWidget(w)
         assert w.nav_practice_btn.text() == "实践项目"
         assert w.practice_page_index is not None
-        # 视觉顺序：今日 → 学习路线 → 实践项目 → 月总结 → AI 设置
+        # 视觉顺序：今日 → 学习路线 → 实践项目 → 月度回顾 （设置沉底）
         texts = []
         for i in range(w.nav_layout.count()):
             item = w.nav_layout.itemAt(i).widget()
             if item is not None:
                 texts.append(item.text())
-        assert texts.index("实践项目") < texts.index("月总结")
+        assert texts.index("实践项目") < texts.index("月度回顾")
 
     def test_switch_to_practice(self, qtbot, practice_env, task_service,
                                 date_service):

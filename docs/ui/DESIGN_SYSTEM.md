@@ -18,6 +18,7 @@ app/ui/design/
     styles/light.qss  # QSS template（placeholder）
     styles/dark.qss
     icons/*.svg       # 最小 Fluent icon 集（MIT，见 icons/LICENSE）
+    theme_preferences.py  # QSettings 主题偏好（appearance/theme）
 app/ui/components/
     button.py         # SAButton / SAIconButton
     card.py           # SACard
@@ -25,6 +26,9 @@ app/ui/components/
     tag.py            # SATag
     status_badge.py   # SAStatusBadge
     empty_state.py    # SAEmptyState
+    navigation.py     # SANavigationItem / SANavigationSidebar (UI-2)
+    page_header.py    # SAPageHeader (UI-2)
+app/ui/app_shell.py   # AppShell + PageKey / PageSpec registry (UI-2)
 ```
 
 ## Color tokens
@@ -73,7 +77,19 @@ tm.theme_changed.connect(slot)  # slot(effective_theme: str)
 - `ThemeMode`: `LIGHT / DARK / SYSTEM`。SYSTEM 读取 `QStyleHints.colorScheme()`，
   不可用时 fallback Light。
 - `apply()` 幂等：重复 apply 不累积 QSS / palette 状态；Light→Dark→Light 回到完全相同的 QSS。
-- UI-1 无 Settings Appearance 页面、无 DB persistence，只做 runtime。
+- `theme_changed` **只在 effective theme 真正变化时** emit；重复 apply 同一主题不会广播。
+- QSS 渲染结果按主题做 `lru_cache`，避免每个窗口构造都重新解析模板。
+- UI-1 无 Settings Appearance 页面、无 DB persistence；仅 runtime。
+  UI-2 起：主题偏好用 QSettings（`appearance/theme`，见 `theme_preferences.py`），
+  仍不写 DB。
+
+## App Shell QSS（UI-2）
+
+Additional selectors（全 semantic token，无 magic hex）：
+`QWidget#SANavigationSidebar`、`QPushButton#SANavigationItem`（`:hover/:pressed/:checked/:focus/:disabled`、`[collapsed="true"]`）、
+`QFrame#SADivider`、`QWidget#SAPageHeader`、`QFrame#SAPageHeaderDivider`、
+`QLabel#SAPageTitle`、`QLabel#SAPageSubtitle`、`QLabel#SABrandTitle`。
+纯 `QWidget` 需要 `WA_StyledBackground` 才会绘制 QSS 背景（Sidebar / PageHeader / Workspace 已设置）。
 
 ## QSS rendering
 

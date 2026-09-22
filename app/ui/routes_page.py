@@ -851,9 +851,6 @@ class LearningRoutesPage(QWidget):
         root.setSpacing(8)
 
         head = QHBoxLayout()
-        title = QLabel("学习路线")
-        title.setObjectName("SectionTitle")
-        head.addWidget(title)
         head.addStretch()
         self.create_btn = _secondary("＋ 新建学习路线", self._on_create_route)
         self.archive_toggle_btn = _secondary("查看已归档", self._on_toggle_archived)

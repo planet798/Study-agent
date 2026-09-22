@@ -97,10 +97,6 @@ class PracticeProjectsPage(QWidget):
         root.setSpacing(8)
 
         head = QHBoxLayout()
-        title = QLabel("实践项目")
-        title.setObjectName("SectionTitle")
-        head.addWidget(title)
-        head.addSpacing(12)
         head.addWidget(QLabel("状态"))
         self.filter_combo = QComboBox()
         for label, value in _FILTERS:

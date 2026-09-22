@@ -33,7 +33,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
@@ -52,6 +51,8 @@ from .ai_worker import (
     RouteSuggestionWorker,
     run_start_assessment,
 )
+from .app_shell import PAGE_SPECS_BY_KEY, AppShell, PageKey
+from .components.navigation import key_value
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
@@ -120,8 +121,11 @@ class MainWindow(QMainWindow):
         practice_service=None,
         practice_capability_service=None,
         practice_readiness_service=None,
+        theme_settings=None,
     ):
         super().__init__()
+        # 主题偏好（QSettings；测试可注入隔离实例）；UI-2 runtime，不改 DB。
+        self.theme_settings = theme_settings
         self.task_service = task_service
         self.date_service = date_service
         self.today_provider = today_provider or _default_today
@@ -191,9 +195,16 @@ class MainWindow(QMainWindow):
         self._assessment_inflight: set[int] = set()
 
         self.setWindowTitle("Study Agent")
-        self.setMinimumSize(560, 460)
-        self.resize(800, 650)
+        self.setMinimumSize(900, 620)
+        self.resize(1180, 760)
         self.setWindowIcon(_tray_icon())
+
+        # 启动主题顺序：读取 QSettings -> set_theme -> (下方 _apply_styles) apply，
+        # 避免先显示 Light 再闪切 Dark。
+        from .design.theme_manager import ThemeManager
+        from .design.theme_preferences import load_theme_mode
+
+        ThemeManager.instance().set_theme(load_theme_mode(self.theme_settings))
 
         self._build_ui()
         self._build_tray()
@@ -205,32 +216,24 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(12, 8, 12, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # 顶部导航 [今日] [学习路线] [月总结] [AI 设置]
-        nav = QHBoxLayout()
-        self.nav_today_btn = QPushButton("今日")
-        self.nav_routes_btn = QPushButton("学习路线")
-        self.nav_monthly_btn = QPushButton("月总结")
-        self.nav_practice_btn = QPushButton("实践项目")
-        self.nav_ai_btn = QPushButton("AI 设置")
-        self.nav_today_btn.clicked.connect(lambda: self._switch_page(0))
-        self.nav_routes_btn.clicked.connect(self._switch_to_routes)
-        self.nav_practice_btn.clicked.connect(self._switch_to_practice)
-        self.nav_monthly_btn.clicked.connect(lambda: self._switch_page(1))
-        self.nav_ai_btn.clicked.connect(self._switch_to_ai_settings)
-        for b in (self.nav_today_btn, self.nav_routes_btn, self.nav_practice_btn,
-                  self.nav_monthly_btn, self.nav_ai_btn):
-            b.setObjectName("PrimaryButton")
-            nav.addWidget(b)
-        nav.addStretch()
-        root.addLayout(nav)
-        self.nav_layout = nav
+        # ---- App Shell: Sidebar + (PageHeader + QStackedWidget) ----
+        self.app_shell = AppShell(parent=central)
+        self.sidebar = self.app_shell.sidebar
+        self.page_header = self.app_shell.page_header
+        self.stack = self.app_shell.stack
+        root.addWidget(self.app_shell)
 
-        # 页面栈：0=今日 1=月总结
-        self.stack = QStackedWidget()
-        root.addWidget(self.stack, stretch=1)
+        # legacy compatibility aliases（旧测试依赖；不再有可见的顶部导航）
+        self.nav_layout = self.sidebar.items_layout
+        self.nav_today_btn = self.sidebar.item(PageKey.TODAY)
+        self.nav_routes_btn = self.sidebar.item(PageKey.ROUTES)
+        self.nav_practice_btn = self.sidebar.item(PageKey.PRACTICE)
+        self.nav_monthly_btn = self.sidebar.item(PageKey.MONTHLY)
+        self.nav_ai_btn = self.sidebar.item(PageKey.SETTINGS)
+        self.sidebar.page_requested.connect(self._on_nav_requested)
 
         # ----- 今日页 -----
         today_page = QWidget()
@@ -238,14 +241,8 @@ class MainWindow(QMainWindow):
         root_today.setContentsMargins(4, 0, 4, 0)
         root_today.setSpacing(10)
 
-        # 顶部标题 + 日期
-        self.title_label = QLabel("Study Agent")
-        self.title_label.setObjectName("AppTitle")
-        root_today.addWidget(self.title_label)
-
-        self.date_label = QLabel("")
-        self.date_label.setObjectName("AppDate")
-        root_today.addWidget(self.date_label)
+        # 日期进入统一 PageHeader；date_label 仍是同一个 label，日期业务逻辑不变。
+        self.date_label = self.page_header.subtitle_label()
 
         section = QLabel("今日学习任务")
         section.setObjectName("SectionTitle")
@@ -394,6 +391,7 @@ class MainWindow(QMainWindow):
                 self.ai_config_service,
                 self.prompt_registry,
                 preview_service=self.prompt_preview_service,
+                theme_settings=self.theme_settings,
             )
             self.stack.addWidget(self.ai_settings_page)
             self.ai_settings_page_index = self.stack.count() - 1
@@ -403,17 +401,49 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("")
+        # 初始选中 Today（页面索引 0），并同步 PageHeader。
+        self._update_page_header(PageKey.TODAY)
+
+    # ---------- 导航 / PageHeader ----------
+
+    def _on_nav_requested(self, key: str) -> None:
+        if key == PageKey.TODAY.value:
+            self._switch_page(0)
+        elif key == PageKey.ROUTES.value:
+            self._switch_to_routes()
+        elif key == PageKey.PRACTICE.value:
+            self._switch_to_practice()
+        elif key == PageKey.MONTHLY.value:
+            self._switch_page(1)
+        elif key == PageKey.SETTINGS.value:
+            self._switch_to_ai_settings()
+
+    def _update_page_header(self, key) -> None:
+        """更新统一 PageHeader，并同步 Sidebar selected 状态。"""
+        spec = PAGE_SPECS_BY_KEY.get(key_value(key))
+        if spec is None:
+            return
+        if key_value(key) == PageKey.TODAY.value:
+            # Today subtitle = 当前日期；date_label 即同一个 label。
+            self.page_header.set_title(spec.title)
+            self.page_header.set_subtitle(getattr(self, "current_date", ""))
+            self.page_header.set_icon(spec.icon)
+        else:
+            self.app_shell.set_page_header(key)
+        self.sidebar.set_current(key)
 
     def _switch_page(self, index: int) -> None:
         """切换今日 / 月总结页面（保留旧索引语义）。"""
         if index == 0:
             self.stack.setCurrentIndex(0)
+            self._update_page_header(PageKey.TODAY)
             return
         if index == 1 and self.monthly_page_index is not None:
             self.stack.setCurrentIndex(1)
+            self._update_page_header(PageKey.MONTHLY)
             return
         if index == 1:
-            self.statusBar().showMessage("月总结不可用", 3000)
+            self.statusBar().showMessage("月度回顾不可用", 3000)
             return
         self.stack.setCurrentIndex(index)
 
@@ -424,14 +454,16 @@ class MainWindow(QMainWindow):
         if self.routes_page is not None:
             self.routes_page.refresh()
         self.stack.setCurrentIndex(self.routes_page_index)
+        self._update_page_header(PageKey.ROUTES)
 
     def _switch_to_ai_settings(self) -> None:
         if self.ai_settings_page_index is None:
-            self.statusBar().showMessage("AI 设置不可用", 3000)
+            self.statusBar().showMessage("设置不可用", 3000)
             return
         if getattr(self, "ai_settings_page", None) is not None:
             self.ai_settings_page.refresh()
         self.stack.setCurrentIndex(self.ai_settings_page_index)
+        self._update_page_header(PageKey.SETTINGS)
 
     def _switch_to_practice(self) -> None:
         if getattr(self, "practice_page_index", None) is None:
@@ -440,6 +472,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "practice_page", None) is not None:
             self.practice_page.refresh()
         self.stack.setCurrentIndex(self.practice_page_index)
+        self._update_page_header(PageKey.PRACTICE)
 
     def _build_tray(self) -> None:
         """托盘可用则创建，不可用（如部分 Linux）则跳过，不影响运行。"""

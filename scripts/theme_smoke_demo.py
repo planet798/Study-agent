@@ -113,15 +113,39 @@ def build_gallery() -> QWidget:
     return root
 
 
+def build_shell_gallery() -> QWidget:
+    """AppShell 占位画廊（不依赖 DB）。"""
+    from app.ui.app_shell import PAGE_SPECS, AppShell, PageKey
+
+    shell = AppShell(PAGE_SPECS)
+    shell.setMinimumSize(1180, 760)
+    for spec in PAGE_SPECS:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(spacing.XXXL, spacing.XL, spacing.XXXL, spacing.XL)
+        lay.addWidget(SASectionHeader(spec.title, subtitle=spec.subtitle))
+        card = SACard()
+        card.add_widget(QLabel(f"{spec.title} page body (placeholder)"))
+        lay.addWidget(card)
+        lay.addStretch()
+        shell.add_page(page)
+    shell.set_page_header(PageKey.TODAY, subtitle="2026-01-05")
+    shell.sidebar.set_current(PageKey.TODAY)
+    return shell
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="", help="directory to save light/dark screenshots")
+    parser.add_argument(
+        "--shell", action="store_true", help="用 AppShell 画廊代替组件画廊"
+    )
     args = parser.parse_args()
 
     app = QApplication([])
     tm = ThemeManager.instance()
     tm.apply(app)
-    gallery = build_gallery()
+    gallery = build_shell_gallery() if args.shell else build_gallery()
     gallery.show()
 
     if args.out:
@@ -129,12 +153,18 @@ def main() -> int:
         out.mkdir(parents=True, exist_ok=True)
         for mode in (ThemeMode.LIGHT, ThemeMode.DARK):
             tm.set_theme(mode)
-            app.processEvents()
-            path = out / f"foundation_{tm.effective_theme}.png"
-            gallery.grab().save(str(path))
-            print("saved", path)
+            for collapsed in (False, True):
+                if args.shell:
+                    gallery.sidebar.set_collapsed(collapsed)
+                app.processEvents()
+                state = "collapsed" if collapsed else "expanded"
+                path = out / f"shell_{tm.effective_theme}_{state}.png"
+                gallery.grab().save(str(path))
+                print("saved", path)
+        if args.shell:
+            gallery.sidebar.set_collapsed(False)
 
-    print("light/dark gallery constructed OK")
+    print("light/dark gallery constructed OK", "(shell)" if args.shell else "")
     return 0
 
 

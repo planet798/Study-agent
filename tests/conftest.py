@@ -24,6 +24,24 @@ from app.services.date_service import DateService  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def isolated_qsettings(tmp_path):
+    """把所有 QSettings 写入隔离到临时目录（不污染真实用户配置）。
+
+    UI-2 引入 QSettings 主题偏好（appearance/theme）；测试必须与真实系统设置隔离。
+    """
+    from PySide6.QtCore import QSettings
+
+    original_format = QSettings.defaultFormat()
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    for scope in (QSettings.Scope.UserScope, QSettings.Scope.SystemScope):
+        QSettings.setPath(QSettings.Format.IniFormat, scope, str(tmp_path))
+    try:
+        yield
+    finally:
+        QSettings.setDefaultFormat(original_format)
+
+
 @pytest.fixture()
 def conn(tmp_path):
     """每个测试使用独立的临时数据库文件。

@@ -34,8 +34,19 @@ Notes
 -----
 - Only the minimal set of icons currently required by Study-Agent is vendored
   (not the full Fluent repository).
-- `chevron_left`, `chevron_right`, `more_horizontal`, `menu`, `eye_off` and
-  `clipboard_task` are Fluent-style glyphs authored locally in the same 24px
-  grid / MIT spirit; they can be swapped for upstream assets if desired.
-- Icons are Monochrome and tinted at runtime via semantic color tokens
+
+- **Official Microsoft Fluent System Icons assets** (MIT, Microsoft Corporation),
+  taken from the upstream repository above:
+  `home`, `home_filled`, `book`, `book_filled`, `calendar`, `calendar_filled`,
+  `settings`, `settings_filled`, `navigation`, `add`, `edit`, `delete`, `play`,
+  `checkmark`, `warning`, `info`, `search`, `eye`.
+
+- **Locally authored project assets** (drawn on the same 24px grid for this
+  project, not copied from upstream):
+  `chevron_left`, `chevron_right`, `more_horizontal`, `menu`, `eye_off`,
+  `clipboard_task`.
+  These are original Study-Agent assets and may be replaced with upstream
+  Fluent assets if/when equivalent official SVGs are available.
+
+- Icons are monochrome and tinted at runtime via semantic color tokens
   (see `app/ui/design/icons.py`), so there are no per-theme duplicates.

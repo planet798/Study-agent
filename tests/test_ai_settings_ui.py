@@ -274,7 +274,7 @@ class TestMainWindowNav:
             prompt_preview_service=preview_service,
         )
         qtbot.addWidget(w)
-        assert w.nav_ai_btn.text() == "AI 设置"
+        assert w.nav_ai_btn.text() == "设置"
         assert w.ai_settings_page_index is not None
         w._switch_to_ai_settings()
         assert w.stack.currentIndex() == w.ai_settings_page_index

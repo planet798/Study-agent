@@ -35,6 +35,9 @@ from PySide6.QtWidgets import (
 
 from ..ai.prompt_registry import PromptRegistry, PromptValidationError
 from ..services.prompt_preview_service import PromptPreviewService
+from .components.section_header import SASectionHeader
+from .design import theme_preferences as _theme_prefs
+from .design.theme_manager import ThemeMode, theme_manager
 from .ai_settings_dialogs import (
     AddAIProfileDialog,
     EditAPIKeyDialog,
@@ -642,14 +645,33 @@ class AISettingsPage(QWidget):
         prompt_registry: PromptRegistry,
         preview_service: PromptPreviewService | None = None,
         parent: QWidget | None = None,
+        theme_settings=None,
     ):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 0, 4, 0)
 
-        title = QLabel("AI 设置")
-        title.setObjectName("AppTitle")
-        layout.addWidget(title)
+        # ---- 外观（UI-2 最小入口：Light / Dark / System） ----
+        self.theme_settings = theme_settings
+        appearance = QWidget()
+        appearance_row = QHBoxLayout(appearance)
+        appearance_row.setContentsMargins(0, 0, 0, 0)
+        appearance_row.addWidget(QLabel("主题"))
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("跟随系统", ThemeMode.SYSTEM.value)
+        self.theme_combo.addItem("浅色", ThemeMode.LIGHT.value)
+        self.theme_combo.addItem("深色", ThemeMode.DARK.value)
+        current = theme_manager().current_mode
+        idx = self.theme_combo.findData(
+            current.value if isinstance(current, ThemeMode) else str(current)
+        )
+        self.theme_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_combo_changed)
+        appearance_row.addWidget(self.theme_combo)
+        appearance_row.addStretch()
+        layout.addWidget(
+            SASectionHeader("外观", trailing=appearance)
+        )
 
         hint = QLabel(
             "模型 / API 决定“连接谁”，Prompt 管理决定“告诉模型什么”。"
@@ -665,6 +687,13 @@ class AISettingsPage(QWidget):
         tabs.addTab(self.profiles_panel, "模型 / API")
         tabs.addTab(self.prompt_panel, "Prompt 管理")
         layout.addWidget(tabs, stretch=1)
+
+    def _on_theme_combo_changed(self) -> None:
+        mode = self.theme_combo.currentData()
+        if not mode:
+            return
+        _theme_prefs.save_theme_mode(mode, self.theme_settings)
+        theme_manager().set_theme(mode)
 
     def refresh(self) -> None:
         self.profiles_panel.refresh()

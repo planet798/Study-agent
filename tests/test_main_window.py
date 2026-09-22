@@ -890,14 +890,14 @@ class TestSummaryPagesGUI:
     def test_no_weekly_button_only_today_and_monthly(
         self, qtbot, repo, task_service, date_service, fixed_today
     ):
-        """周总结已移除：顶部只有 [今日] [月总结]。"""
+        """周总结已移除：导航只有 [今日] [月度回顾]。"""
         w = self._make_summary_window(qtbot, repo, task_service, date_service,
                                       fixed_today)
         qtbot.addWidget(w)
         assert not hasattr(w, "nav_weekly_btn")
         assert not hasattr(w, "weekly_page")
         assert w.nav_today_btn.text() == "今日"
-        assert w.nav_monthly_btn.text() == "月总结"
+        assert w.nav_monthly_btn.text() == "月度回顾"
         # 今日页正常
         assert w.stack.currentIndex() == 0
 

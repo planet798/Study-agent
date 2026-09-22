@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
@@ -69,8 +70,9 @@ def load_template(theme: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=4)
 def render_theme(theme: str) -> str:
-    """渲染指定主题的完整 QSS。"""
+    """渲染指定主题的完整 QSS（静态模板，结果缓存）。"""
     return render_qss(load_template(theme), _tokens.render_map(theme))
 
 
@@ -127,6 +129,7 @@ class ThemeManager(QObject):
         self._mode = _coerce_mode(mode)
         self._app = None
         self._last_emitted: str | None = None
+        self._listener_installed = False
 
     # ---------- singleton ----------
     @classmethod
@@ -185,18 +188,46 @@ class ThemeManager(QObject):
             self.apply(self._app)
 
     def apply(self, app) -> str:
-        """渲染并应用当前主题 QSS + palette，返回 effective theme。"""
+        """渲染并应用当前主题 QSS + palette，返回 effective theme。
+
+        - QSS / palette 每次都重新渲染并应用（幂等，不累积状态）。
+        - ``theme_changed`` **只在 effective theme 真正变化时** emit，
+          避免重复 apply 广播无意义的“主题变化”。
+        """
         if app is None:
             return self.effective_theme
         self._app = app
+        self._install_system_listener(app)
         theme = self.effective_theme
         qss = render_theme(theme)
         app.setStyleSheet(qss)
         app.setPalette(_palette_for(theme))
-        if theme != self._last_emitted:
-            self._last_emitted = theme
-        self.theme_changed.emit(theme)
+        changed = theme != self._last_emitted
+        self._last_emitted = theme
+        if changed:
+            self.theme_changed.emit(theme)
         return theme
+
+    def _install_system_listener(self, app) -> None:
+        """监听系统深浅色变化（SYSTEM 模式下自动 apply）。
+
+        Qt / 平台不支持时静默降级，行为与旧版一致（只在 apply 时读取一次）。
+        """
+        if self._listener_installed:
+            return
+        try:
+            hints = app.styleHints()
+            signal = getattr(hints, "colorSchemeChanged", None)
+            if signal is not None:
+                signal.connect(self._on_system_color_scheme_changed)
+                self._listener_installed = True
+        except Exception:  # noqa: BLE001 - 平台/版本差异，fallback 现有行为
+            self._listener_installed = False
+
+    def _on_system_color_scheme_changed(self, *args) -> None:
+        if self._mode is not ThemeMode.SYSTEM or self._app is None:
+            return
+        self.apply(self._app)
 
 
 def theme_manager() -> ThemeManager:

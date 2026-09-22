@@ -109,9 +109,6 @@ class MonthlySummaryPage(QWidget):
         outer.setContentsMargins(4, 4, 4, 4)
 
         head = QHBoxLayout()
-        title = QLabel("月总结")
-        title.setObjectName("SectionTitle")
-        head.addWidget(title)
         head.addStretch()
         self.prev_btn = QPushButton("< 上一月")
         self.prev_btn.clicked.connect(self._prev)
