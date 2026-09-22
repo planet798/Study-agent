@@ -31,8 +31,21 @@
 - **Mastery** 是连续度量 → `SAProgressBar`（百分比）；无验收数据显示“暂无验收数据”。
 - **Capability** 是离散等级 → `SATag` + 现有 service 提供的 label；
   **绝不画成百分比**，**绝不与 Mastery 共用同一进度条**。
-- Route Card 的 Capability 取该路线知识证据中现有的 `capability_label`
-  （来自 `RouteProgressService`），不重新定义 level。
+
+### Route-level Capability = Evidence Coverage / Distribution（不做聚合）
+
+`RouteProgressService` 明确**不计算 route average capability**。因此 Route Card 只展示：
+
+- `capability_evidence_count`（有证据的知识点数量）；
+- `capability_level_counts`（各 level 的计数分布）。
+
+```
+能力证据 Capability   [4 个知识点]  [L2 × 1]  [L3 × 2]  [L4 × 1]
+```
+
+没有证据时显示“暂无能力证据”。**禁止**取最高/最低/平均/中位数/第一个 KP，
+**禁止**把某个 KP 的 capability 当作整条 route 的 capability，**禁止**造出
+“Route 当前是 L3”这类业务模型不存在的事实。
 
 ## Route Status
 
@@ -43,10 +56,14 @@
 
 保持 `RouteDetailDialog`（降低行为风险），内部按 section 组织：
 
-1. Overview（目标 / 描述 / 优先级 / 自动规划 / 状态 / 路由进度 / 掌握）
-2. Learning Progress（Topic 完成 / 学习活动）
-3. Mastery & Review（验收证据 / 已掌握 / 薄弱 / 今日到期 / 未来 7 天 / 逾期）
-4. Capability（逐 Knowledge Point：Mastery 行 + Capability 行分离）
+1. Overview `SACard`（目标 / 描述 / Priority / Planning State / Route Status /
+   Current Phase / Current Topic）——不再用单个多行 `info_label`。
+2. Learning Progress `SACard`（课程覆盖 `SAProgressBar`；学习活动 必需/可选）
+   ——不再用 `【路线进度】` / `【学习活动】` 前缀。
+3. Mastery & Review `SACard`（Mastery bar 或“暂无验收数据”；已验收 / 已掌握 /
+   薄弱 / 今日到期 / 未来7天 / 逾期 / 最近复习）——不再用 `【掌握】`。
+4. Capability `SACard`（evidence count + level distribution；下面逐 Knowledge Point
+   Mastery 行 + Capability 行分离）
 5. Curriculum（Phase `SACard` → Topic + 学习活动状态文本）
 6. Skills
 7. Curriculum Gap
@@ -59,8 +76,9 @@
 
 ```
 <Knowledge Point>  <status>
-Mastery：xx%
-Capability：<label / 暂无能力证据>
+Mastery：xx% / 暂无验收
+Capability：Lx · <capability_label> / 暂无能力证据
+弱点：…（如有）
 ```
 
 右侧保留 actions：查看证据 / 记录实验成果（显示条件不变）。

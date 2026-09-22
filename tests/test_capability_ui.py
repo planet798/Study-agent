@@ -87,7 +87,7 @@ class TestRouteDetailCapability:
         _aware(activity_env, cap)
         dlg = _dialog(activity_env, progress, cap, out, qtbot)
         joined = "\n".join(_labels(dlg))
-        assert "Capability：知道概念" in joined
+        assert "Capability：L1 · 知道概念" in joined
         assert "查看证据" in joined
 
     def test_no_evidence_label(self, activity_env, qtbot):
@@ -107,7 +107,7 @@ class TestRouteDetailCapability:
         dlg = _dialog(env, progress, cap, out, qtbot)
         joined = "\n".join(_labels(dlg))
         assert "Mastery：58%" in joined
-        assert "Capability：知道概念" in joined
+        assert "Capability：L1 · 知道概念" in joined
 
     def test_evidence_dialog_timeline(self, activity_env, qtbot):
         from app.ui.capability_dialog import CapabilityEvidenceDialog

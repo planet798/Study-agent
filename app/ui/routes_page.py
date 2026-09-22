@@ -34,6 +34,7 @@ from .components.button import SAButton
 from .components.card import SACard
 from .components.progress_bar import SAProgressBar
 from .components.status_badge import SAStatusBadge
+from .components.section_header import SASectionHeader
 from .components.tag import SATag
 from .route_builder_dialogs import (
     AIRouteBuilderDialog,
@@ -55,6 +56,18 @@ from .styles import apply_secondary_button_text
 def _secondary(text: str, on_click) -> QPushButton:
     """UI-3：Routes 区域按钮迁移到 SAButton（secondary）。"""
     btn = SAButton(text, variant="secondary", size="small")
+    btn.clicked.connect(on_click)
+    return btn
+
+
+def _primary(text: str, on_click) -> QPushButton:
+    btn = SAButton(text, variant="primary", size="small")
+    btn.clicked.connect(on_click)
+    return btn
+
+
+def _subtle(text: str, on_click) -> QPushButton:
+    btn = SAButton(text, variant="subtle", size="small")
     btn.clicked.connect(on_click)
     return btn
 
@@ -125,6 +138,9 @@ class RouteDetailDialog(QDialog):
     def refresh(self) -> None:
         route = self.route_service.get(self.route.id) or self.route
         self.route = route
+        self.title_label.setText(route.name)
+
+        # compatibility：旧 info_label 保留为 alias，但不作为 production 视觉。
         planning = "已启用" if route.planning_enabled else "暂停"
         status = "已归档" if route.is_archived else "进行中"
         self.info_label.setText(
@@ -133,42 +149,10 @@ class RouteDetailDialog(QDialog):
             f"优先级：{priority_text(route.priority)}\n"
             f"自动规划：{planning}　状态：{status}"
         )
-        self.title_label.setText(route.name)
+        self.info_label.setVisible(False)
 
-        # 顶部动作
-        while self.action_row.count():
-            item = self.action_row.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
-        if not route.is_archived:
-            self.action_row.addWidget(
-                _secondary("＋ 添加阶段", self._on_add_phase)
-            )
-            self.action_row.addWidget(
-                _secondary("AI 生成学习计划", self._on_ai_generate)
-            )
-            if route.planning_enabled:
-                self.action_row.addWidget(
-                    _secondary("暂停自动规划", self._on_pause)
-                )
-            else:
-                self.action_row.addWidget(
-                    _secondary("恢复自动规划", self._on_resume)
-                )
-            self.action_row.addWidget(_secondary("归档路线", self._on_archive))
-        else:
-            self.action_row.addWidget(_secondary("恢复路线", self._on_restore))
-        self.action_row.addStretch()
-
-        # 结构
-        while self.body_layout.count():
-            item = self.body_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        self._rebuild_actions(route)
+        self._clear_body()
 
         structure = self.route_plan_service.get_structure(route.id)
         if structure is None:
@@ -176,121 +160,25 @@ class RouteDetailDialog(QDialog):
             hint.setObjectName("EmptyHint")
             self.body_layout.addWidget(hint)
             if not route.is_archived:
-                row = QHBoxLayout()
-                row.addWidget(
+                empty_row = QHBoxLayout()
+                empty_row.addWidget(
                     _secondary("创建手动学习计划", self._on_create_plan)
                 )
-                row.addWidget(
+                empty_row.addWidget(
                     _secondary("AI 生成学习计划", self._on_ai_generate)
                 )
-                row.addStretch()
-                self.body_layout.addLayout(row)
+                empty_row.addStretch()
+                self.body_layout.addLayout(empty_row)
             self.body_layout.addStretch()
             return
 
         progress = self.route_plan_service.route_progress(route.id)
-        today = self.today_provider()
-        rp = None
-        if self.progress_service is not None:
-            try:
-                rp = self.progress_service.get_progress(route.id, today)
-            except Exception:  # noqa: BLE001
-                rp = None
-        if rp is not None:
-            prog = QLabel(
-                f"【路线进度】课程覆盖：{rp.topic_covered} / {rp.topic_total} Topic"
-                f"　已验收：{rp.assessment_evidence_count}"
-                f"　已掌握：{rp.mastered_count}"
-                f"　待复习：{rp.due_review_count}"
-                f"　薄弱：{rp.weak_count}"
-            )
-            mastery_txt = (
-                "暂无验收数据" if not rp.has_assessment
-                else f"掌握率 {rp.mastery_percent}%"
-            )
-            prog2 = QLabel(f"【掌握】{mastery_txt}")
-        else:
-            prog = QLabel(
-                f"已完成 Topic：{progress['done']} / {progress['total']}"
-                f"　阶段数：{progress['phases']}"
-            )
-            prog2 = None
-        prog.setObjectName("TaskMeta")
-        self.body_layout.addWidget(prog)
-        if prog2 is not None:
-            prog2.setObjectName("TaskMeta")
-            self.body_layout.addWidget(prog2)
+        rp = self._progress_for(route.id)
 
-        if rp is not None and rp.activity_required_total > 0:
-            act = QLabel(
-                "【学习活动】必需完成："
-                f"{rp.activity_required_done} / {rp.activity_required_total}"
-                + (f"　可选：{rp.activity_optional_done} / {rp.activity_optional_total}"
-                   if rp.activity_optional_total else "")
-            )
-            act.setObjectName("TaskMeta")
-            self.body_layout.addWidget(act)
-
-        if rp is not None and rp.knowledge:
-            self.body_layout.addWidget(self._section_label("知识掌握 / 能力"))
-            for ks in rp.knowledge:
-                if ks.status == "已掌握":
-                    extra = f"　{ks.mastery_percent}%"
-                elif ks.status == "薄弱":
-                    extra = f"　{ks.mastery_percent}%" if ks.mastery_percent is not None else ""
-                    if ks.weak_points:
-                        extra += f"　弱点：{'、'.join(ks.weak_points[:3])}"
-                elif ks.status == "已验收":
-                    extra = f"　{ks.mastery_percent}%" if ks.mastery_percent is not None else ""
-                else:
-                    extra = ""
-                row = QHBoxLayout()
-                mastery_txt = (
-                    "暂无验收" if ks.mastery is None
-                    else f"{ks.mastery_percent}%"
-                )
-                cap_txt = (
-                    ks.capability_label if ks.has_capability_evidence
-                    else "暂无能力证据"
-                )
-                info = QVBoxLayout()
-                info.setContentsMargins(0, 0, 0, 0)
-                info.setSpacing(2)
-                title_lbl = QLabel(f"{ks.name}　{ks.status}{extra}")
-                title_lbl.setObjectName("TaskTitle")
-                title_lbl.setWordWrap(True)
-                info.addWidget(title_lbl)
-                mastery_lbl = QLabel(f"Mastery：{mastery_txt}")
-                mastery_lbl.setObjectName("TaskMeta")
-                info.addWidget(mastery_lbl)
-                cap_lbl = QLabel(f"Capability：{cap_txt}")
-                cap_lbl.setObjectName("TaskMeta")
-                info.addWidget(cap_lbl)
-                row.addLayout(info, stretch=1)
-                if self.capability_service is not None and ks.knowledge_point_id:
-                    row.addWidget(_secondary(
-                        "查看证据",
-                        lambda _=False, k=ks: self._on_view_evidence(k),
-                    ))
-                    if self._needs_experiment_record(ks):
-                        row.addWidget(_secondary(
-                            "记录实验成果",
-                            lambda _=False, k=ks: self._on_record_experiment(k),
-                        ))
-                self.body_layout.addLayout(row)
-            self.body_layout.addWidget(self._section_label("复习状态"))
-            last_assessed = max(
-                (k.last_assessed_at for k in rp.knowledge if k.last_assessed_at),
-                default=None,
-            )
-            rev = QLabel(
-                f"今日到期：{rp.due_review_count}　未来7天：{rp.upcoming_review_count}"
-                f"　逾期：{rp.overdue_review_count}"
-                f"　最近复习：{last_assessed or '—'}"
-            )
-            rev.setObjectName("TaskMeta")
-            rev.setWordWrap(True)
-            self.body_layout.addWidget(rev)
+        self._build_overview_card(route, structure)
+        self._build_learning_progress_card(rp, progress)
+        self._build_mastery_review_card(rp)
+        self._build_capability_card(rp)
 
         done_ids = self._complete_topic_ids()
         if not structure.phases:
@@ -304,6 +192,270 @@ class RouteDetailDialog(QDialog):
         self._add_linked_projects_section()
         self._add_practice_blockers_section()
         self.body_layout.addStretch()
+
+    # ---------- 构建辅助 ----------
+
+    def _rebuild_actions(self, route) -> None:
+        while self.action_row.count():
+            item = self.action_row.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        if not route.is_archived:
+            self.action_row.addWidget(
+                _primary("AI 生成学习计划", self._on_ai_generate)
+            )
+            self.action_row.addWidget(
+                _secondary("＋ 添加阶段", self._on_add_phase)
+            )
+            if route.planning_enabled:
+                self.action_row.addWidget(
+                    _secondary("暂停自动规划", self._on_pause)
+                )
+            else:
+                self.action_row.addWidget(
+                    _secondary("恢复自动规划", self._on_resume)
+                )
+            self.action_row.addWidget(_subtle("归档路线", self._on_archive))
+        else:
+            self.action_row.addWidget(
+                _secondary("恢复路线", self._on_restore)
+            )
+        self.action_row.addStretch()
+
+    def _clear_body(self) -> None:
+        while self.body_layout.count():
+            item = self.body_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
+    def _progress_for(self, route_id):
+        if self.progress_service is None:
+            return None
+        try:
+            return self.progress_service.get_progress(
+                route_id, self.today_provider()
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _card(self, title: str):
+        card = SACard()
+        card.add_widget(SASectionHeader(title))
+        return card, card.body_layout
+
+    @staticmethod
+    def _value_pair(lay, label: str, value: str) -> None:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        key = QLabel(label)
+        key.setObjectName("SAValueLabel")
+        val = QLabel(value if value else "—")
+        val.setObjectName("SAValueStrong")
+        val.setWordWrap(True)
+        row.addWidget(key)
+        row.addWidget(val, stretch=1)
+        lay.addLayout(row)
+
+    def _detail_current_phase(self, structure) -> str:
+        if structure is None or not structure.phases:
+            return "尚未创建学习计划"
+        done_ids = self._complete_topic_ids()
+        for phase in structure.phases:
+            if any(t.id not in done_ids for t in phase.topics):
+                return phase.name
+        return structure.phases[-1].name
+
+    def _detail_current_topic(self, structure):
+        if structure is None or not structure.phases:
+            return None
+        done_ids = self._complete_topic_ids()
+        for phase in structure.phases:
+            for topic in phase.topics:
+                if topic.id not in done_ids:
+                    return topic.name
+        last = structure.phases[-1]
+        return last.topics[-1].name if last.topics else None
+
+    # ---------- Overview ----------
+
+    def _build_overview_card(self, route, structure) -> None:
+        card, lay = self._card("概览")
+        head = QHBoxLayout()
+        if route.is_archived:
+            head.addWidget(SAStatusBadge("archived"))
+        elif not route.planning_enabled:
+            head.addWidget(SAStatusBadge("paused"))
+        else:
+            head.addWidget(SAStatusBadge("active"))
+        head.addStretch()
+        lay.addLayout(head)
+        self._value_pair(lay, "目标", route.goal or "—")
+        self._value_pair(lay, "描述", route.description or "—")
+        self._value_pair(lay, "优先级", priority_text(route.priority))
+        self._value_pair(
+            lay, "自动规划", "已启用" if route.planning_enabled else "暂停"
+        )
+        self._value_pair(
+            lay, "状态", "已归档" if route.is_archived else "进行中"
+        )
+        self._value_pair(lay, "当前阶段", self._detail_current_phase(structure))
+        self._value_pair(
+            lay, "当前 Topic", self._detail_current_topic(structure) or "—"
+        )
+        self.body_layout.addWidget(card)
+
+    # ---------- Learning Progress ----------
+
+    def _build_learning_progress_card(self, rp, progress) -> None:
+        card, lay = self._card("学习进度")
+        if rp is not None:
+            covered, total = rp.topic_covered, rp.topic_total
+        else:
+            covered = int(progress.get("done") or 0)
+            total = int(progress.get("total") or 0)
+        pct = int(round(covered * 100 / total)) if total else 0
+        lay.addWidget(
+            SAProgressBar(value=pct, label=f"课程覆盖 {covered} / {total}")
+        )
+        if rp is not None and (
+            rp.activity_required_total or rp.activity_optional_total
+        ):
+            req_pct = (
+                int(round(rp.activity_required_done * 100 /
+                          rp.activity_required_total))
+                if rp.activity_required_total else 0
+            )
+            lay.addWidget(SAProgressBar(
+                value=req_pct,
+                label=(f"学习活动 必需：{rp.activity_required_done} / "
+                       f"{rp.activity_required_total}"),
+            ))
+            if rp.activity_optional_total:
+                opt_pct = int(round(
+                    rp.activity_optional_done * 100 / rp.activity_optional_total
+                ))
+                lay.addWidget(SAProgressBar(
+                    value=opt_pct,
+                    label=(f"学习活动 可选：{rp.activity_optional_done} / "
+                           f"{rp.activity_optional_total}"),
+                ))
+        else:
+            empty = QLabel("暂无学习活动数据")
+            empty.setObjectName("TaskMeta")
+            lay.addWidget(empty)
+        self.body_layout.addWidget(card)
+
+    # ---------- Mastery & Review ----------
+
+    def _build_mastery_review_card(self, rp) -> None:
+        card, lay = self._card("掌握与复习")
+        if rp is None:
+            empty = QLabel("暂无掌握数据")
+            empty.setObjectName("TaskMeta")
+            lay.addWidget(empty)
+            self.body_layout.addWidget(card)
+            return
+        if rp.has_assessment:
+            lay.addWidget(SAProgressBar(
+                value=rp.mastery_percent, label="掌握度 Mastery"
+            ))
+        else:
+            no_data = QLabel("掌握度：暂无验收数据")
+            no_data.setObjectName("TaskMeta")
+            lay.addWidget(no_data)
+        last_assessed = max(
+            (k.last_assessed_at for k in rp.knowledge if k.last_assessed_at),
+            default=None,
+        )
+        for label, value in (
+            ("已验收", f"{rp.assessment_evidence_count}"),
+            ("已掌握", f"{rp.mastered_count}"),
+            ("薄弱", f"{rp.weak_count}"),
+            ("今日到期", f"{rp.due_review_count}"),
+            ("未来7天", f"{rp.upcoming_review_count}"),
+            ("逾期", f"{rp.overdue_review_count}"),
+            ("最近复习", last_assessed or "—"),
+        ):
+            self._value_pair(lay, label, value)
+        self.body_layout.addWidget(card)
+
+    # ---------- Capability ----------
+
+    def _build_capability_card(self, rp) -> None:
+        card, lay = self._card("能力证据 Capability")
+        if rp is None or rp.capability_evidence_count <= 0:
+            empty = QLabel("暂无能力证据")
+            empty.setObjectName("TaskMeta")
+            lay.addWidget(empty)
+        else:
+            summary = QLabel(
+                f"有能力证据：{rp.capability_evidence_count} 个知识点"
+            )
+            summary.setObjectName("TaskMeta")
+            lay.addWidget(summary)
+            dist = QHBoxLayout()
+            dist.setSpacing(6)
+            for level in sorted(rp.capability_level_counts):
+                count = int(rp.capability_level_counts.get(level, 0) or 0)
+                if count > 0:
+                    dist.addWidget(SATag(f"L{level} × {count}", "info"))
+            dist.addStretch()
+            lay.addLayout(dist)
+
+        if rp is not None and rp.knowledge:
+            lay.addWidget(SASectionHeader("知识状态"))
+            for ks in rp.knowledge:
+                self._add_knowledge_row(lay, ks)
+        self.body_layout.addWidget(card)
+
+    def _add_knowledge_row(self, lay, ks) -> None:
+        row = QHBoxLayout()
+        info = QVBoxLayout()
+        info.setContentsMargins(0, 0, 0, 0)
+        info.setSpacing(2)
+        title = QLabel(f"{ks.name}　{ks.status}")
+        title.setObjectName("TaskTitle")
+        title.setWordWrap(True)
+        info.addWidget(title)
+
+        mastery_txt = (
+            "暂无验收" if ks.mastery is None else f"{ks.mastery_percent}%"
+        )
+        info.addWidget(self._meta_label(f"Mastery：{mastery_txt}"))
+
+        if ks.has_capability_evidence:
+            cap_txt = f"L{ks.capability_level} · {ks.capability_label}"
+        else:
+            cap_txt = "暂无能力证据"
+        info.addWidget(self._meta_label(f"Capability：{cap_txt}"))
+
+        if ks.weak_points:
+            info.addWidget(self._meta_label(
+                f"弱点：{'、'.join(ks.weak_points[:3])}"
+            ))
+        row.addLayout(info, stretch=1)
+
+        if self.capability_service is not None and ks.knowledge_point_id:
+            row.addWidget(_secondary(
+                "查看证据", lambda _=False, k=ks: self._on_view_evidence(k)
+            ))
+            if self._needs_experiment_record(ks):
+                row.addWidget(_secondary(
+                    "记录实验成果",
+                    lambda _=False, k=ks: self._on_record_experiment(k),
+                ))
+        lay.addLayout(row)
+
+    @staticmethod
+    def _meta_label(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("TaskMeta")
+        lbl.setWordWrap(True)
+        return lbl
 
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
@@ -1031,12 +1183,18 @@ class LearningRoutesPage(QWidget):
             lay.addWidget(mastery_lbl)
 
         cap_row = QHBoxLayout()
-        cap_title = QLabel("能力 Capability")
+        cap_row.setSpacing(6)
+        cap_title = QLabel("能力证据 Capability")
         cap_title.setObjectName("TaskMeta")
         cap_row.addWidget(cap_title)
-        cap_label = self._route_capability_label(rp)
-        if cap_label:
-            cap_row.addWidget(SATag(cap_label, "info"))
+        if rp is not None and rp.capability_evidence_count > 0:
+            cap_row.addWidget(
+                SATag(f"{rp.capability_evidence_count} 个知识点", "info")
+            )
+            for level in sorted(rp.capability_level_counts):
+                count = int(rp.capability_level_counts.get(level, 0) or 0)
+                if count > 0:
+                    cap_row.addWidget(SATag(f"L{level} × {count}", "neutral"))
         else:
             cap_none = QLabel("暂无能力证据")
             cap_none.setObjectName("TaskMeta")
@@ -1126,14 +1284,19 @@ class LearningRoutesPage(QWidget):
         return ""
 
     @staticmethod
-    def _route_capability_label(rp) -> str:
+    def _route_capability_distribution(rp) -> list[tuple[int, int]]:
+        """返回 (level, count)，只用 RouteProgress 提供的 distribution。
+
+        不做任何 route-level 聚合（不取最高/最低/平均/第一个 KP）。
+        """
         if rp is None:
-            return ""
-        for ks in getattr(rp, "knowledge", []) or []:
-            if getattr(ks, "has_capability_evidence", False) \
-                    and ks.capability_label:
-                return ks.capability_label
-        return ""
+            return []
+        counts = getattr(rp, "capability_level_counts", {}) or {}
+        return [
+            (int(level), int(counts.get(level, 0) or 0))
+            for level in sorted(counts)
+            if int(counts.get(level, 0) or 0) > 0
+        ]
 
     @staticmethod
     def _route_status_badge(route) -> SAStatusBadge:
