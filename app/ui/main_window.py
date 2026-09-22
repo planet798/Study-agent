@@ -55,7 +55,7 @@ from .ai_worker import (
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
-from .styles import APP_STYLE, apply_secondary_button_text
+from .styles import apply_secondary_button_text
 from .task_widget import TaskWidget
 
 POSTPONE_WARNING = "该任务已经连续延期 3 次，请考虑拆分任务或调整计划。"
@@ -468,9 +468,15 @@ class MainWindow(QMainWindow):
         self._tray.show()
 
     def _apply_styles(self) -> None:
+        """经 Design System ThemeManager 应用当前主题（默认 Light）。
+
+        UI-1 只做最小接入：布局 / 导航 / 业务调用完全不变。
+        """
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(APP_STYLE)
+            from .design.theme_manager import ThemeManager
+
+            ThemeManager.instance().apply(app)
 
     # ---------- 启动 / 刷新 ----------
 

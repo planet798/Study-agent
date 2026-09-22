@@ -1,0 +1,526 @@
+/* ==========================================================================
+   Study-Agent — Dark theme QSS template (Fluent 2 foundation)
+   --------------------------------------------------------------------------
+   - 只使用双花括号 placeholder（{ { name } } 语法）；颜色不得写死。
+   - 由 ThemeManager.render_qss() 用 semantic token 渲染后注入 QApplication。
+   - 保留 legacy selectors（PrimaryButton / SecondaryButton / TaskCard ...），
+     现有页面与测试继续生效。
+   - dark.qss 必须与本文件保持相同的 placeholder 集合（有 parity 测试保证）。
+   ========================================================================== */
+
+QWidget {
+    font-family: {{font_family}};
+    font-size: {{font_size_body}};
+    color: {{text_primary}};
+}
+QMainWindow, QDialog {
+    background-color: {{background}};
+}
+
+/* ---- legacy 文本角色 ---- */
+#AppTitle {
+    font-size: 22px;
+    font-weight: 600;
+    color: {{text_primary}};
+}
+#AppDate {
+    font-size: 13px;
+    color: {{text_secondary}};
+}
+#SectionTitle {
+    font-size: 17px;
+    font-weight: 600;
+    color: {{text_primary}};
+    padding-top: 8px;
+}
+#EmptyHint {
+    color: {{text_tertiary}};
+    font-size: 15px;
+    padding: 30px;
+}
+
+/* ---- legacy 任务卡片 ---- */
+QFrame#TaskCard {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_medium}};
+    margin: 3px 0px;
+}
+QFrame#TaskCard[done="true"] {
+    background-color: {{success_background}};
+    border-color: {{success}};
+}
+QFrame#TaskCard[postponing="true"] {
+    background-color: {{warning_background}};
+    border-color: {{warning}};
+}
+#TaskTitle {
+    font-size: 15px;
+    font-weight: 600;
+    color: {{text_primary}};
+}
+#TaskDesc {
+    color: {{text_secondary}};
+    font-size: 13px;
+}
+#TaskMeta {
+    color: {{text_secondary}};
+    font-size: 12px;
+}
+#ReviewTag {
+    color: {{accent}};
+    font-size: 12px;
+    font-weight: 600;
+}
+#TaskReason {
+    color: {{warning}};
+    font-size: 12px;
+}
+#PostponeWarning {
+    color: {{warning}};
+    font-size: 12px;
+    font-weight: 600;
+}
+#DoneBadge {
+    color: {{success}};
+    font-weight: 600;
+}
+
+/* ---- 按钮 ---- */
+QPushButton {
+    background-color: {{surface_alt}};
+    border: 1px solid {{border}};
+    border-radius: {{radius_small}};
+    padding: 6px 14px;
+    color: {{text_primary}};
+}
+QPushButton:hover {
+    background-color: {{surface_hover}};
+}
+QPushButton:pressed {
+    background-color: {{surface_pressed}};
+}
+QPushButton:disabled {
+    color: {{text_disabled}};
+    border-color: {{border_subtle}};
+}
+QPushButton:focus,
+QPushButton#PrimaryButton:focus,
+QPushButton#SecondaryButton:focus,
+QPushButton#DangerButton:focus,
+QPushButton#PostponeButton:focus,
+QPushButton[saVariant="subtle"]:focus {
+    border: 1px solid {{focus}};
+}
+QPushButton#PrimaryButton {
+    background-color: {{accent}};
+    border: 1px solid {{accent}};
+    color: {{text_on_accent}};
+    font-weight: 600;
+}
+QPushButton#PrimaryButton:hover {
+    background-color: {{accent_hover}};
+    border-color: {{accent_hover}};
+}
+QPushButton#PrimaryButton:pressed {
+    background-color: {{accent_pressed}};
+    border-color: {{accent_pressed}};
+}
+QPushButton#PrimaryButton:disabled {
+    background-color: {{accent_disabled}};
+    border-color: {{accent_disabled}};
+    color: {{text_on_accent}};
+}
+QPushButton#DangerButton {
+    background-color: {{surface_alt}};
+    border-color: {{danger}};
+    color: {{danger}};
+}
+QPushButton#DangerButton:hover {
+    background-color: {{danger_background}};
+}
+QPushButton#PostponeButton {
+    border-color: {{warning}};
+    color: {{warning}};
+}
+QPushButton#PostponeButton:hover {
+    background-color: {{warning_background}};
+}
+QPushButton#SecondaryButton {
+    background-color: {{surface_alt}};
+    border: 1px solid {{accent}};
+    color: {{accent}};
+    font-weight: 600;
+}
+QPushButton#SecondaryButton:hover {
+    background-color: {{surface_hover}};
+}
+QPushButton#SecondaryButton:pressed {
+    background-color: {{surface_pressed}};
+}
+QPushButton#SecondaryButton:disabled {
+    color: {{text_disabled}};
+    border-color: {{border}};
+}
+
+/* ---- 新 Design System 按钮变体 ---- */
+QPushButton[saVariant="subtle"] {
+    background-color: transparent;
+    border: 1px solid transparent;
+    color: {{text_primary}};
+    font-weight: normal;
+}
+QPushButton[saVariant="subtle"]:hover {
+    background-color: {{surface_hover}};
+}
+QPushButton[saVariant="subtle"]:pressed {
+    background-color: {{surface_pressed}};
+}
+QPushButton[saVariant="subtle"]:disabled {
+    color: {{text_disabled}};
+    background-color: transparent;
+}
+QPushButton[saButton="true"][saSize="small"] {
+    padding: 3px 10px;
+}
+QPushButton[saButton="true"][saSize="medium"] {
+    padding: 6px 14px;
+}
+
+/* ---- legacy 统计栏（历史保留） ---- */
+QFrame#StatsBar {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_medium}};
+}
+#StatsTitle {
+    font-weight: 600;
+    color: {{text_primary}};
+    font-size: 14px;
+}
+#StatsValue {
+    font-weight: 600;
+    color: {{accent}};
+    font-size: 14px;
+}
+
+/* ---- 输入 ---- */
+QLineEdit, QTextEdit, QPlainTextEdit {
+    background-color: {{surface}};
+    border: 1px solid {{border}};
+    border-radius: {{radius_small}};
+    padding: 6px;
+    color: {{text_primary}};
+    selection-background-color: {{accent}};
+    selection-color: {{text_on_accent}};
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+    border: 1px solid {{focus}};
+}
+QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled {
+    color: {{text_disabled}};
+    background-color: {{surface_alt}};
+}
+QLineEdit[saMono="true"], QPlainTextEdit[saMono="true"] {
+    font-family: {{font_mono}};
+}
+
+/* ---- ComboBox ---- */
+QComboBox {
+    background-color: {{surface}};
+    border: 1px solid {{border}};
+    border-radius: {{radius_small}};
+    padding: 5px 8px;
+    color: {{text_primary}};
+    min-height: 20px;
+}
+QComboBox:hover {
+    border-color: {{border_strong}};
+}
+QComboBox:focus {
+    border: 1px solid {{focus}};
+}
+QComboBox:disabled {
+    color: {{text_disabled}};
+    background-color: {{surface_alt}};
+}
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+QComboBox QAbstractItemView {
+    background-color: {{surface}};
+    border: 1px solid {{border}};
+    selection-background-color: {{surface_selected}};
+    selection-color: {{text_primary}};
+    outline: none;
+}
+
+/* ---- CheckBox / RadioButton ---- */
+QCheckBox, QRadioButton {
+    color: {{text_primary}};
+    spacing: 6px;
+}
+QCheckBox:disabled, QRadioButton:disabled {
+    color: {{text_disabled}};
+}
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+}
+QCheckBox::indicator {
+    border: 1px solid {{border_strong}};
+    border-radius: 3px;
+    background-color: {{surface}};
+}
+QCheckBox::indicator:checked {
+    background-color: {{accent}};
+    border-color: {{accent}};
+}
+QRadioButton::indicator {
+    border: 1px solid {{border_strong}};
+    border-radius: 8px;
+    background-color: {{surface}};
+}
+QRadioButton::indicator:checked {
+    background-color: {{accent}};
+    border-color: {{accent}};
+}
+
+/* ---- Tabs ---- */
+QTabWidget::pane {
+    border: 1px solid {{border_subtle}};
+    background-color: {{surface}};
+    border-radius: {{radius_small}};
+}
+QTabBar::tab {
+    background-color: transparent;
+    color: {{text_secondary}};
+    padding: 7px 14px;
+    border-bottom: 2px solid transparent;
+}
+QTabBar::tab:hover {
+    color: {{text_primary}};
+}
+QTabBar::tab:selected {
+    color: {{accent}};
+    border-bottom: 2px solid {{accent}};
+}
+QTabBar::tab:focus {
+    color: {{accent}};
+}
+
+/* ---- List / Tree ---- */
+QListWidget, QTreeWidget {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_small}};
+    color: {{text_primary}};
+    outline: none;
+}
+QListWidget::item, QTreeWidget::item {
+    padding: 4px 6px;
+}
+QListWidget::item:hover, QTreeWidget::item:hover {
+    background-color: {{surface_hover}};
+}
+QListWidget::item:selected, QTreeWidget::item:selected {
+    background-color: {{surface_selected}};
+    color: {{text_primary}};
+}
+
+/* ---- 滚动 ---- */
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background-color: {{border_strong}};
+    border-radius: 5px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: {{text_tertiary}};
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal {
+    background-color: {{border_strong}};
+    border-radius: 5px;
+    min-width: 24px;
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    width: 0px;
+    height: 0px;
+}
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
+}
+
+/* ---- Menu / Tooltip ---- */
+QMenu {
+    background-color: {{surface}};
+    border: 1px solid {{border}};
+    color: {{text_primary}};
+    padding: 4px;
+}
+QMenu::item {
+    padding: 6px 20px;
+    border-radius: {{radius_small}};
+}
+QMenu::item:selected {
+    background-color: {{surface_selected}};
+}
+QMenu::separator {
+    height: 1px;
+    background: {{border_subtle}};
+    margin: 4px 8px;
+}
+QToolTip {
+    background-color: {{surface_alt}};
+    color: {{text_primary}};
+    border: 1px solid {{border}};
+    padding: 4px 6px;
+}
+
+/* ---- StatusBar / ProgressBar ---- */
+QStatusBar {
+    background-color: {{surface_alt}};
+    color: {{text_secondary}};
+}
+QStatusBar::item {
+    border: none;
+}
+QProgressBar {
+    background-color: {{surface_alt}};
+    border: none;
+    border-radius: {{radius_small}};
+    text-align: center;
+    color: {{text_primary}};
+}
+QProgressBar::chunk {
+    background-color: {{accent}};
+    border-radius: {{radius_small}};
+}
+
+/* ---- 语义 label（替代散布式 setStyleSheet("color:#e74c3c")） ---- */
+QErrorMessage {
+    color: {{danger}};
+}
+QLabel[role="danger"] {
+    color: {{danger}};
+}
+QLabel[role="warning"] {
+    color: {{warning}};
+}
+QLabel[role="success"] {
+    color: {{success}};
+}
+QLabel[role="info"] {
+    color: {{info}};
+}
+QLabel[role="body_secondary"] {
+    color: {{text_secondary}};
+}
+QLabel[role="caption"] {
+    color: {{text_secondary}};
+    font-size: {{font_size_caption}};
+}
+
+/* ---- Design System 组件 ---- */
+QFrame#SACard {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_medium}};
+}
+QFrame#SACard[saCardVariant="interactive"]:hover {
+    background-color: {{surface_hover}};
+    border-color: {{border}};
+}
+QFrame#SACard[saCardVariant="selected"] {
+    border: 1px solid {{accent}};
+    background-color: {{surface_selected}};
+}
+QLabel#SATag {
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: {{font_size_caption}};
+}
+QLabel#SATag[saTagVariant="neutral"] {
+    background-color: {{surface_alt}};
+    color: {{text_secondary}};
+}
+QLabel#SATag[saTagVariant="accent"] {
+    background-color: {{surface_selected}};
+    color: {{accent}};
+}
+QLabel#SATag[saTagVariant="success"] {
+    background-color: {{success_background}};
+    color: {{success}};
+}
+QLabel#SATag[saTagVariant="warning"] {
+    background-color: {{warning_background}};
+    color: {{warning}};
+}
+QLabel#SATag[saTagVariant="danger"] {
+    background-color: {{danger_background}};
+    color: {{danger}};
+}
+QLabel#SATag[saTagVariant="info"] {
+    background-color: {{info_background}};
+    color: {{info}};
+}
+QLabel#SAStatusBadge {
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: {{font_size_caption}};
+    font-weight: 600;
+}
+QLabel#SAStatusBadge[saStatus="active"],
+QLabel#SAStatusBadge[saStatus="completed"] {
+    background-color: {{success_background}};
+    color: {{success}};
+}
+QLabel#SAStatusBadge[saStatus="in_progress"] {
+    background-color: {{info_background}};
+    color: {{info}};
+}
+QLabel#SAStatusBadge[saStatus="planned"] {
+    background-color: {{surface_alt}};
+    color: {{text_secondary}};
+}
+QLabel#SAStatusBadge[saStatus="paused"],
+QLabel#SAStatusBadge[saStatus="warning"] {
+    background-color: {{warning_background}};
+    color: {{warning}};
+}
+QLabel#SAStatusBadge[saStatus="archived"] {
+    background-color: {{surface_alt}};
+    color: {{text_disabled}};
+}
+QLabel#SASectionTitle {
+    color: {{text_primary}};
+    font-size: 17px;
+    font-weight: 600;
+}
+QLabel#SASectionSubtitle {
+    color: {{text_secondary}};
+    font-size: {{font_size_caption}};
+}
+QLabel#SAEmptyTitle {
+    color: {{text_primary}};
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#SAEmptyDescription {
+    color: {{text_secondary}};
+    font-size: {{font_size_caption}};
+}
