@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from .schema import migrate
+from .schema import initialize_fresh_database, migrate
 
 # 项目根目录：app/database -> .. -> .. 为 study-agent/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -74,4 +74,32 @@ def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
 
     # 幂等建表 + 按序迁移（兼容旧数据库，不破坏历史数据）
     migrate(conn)
+    return conn
+
+
+def get_fresh_connection(
+    db_path: str | Path | None = None, *, synchronous: str | None = "OFF"
+) -> sqlite3.Connection:
+    """**测试专用快路径**：为「全新空库」直接建当前完整 schema。
+
+    与 ``get_connection`` 的连接设置一致（row_factory / foreign_keys / WAL），
+    但用 ``initialize_fresh_database`` 一次建好 vN 结构，不重放 v2..vN 迁移，
+    因此 fixture 初始化从 ~280ms 降到个位数毫秒。
+
+    - 只允许用在全新的空库上（``initialize_fresh_database`` 会强校验）。
+    - ``synchronous`` 默认 ``OFF``（测试进程崩溃才可能丢尾部写入，测试无此顾虑）；
+      migration / WAL / release 验证测试请继续使用 ``get_connection``（真实 durability）。
+    - **绝不**用于已有 / legacy / production 数据库。
+    """
+    path = resolve_db_path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    if synchronous is not None:
+        conn.execute(f"PRAGMA synchronous = {synchronous}")
+
+    initialize_fresh_database(conn)
     return conn

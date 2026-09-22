@@ -1417,3 +1417,122 @@ def migrate_stepwise(conn, target: int | None = None, on_step=None) -> int:
             on_step(version)
 
     return get_schema_version(conn)
+
+
+# ============================================================
+# Fresh-DB fast path（仅用于全新空库；绝不可用于 legacy / 正式库）
+# ============================================================
+#
+# 背景：普通测试每次都会新建一个空库。若走 `migrate()`，会在空库上
+# 逐级重放 v2..v20（共 19 步，每步都 commit/fsync），实测约 280ms，
+# 而其中真正 CPU 只有十几毫秒。
+#
+# `initialize_fresh_database()` 用「当前 schema 快照」一次性建好 vN 结构，
+# 不重放历史迁移。快照是在**运行时**从真实迁移路径 `migrate_stepwise()`
+# 反推出来的（见 `_build_fresh_snapshot`），因此与 `migrate()` 的结果
+# 严格一致、不会漂移。
+#
+# 明确禁止用途：
+#   - 已有 production DB（哪怕只是 user_version 不对）
+#   - legacy DB / 待升级 DB
+#   - release migration / migration gate
+#   - schema migration / verifier / WAL backup 等迁移测试
+# 这些场景必须继续走 `migrate()` / `migrate_stepwise()` 真实路径。
+
+_FRESH_SNAPSHOT = None
+
+
+def _build_fresh_snapshot():
+    """从真实迁移路径反推「全新 vN 库」的完整 DDL + 确定性种子数据。
+
+    只在进程内构建一次。使用内存库，不触碰磁盘、不产生任何副作用。
+    返回 (ddl_statements, seed_rows)，其中 seed_rows 为
+    ``[(table_name, [row_tuple, ...]), ...]``。
+    """
+    mem = sqlite3.connect(":memory:")
+    try:
+        mem.execute("PRAGMA journal_mode = MEMORY")
+        mem.execute("PRAGMA synchronous = OFF")
+        migrate_stepwise(mem)
+
+        ddl = [
+            row[0]
+            for row in mem.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY CASE type "
+                "  WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, rowid"
+            )
+        ]
+        tables = [
+            row[0]
+            for row in mem.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
+            )
+        ]
+        seeds = []
+        for table in tables:
+            rows = mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                seeds.append((table, rows))
+        return tuple(ddl), tuple(seeds)
+    finally:
+        mem.close()
+
+
+def _fresh_snapshot():
+    global _FRESH_SNAPSHOT
+    if _FRESH_SNAPSHOT is None:
+        _FRESH_SNAPSHOT = _build_fresh_snapshot()
+    return _FRESH_SNAPSHOT
+
+
+def is_empty_database(conn) -> bool:
+    """判断连接指向的库是否是「全新空库」（无用户表且 user_version=0）。"""
+    user_tables = conn.execute(
+        "SELECT count(*) FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchone()[0]
+    return int(user_tables) == 0 and get_schema_version(conn) == 0
+
+
+def initialize_fresh_database(conn) -> int:
+    """**仅用于全新空库**的快速初始化：直接建当前完整 schema。
+
+    - 前置条件：``is_empty_database(conn)`` 为真；否则抛 RuntimeError。
+    - 行为：一次性执行当前 vN 结构 DDL + 迁移在空库上产生的确定性种子，
+      并设置 ``PRAGMA user_version = SCHEMA_VERSION``。
+    - **不重放**历史迁移（v2..vN 逐步逻辑）。
+    - 与 ``migrate()`` 在空库上的最终状态严格一致（含 learning_routes 种子）。
+
+    禁止用于已有 / legacy / production / release-migration 数据库。
+    返回设置后的 schema 版本。
+    """
+    if not is_empty_database(conn):
+        raise RuntimeError(
+            "initialize_fresh_database 只能用于全新的空数据库；"
+            "已有数据的库请使用 migrate()/migrate_stepwise()。"
+        )
+
+    ddl, seeds = _fresh_snapshot()
+    started = False
+    try:
+        # 所有 DDL / 种子集中在同一个事务里，只 fsync 一次。
+        conn.execute("BEGIN")
+        started = True
+        for statement in ddl:
+            conn.execute(statement)
+        for table, rows in seeds:
+            placeholders = ",".join("?" * len(rows[0]))
+            conn.executemany(
+                f"INSERT INTO {table} VALUES ({placeholders})", rows
+            )
+        conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
+        conn.commit()
+        started = False
+    except Exception:
+        if started:
+            conn.rollback()
+        raise
+    return get_schema_version(conn)

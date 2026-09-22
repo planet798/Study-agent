@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -16,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.database.connection import get_connection  # noqa: E402
+from app.database.connection import get_fresh_connection  # noqa: E402
 from app.database.repository import TaskRepository  # noqa: E402
 from app.services.task_service import TaskService  # noqa: E402
 from app.services.date_service import DateService  # noqa: E402
@@ -25,8 +26,13 @@ from app.ui.main_window import MainWindow  # noqa: E402
 
 @pytest.fixture()
 def conn(tmp_path):
-    """每个测试使用独立的临时数据库文件。"""
-    c = get_connection(tmp_path / "test.db")
+    """每个测试使用独立的临时数据库文件。
+
+    使用 fast fresh path：直接建当前 schema，不重放 v2..v20 历史迁移。
+    与 ``get_connection`` 在空库上的最终状态一致（含 learning_routes 种子）。
+    迁移 / WAL / release 验证类测试请显式使用 ``get_connection``。
+    """
+    c = get_fresh_connection(tmp_path / "test.db")
     yield c
     c.close()
 
@@ -420,3 +426,34 @@ def practice_readiness_env(practice_env):
         r4=practice_env.r4, r5=practice_env.r5, r6=practice_env.r6,
         group=practice_env.group,
     )
+
+
+# ============================================================
+# Category markers（只加标签，默认仍跑完整 suite）
+# ============================================================
+# 开发时可以：
+#   pytest -m "not slow"            # 快速迭代（跳过迁移/集成类）
+#   pytest -m migration             # 只跑迁移相关
+#   pytest -m ui                    # 只跑 GUI/offscreen
+#   pytest -m integration           # 只跑端到端/调度集成
+# 默认 ``pytest -q`` 语义完全不变。
+
+_MIGRATION_RE = re.compile(r"migration|verifier|legacy|schema_migrations")
+_SLOW_RE = re.compile(
+    r"end_to_end|phase6_regression|multi_route_scheduler|stabilization_legacy"
+    r"|release_migration|migration_verifier"
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        nodeid = item.nodeid.lower()
+        if _MIGRATION_RE.search(nodeid):
+            item.add_marker(pytest.mark.migration)
+        if "qtbot" in getattr(item, "fixturenames", ()):
+            item.add_marker(pytest.mark.ui)
+        if _SLOW_RE.search(nodeid):
+            item.add_marker(pytest.mark.integration)
+            item.add_marker(pytest.mark.slow)
+        elif _MIGRATION_RE.search(nodeid):
+            item.add_marker(pytest.mark.slow)
