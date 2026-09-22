@@ -207,9 +207,11 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
 # component_consistency_problems）而不是“不可变字段”比较。
 
 
-# 每次修改 FINGERPRINT_COLUMNS 都要 +1：verify 仅在同版本时才比较 fields_hash，
-# 否则旧 snapshot 会因列集合不同而产生误报。ids_hash 不受列变化影响，始终比较。
-FINGERPRINT_VERSION = 2
+# 每次修改 FINGERPRINT_COLUMNS 都要 +1。
+# v3：每表额外保存 per-row（id -> immutable fields hash），支持“历史子集”校验：
+#     迁移前已有行必须保留且不可被非法修改，迁移后允许正常新增新行。
+# v1/v2 旧 snapshot 仍可读（缺 per-row hashes 时走 legacy 分支）。
+FINGERPRINT_VERSION = 3
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -227,10 +229,11 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def fingerprint(conn: sqlite3.Connection) -> dict:
-    """历史表指纹：row count + id 集合 hash + 关键字段 hash。
+    """历史表指纹：row count + id 集合 hash + 关键字段 hash + per-row hash。
 
-    - ids_hash：检测“行被替换”（同数量但不同 id）；
-    - fields_hash：检测“同 id 但关键字段被改”。
+    - ``ids_hash`` / ``fields_hash``：整表 hash（保留给旧 snapshot 兼容比较）；
+    - ``rows``：``{id: immutable_fields_hash}``，用于历史**子集**语义：
+      before 的每个 id 必须在 after 中存在且字段 hash 不变；after 新 id 合法。
     旧 schema 缺列/缺表时自动跳过对应列/表。
     """
     out: dict[str, dict] = {}
@@ -261,13 +264,40 @@ def fingerprint(conn: sqlite3.Connection) -> dict:
                 for row in rows
             ).encode("utf-8")
         ).hexdigest()
+        # per-row immutable hash，支持历史子集校验（允许迁移后新增行）。
+        row_hashes = {
+            str(row[0]): hashlib.sha256(
+                ",".join("" if v is None else str(v) for v in row).encode(
+                    "utf-8"
+                )
+            ).hexdigest()
+            for row in rows
+        }
         out[table] = {
             "count": len(rows),
             "columns": list(wanted),
             "ids_hash": ids_hash,
             "fields_hash": fields_hash,
+            # v3：显式标记具备 per-row 校验能力（空表也能区分旧 snapshot）
+            "row_level": True,
+            "rows": row_hashes,
         }
     return out
+
+
+def _normalize_id(key):
+    """snapshot 的 per-row key 是字符串；输出时尽量还原为 int。"""
+    try:
+        return int(key)
+    except (TypeError, ValueError):
+        return key
+
+
+def _id_sort_key(key):
+    try:
+        return (0, int(key))
+    except (TypeError, ValueError):
+        return (1, str(key))
 
 
 def integrity_check(conn: sqlite3.Connection) -> list[str]:
@@ -581,7 +611,17 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
     """完整性校验 + （可选）before/after 对比。
 
     包含：PRAGMA integrity_check、PRAGMA foreign_key_check、
-    route / evidence / component 结构一致性、历史行数不减少、历史行指纹不变。
+    route / evidence / component 结构一致性、历史行**子集**保留校验。
+
+    历史保留语义（v3，避免正常业务增长误报）：
+    - before 中已有的历史 ID 必须仍存在于 after（否则 history_missing_ids）；
+    - before 中已有行的 immutable 字段 hash 不得变化（否则
+      history_fingerprint_changes / history_modified_rows）；
+    - after 出现新 ID 是合法的（history_new_rows），不计入
+      history_id_changes；
+    - 旧 v1/v2 snapshot 无 per-row hashes：仅在 count 相等时比较整表
+      ids/fields hash，count 增长时标注 not_available_for_legacy_snapshot，
+      不伪造完整校验。
 
     注意：tasks 的 migration-owned 字段（route_id / component_id /
     learning_activity_kind）不入不可变指纹，改由 route_integrity /
@@ -602,6 +642,12 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
         "history_decreases": {},
         "history_fingerprint_changes": {},
         "history_id_changes": {},
+        # v3：历史子集语义的结果（允许迁移后正常新增行）
+        "history_missing_ids": {},
+        "history_modified_rows": {},
+        "history_preserved": {},
+        "history_new_rows": {},
+        "historical_row_field_check": {},
         "fingerprint_version": after.get("fingerprint_version"),
         "fingerprint_version_match": None,
     }
@@ -610,9 +656,11 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
             before.get("fingerprint_version") == after.get("fingerprint_version")
         )
         result["fingerprint_version_match"] = fp_version_match
+        before_counts = before.get("counts") or {}
+        after_counts = after.get("counts") or {}
         for table in HISTORY_TABLES:
-            b = (before.get("counts") or {}).get(table)
-            a = (after.get("counts") or {}).get(table)
+            b = before_counts.get(table)
+            a = after_counts.get(table)
             if b is not None and a is not None and a < b:
                 result["history_decreases"][table] = {"before": b, "after": a}
         before_fp = before.get("fingerprints") or {}
@@ -620,21 +668,85 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
         for table, bfp in before_fp.items():
             afp = after_fp.get(table)
             if afp is None:
-                continue
-            if bfp.get("ids_hash") != afp.get("ids_hash"):
+                # 整表在 after 中消失：before 的所有已知 id 均视为缺失。
                 result["history_id_changes"][table] = {
                     "before_count": bfp.get("count"),
-                    "after_count": afp.get("count"),
+                    "after_count": None,
                 }
-            # 仅同 fingerprint 版本时比较不可变字段 hash；旧 snapshot（列集合不同）
-            # 会产生误报，此时仅依赖 ids_hash + 结构校验。
-            if fp_version_match and \
-                    bfp.get("fields_hash") != afp.get("fields_hash"):
-                result["history_fingerprint_changes"][table] = {
-                    "before_count": bfp.get("count"),
-                    "after_count": afp.get("count"),
-                    "columns": afp.get("columns"),
-                }
+                if bfp.get("row_level"):
+                    result["history_missing_ids"][table] = [
+                        _normalize_id(k)
+                        for k in sorted(bfp.get("rows") or {}, key=_id_sort_key)
+                    ]
+                continue
+            b_count = bfp.get("count")
+            a_count = afp.get("count")
+            row_level = bool(bfp.get("row_level")) and bool(afp.get("row_level"))
+            if row_level:
+                # v3 子集语义：before IDs 必须 ⊆ after IDs 且字段 hash 不变；
+                # after 新增 ID 完全合法，不计入 history_id_changes。
+                rows_b = bfp.get("rows") or {}
+                rows_a = afp.get("rows") or {}
+                missing = sorted(
+                    (k for k in rows_b if k not in rows_a), key=_id_sort_key
+                )
+                modified = sorted(
+                    (
+                        k for k in rows_b
+                        if k in rows_a and rows_a[k] != rows_b[k]
+                    ),
+                    key=_id_sort_key,
+                )
+                new_rows = [k for k in rows_a if k not in rows_b]
+                if missing:
+                    result["history_missing_ids"][table] = [
+                        _normalize_id(k) for k in missing
+                    ]
+                    result["history_id_changes"][table] = {
+                        "before_count": b_count,
+                        "after_count": a_count,
+                        "missing_ids": [_normalize_id(k) for k in missing],
+                    }
+                if modified:
+                    result["history_modified_rows"][table] = [
+                        _normalize_id(k) for k in modified
+                    ]
+                    result["history_fingerprint_changes"][table] = {
+                        "before_count": b_count,
+                        "after_count": a_count,
+                        "columns": afp.get("columns"),
+                        "modified_ids": [_normalize_id(k) for k in modified],
+                    }
+                result["history_preserved"][table] = len(rows_b) - len(missing)
+                result["history_new_rows"][table] = len(new_rows)
+            else:
+                # legacy snapshot（v1/v2，无 per-row hashes）：只做能安全支持的检查。
+                # - 行数不得减少（history_decreases 已覆盖）；
+                # - count 相等时才可比较整表 ids/fields hash；
+                # - count 增长时不能用整表 hash 判定 corruption，显式标注不可用，
+                #   避免把正常新增业务行误报为篡改。
+                equal_count = b_count == a_count
+                columns_match = bfp.get("columns") == afp.get("columns")
+                if equal_count:
+                    if bfp.get("ids_hash") != afp.get("ids_hash"):
+                        result["history_id_changes"][table] = {
+                            "before_count": b_count,
+                            "after_count": a_count,
+                        }
+                    if columns_match and \
+                            bfp.get("fields_hash") != afp.get("fields_hash"):
+                        result["history_fingerprint_changes"][table] = {
+                            "before_count": b_count,
+                            "after_count": a_count,
+                            "columns": afp.get("columns"),
+                        }
+                else:
+                    result["historical_row_field_check"][table] = (
+                        "not_available_for_legacy_snapshot"
+                    )
+                if b_count is not None and a_count is not None \
+                        and a_count >= b_count:
+                    result["history_new_rows"][table] = a_count - b_count
     result["ok"] = (
         integrity == ["ok"]
         and not fk_problems
@@ -644,6 +756,7 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
         and not result["history_decreases"]
         and not result["history_fingerprint_changes"]
         and not result["history_id_changes"]
+        and not result["history_missing_ids"]
     )
     return result
 

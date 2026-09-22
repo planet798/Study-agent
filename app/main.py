@@ -1039,6 +1039,11 @@ def _run_release_migrate(
     }
 
 
+def _nonzero(d):
+    """文本输出时只展示真正有内容的表，避免全零噪音。"""
+    return {k: v for k, v in (d or {}).items() if v}
+
+
 def _inventory_text(data: dict) -> str:
     lines = [f"schema_version: {data.get('schema_version')}", "counts:"]
     for k, v in (data.get("counts") or {}).items():
@@ -1081,6 +1086,25 @@ def _migrate_text(report: dict) -> str:
         )
     if v.get("history_id_changes"):
         lines.append(f"history_id_changes: {v['history_id_changes']}")
+    if v.get("history_preserved"):
+        lines.append(
+            f"history_preserved: {_nonzero(v['history_preserved'])}"
+        )
+    if v.get("history_new_rows"):
+        lines.append(
+            f"history_new_rows: {_nonzero(v['history_new_rows'])}"
+        )
+    if v.get("history_missing_ids"):
+        lines.append(f"history_missing_ids: {v['history_missing_ids']}")
+    if v.get("history_modified_rows"):
+        lines.append(
+            f"history_modified_rows: {v['history_modified_rows']}"
+        )
+    if v.get("historical_row_field_check"):
+        lines.append(
+            f"historical_row_field_check: "
+            f"{v['historical_row_field_check']}"
+        )
     return "\n".join(lines)
 
 
@@ -1103,6 +1127,25 @@ def _verify_text(result: dict) -> str:
         lines.append(
             f"history_id_changes: {result.get('history_id_changes')}"
         )
+        lines.append(
+            f"history_preserved: "
+            f"{_nonzero(result.get('history_preserved'))}"
+        )
+        lines.append(
+            f"history_new_rows: "
+            f"{_nonzero(result.get('history_new_rows'))}"
+        )
+        lines.append(
+            f"history_missing_ids: {result.get('history_missing_ids')}"
+        )
+        lines.append(
+            f"history_modified_rows: {result.get('history_modified_rows')}"
+        )
+        if result.get("historical_row_field_check"):
+            lines.append(
+                f"historical_row_field_check: "
+                f"{result.get('historical_row_field_check')}"
+            )
     return "\n".join(lines)
 
 

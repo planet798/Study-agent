@@ -63,7 +63,9 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
    必须走 `db-release backup/inventory/migrate/verify`。
 8. **release / legacy 迁移只走真实 `migrate_stepwise()` 路径**，不得使用
    `initialize_fresh_database()`（后者仅用于全新空库）。
-9. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
+9. **Verifier 历史保留是子集语义**（fingerprint v3）：before IDs 必须仍是 after 的
+   子集且 immutable 字段不变；after 新增业务行合法。不能要求正式库迁移后冻结不增长。
+10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
 
 ## 4. DB schema 版本（v20）

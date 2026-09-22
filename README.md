@@ -406,8 +406,11 @@ python -m app.main db-release verify --db "...\\study_agent.db" --before before.
   `component_consistency_problems`（复用 `TopicLearningProfileService.
   validate_consistency`：dangling component / topic mismatch / activity kind
   mismatch）；
-- fingerprint 带 `fingerprint_version`：仅同版本才比较**字段** hash（列集合变化时不误报），
-  `ids_hash` 不受列变化影响始终比较；旧 snapshot（无版本）仍可用于 id 集合校验；
+- fingerprint 带 `fingerprint_version`（当前 v3）：历史表采用**子集语义**（
+  `before IDs ⊆ after IDs`）——迁移前已有行必须保留且 immutable 字段不变；
+  迁移后**允许正常新增业务行**（`history_preserved` / `history_new_rows`），
+  不再因正式库增长而误报；旧 v1/v2 snapshot 无 per-row hash 时，仅在行数相等时
+  比较整表 hash，行数增长时标注 `not_available_for_legacy_snapshot`，不伪造校验；
 - v20 不自动创建任何 Project / Requirement / PROJECT evidence。
 
 ### Migration Gate（GUI 启动）
