@@ -1,0 +1,56 @@
+# Study-Agent — Final UI Acceptance (Windows)
+
+在 Windows 实机执行：
+
+```
+.venv\Scripts\python.exe app\main.py
+```
+
+逐项记录 PASS / FAIL / NOTE。
+
+## A. Shell
+- 左 Sidebar（今日/学习路线/实践项目/月度回顾）与底部设置。
+- Sidebar expanded(228) / collapsed(60) 切换；collapsed 有 tooltip+accessibleName。
+- Page Header 显示页面标题与副标题。
+
+## B. Today
+- Summary（待处理/预计时长/今日复习）；Focus / Review 分区；Career Signals 退居其后。
+- 任务卡标签（路线/活动/来源/复习）、操作层级、Done≠Mastery、延期 ≥3 警告。
+- Empty：「今天还没有学习任务」+ 添加。
+
+## C. Learning Routes
+- R1–R6 一眼可扫；分组 heading。
+- 课程进度条；**Mastery 百分比条**；**Capability evidence count + Lx distribution**（非百分比）。
+- Route Detail：概览 / 学习进度 / 掌握与复习 / 能力证据（知识状态逐行）等 Card。
+
+## D. Practice
+- Project 卡：status badge / type tag / route tag；里程碑 / 成果 / 项目能力证据 / 学习准备度**分离**；无统一 project %。
+- Detail：概览 / 项目范围 / 学习准备 / 里程碑 / 项目成果 / 项目能力证据。
+- Readiness 只为 requirements ratio；能力缺口非红色；L5 只来自 active confirmed evidence。
+
+## E. Monthly
+- 月份导航（chevron 图标）；4 核心指标；分类行；路线维度无伪造 mastery %；项目证据只计数。
+- 无 weekly 文案；AI 不可用 banner；空月份提示。
+
+## F. Settings
+- 无 AI service 仍可切换主题（Appearance）。
+- Model/API：profile 无 ●○；Key 绝不回显；连接测试不阻塞。
+- Prompt：editor monospace；状态 tag；save/preview/reset。
+
+## G. Dialogs
+- Add Task / Assessment / Route Detail / Practice Detail / AI profile / Prompt preview：
+  margins / spacing / button 层级一致；确认在右、取消在左；focus 可见。
+
+## H. Light / Dark / System
+- Settings 切换 Light→Dark→System→Light 实时生效，无需重启。
+- 已打开 Dialog 新开后继承主题；无白底黑字/黑底黑字割裂。
+
+## I. DPI（100% / 125% / 150% / 175%）
+- 无文本裁切；按钮高度正常；ComboBox/Tab/Scrollbar/Sidebar/Prompt editor 正常。
+- 窗口尺寸：1180×760 / 1440×900 / 1920×1080；无横向撑爆。
+
+## J. Keyboard
+- Tab 可遍历 Sidebar / Today actions / Settings；Enter/Space 激活；Escape 关闭 dialog；focus ring 可见。
+
+## README 推荐截图（4 张）
+Today（light）· Learning Routes（light）· Practice（light）· Today（dark）。

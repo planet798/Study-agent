@@ -114,6 +114,12 @@ detail 是否不再是 `【】` 文本堆叠；readiness 不是能力百分比�
 
 ---
 
+## 7. UI-5 最终验收
+
+见 `docs/ui/FINAL_UI_ACCEPTANCE.md`（Windows 实机 PASS/FAIL/NOTE）。
+
+---
+
 ## 6. UI-0 状态
 
 - [x] 已确认 offscreen 最小探针可用（不足以自动截取生产页面）

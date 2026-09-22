@@ -150,11 +150,15 @@ class PracticeProjectsPage(QWidget):
         self.list_layout.setContentsMargins(0, 0, 6, 0)
         self.list_layout.setSpacing(_spacing.SM)
         self.scroll.setWidget(self.list_container)
+        self.empty_action_btn = SAButton(
+            "新建项目", variant="secondary", icon_name=_icons.IconName.ADD
+        )
+        self.empty_action_btn.clicked.connect(self._on_create)
         self.empty_state = SAEmptyState(
             title="还没有实践项目",
             description="创建项目，把学习路线、技能和 Topic 转化为可验证成果。",
             icon_name=_icons.IconName.PROJECT,
-            action=None,
+            action=self.empty_action_btn,
         )
         self.empty_state.setVisible(False)
         root.addWidget(self.empty_state)
@@ -404,9 +408,13 @@ class PracticeProjectDetailDialog(QDialog):
         self._value_pair(lay, "成果", str(prog['output_count']))
         self.body_layout.addWidget(card)
 
-        self._routes_section(detail["routes"])
-        self._skills_section(detail["skills"])
-        self._topics_section(detail["topics"])
+        scope_card = SACard()
+        scope_card.add_widget(SASectionHeader("项目范围"))
+        scope_lay = scope_card.body_layout
+        self.body_layout.addWidget(scope_card)
+        self._routes_section(detail["routes"], lay=scope_lay)
+        self._skills_section(detail["skills"], lay=scope_lay)
+        self._topics_section(detail["topics"], lay=scope_lay)
         self._readiness_section()
         self._milestones_section(detail["milestones"])
         self._outputs_section(detail["outputs"])
@@ -429,52 +437,61 @@ class PracticeProjectDetailDialog(QDialog):
         for delay in (0, 50, 150, 400):
             QTimer.singleShot(delay, _apply)
 
-    def _routes_section(self, routes) -> None:
+    def _routes_section(self, routes, lay=None) -> None:
+        if lay is None:
+            lay = self.body_layout
         head = QHBoxLayout()
         head.addWidget(self._section("关联学习路线"))
         head.addStretch()
         head.addWidget(_secondary("管理路线", self._manage_routes))
-        self.body_layout.addLayout(head)
+        lay.addLayout(head)
         names = " · ".join(r.name for r in routes) if routes else "—"
         lbl = QLabel(names)
         lbl.setObjectName("TaskMeta")
         lbl.setWordWrap(True)
-        self.body_layout.addWidget(lbl)
+        lay.addWidget(lbl)
 
-    def _skills_section(self, skills) -> None:
+    def _skills_section(self, skills, lay=None) -> None:
+        if lay is None:
+            lay = self.body_layout
         head = QHBoxLayout()
         head.addWidget(self._section("关联技能"))
         head.addStretch()
         head.addWidget(_secondary("管理技能", self._manage_skills))
-        self.body_layout.addLayout(head)
+        lay.addLayout(head)
         names = "、".join(s["name"] for s in skills) if skills else "—"
         lbl = QLabel(names)
         lbl.setObjectName("TaskMeta")
         lbl.setWordWrap(True)
-        self.body_layout.addWidget(lbl)
+        lay.addWidget(lbl)
 
-    def _topics_section(self, topics) -> None:
+    def _topics_section(self, topics, lay=None) -> None:
+        if lay is None:
+            lay = self.body_layout
         head = QHBoxLayout()
         head.addWidget(self._section("关联 Topic"))
         head.addStretch()
         head.addWidget(_secondary("管理 Topic", self._manage_topics))
-        self.body_layout.addLayout(head)
+        lay.addLayout(head)
         names = "、".join(t["name"] for t in topics) if topics else "—"
         lbl = QLabel(names)
         lbl.setObjectName("TaskMeta")
         lbl.setWordWrap(True)
-        self.body_layout.addWidget(lbl)
+        lay.addWidget(lbl)
 
     def _milestones_section(self, milestones) -> None:
+        card = SACard()
+        card.add_widget(SASectionHeader("里程碑"))
+        lay = card.body_layout
+        self.body_layout.addWidget(card)
         head = QHBoxLayout()
-        head.addWidget(self._section("里程碑"))
         head.addStretch()
         head.addWidget(_secondary("新增里程碑", self._add_milestone))
-        self.body_layout.addLayout(head)
+        lay.addLayout(head)
         if not milestones:
             lbl = QLabel("尚未设置里程碑")
             lbl.setObjectName("TaskMeta")
-            self.body_layout.addWidget(lbl)
+            lay.addWidget(lbl)
             return
         for m in milestones:
             row = QHBoxLayout()
@@ -496,18 +513,21 @@ class PracticeProjectDetailDialog(QDialog):
             row.addWidget(_secondary(
                 "删除", lambda _=False, mm=m: self._delete_milestone(mm)
             ))
-            self.body_layout.addLayout(row)
+            lay.addLayout(row)
 
     def _outputs_section(self, outputs) -> None:
+        card = SACard()
+        card.add_widget(SASectionHeader("项目成果"))
+        lay = card.body_layout
+        self.body_layout.addWidget(card)
         head = QHBoxLayout()
-        head.addWidget(self._section("项目成果"))
         head.addStretch()
         head.addWidget(_secondary("新增成果", self._add_output))
-        self.body_layout.addLayout(head)
+        lay.addLayout(head)
         if not outputs:
             lbl = QLabel("暂无项目成果")
             lbl.setObjectName("TaskMeta")
-            self.body_layout.addWidget(lbl)
+            lay.addWidget(lbl)
             return
         for o in outputs:
             row = QHBoxLayout()
@@ -526,19 +546,22 @@ class PracticeProjectDetailDialog(QDialog):
             row.addWidget(_secondary(
                 "删除", lambda _=False, oo=o: self._delete_output(oo)
             ))
-            self.body_layout.addLayout(row)
+            lay.addLayout(row)
 
     # ---------- Phase 6：学习准备度 ----------
 
     def _readiness_section(self) -> None:
+        card = SACard()
+        card.add_widget(SASectionHeader("学习准备"))
+        lay = card.body_layout
+        self.body_layout.addWidget(card)
         head = QHBoxLayout()
-        head.addWidget(self._section("学习准备"))
         head.addStretch()
-        self.body_layout.addLayout(head)
+        lay.addLayout(head)
         if self.readiness_service is None:
             lbl = QLabel("未启用学习准备度")
             lbl.setObjectName("TaskMeta")
-            self.body_layout.addWidget(lbl)
+            lay.addWidget(lbl)
             return
         try:
             readiness = self.readiness_service.get_project_readiness(
@@ -547,7 +570,7 @@ class PracticeProjectDetailDialog(QDialog):
         except Exception as e:  # noqa: BLE001
             lbl = QLabel(f"学习准备度不可用：{e}")
             lbl.setObjectName("TaskMeta")
-            self.body_layout.addWidget(lbl)
+            lay.addWidget(lbl)
             return
         summary = QLabel(
             f"学习准备度：{readiness['satisfied_count']} / "
@@ -559,7 +582,7 @@ class PracticeProjectDetailDialog(QDialog):
         )
         summary.setObjectName("TaskMeta")
         summary.setWordWrap(True)
-        self.body_layout.addWidget(summary)
+        lay.addWidget(summary)
         statuses = readiness.get("statuses") or []
         covered = {int(st.topic_id) for st in statuses}
         for st in statuses:
@@ -591,7 +614,7 @@ class PracticeProjectDetailDialog(QDialog):
                 lambda _=False, tid=st.topic_id, nm=st.topic_name:
                     self._edit_requirement(tid, nm),
             ))
-            self.body_layout.addLayout(row)
+            lay.addLayout(row)
 
         # 已关联但未设置要求的 Topic（§75：不强制，用户需要时再设）
         for tid in self.service.projects.list_topic_ids(self.project_id):
@@ -608,7 +631,7 @@ class PracticeProjectDetailDialog(QDialog):
                 "设置学习要求",
                 lambda _=False, tid=tid, nm=name: self._edit_requirement(tid, nm),
             ))
-            self.body_layout.addLayout(row)
+            lay.addLayout(row)
 
     def _edit_requirement(self, topic_id, topic_name) -> None:
         project = self.service.projects.get(self.project_id)
@@ -625,14 +648,17 @@ class PracticeProjectDetailDialog(QDialog):
     # ---------- Phase 5：项目能力证据 ----------
 
     def _evidence_section(self) -> None:
+        card = SACard()
+        card.add_widget(SASectionHeader("项目能力证据"))
+        lay = card.body_layout
+        self.body_layout.addWidget(card)
         head = QHBoxLayout()
-        head.addWidget(self._section("项目能力证据"))
         head.addStretch()
-        self.body_layout.addLayout(head)
+        lay.addLayout(head)
         if self.capability_service is None:
             lbl = QLabel("未启用项目能力证据")
             lbl.setObjectName("TaskMeta")
-            self.body_layout.addWidget(lbl)
+            lay.addWidget(lbl)
             return
         candidates = self.capability_service.list_evidence_candidates(
             self.project_id
@@ -643,7 +669,7 @@ class PracticeProjectDetailDialog(QDialog):
             )
             lbl.setObjectName("TaskMeta")
             lbl.setWordWrap(True)
-            self.body_layout.addWidget(lbl)
+            lay.addWidget(lbl)
             return
         for c in candidates:
             row = QHBoxLayout()
@@ -688,7 +714,7 @@ class PracticeProjectDetailDialog(QDialog):
                 row.addWidget(btn)
             lbl.setObjectName("TaskMeta")
             lbl.setWordWrap(True)
-            self.body_layout.addLayout(row)
+            lay.addLayout(row)
 
     def _confirm_topic_evidence(self, candidate) -> None:
         project = self.service.projects.get(self.project_id)

@@ -164,12 +164,20 @@ def test_monthly_ai_unavailable_banner(qapp):
 def test_monthly_empty_month_banner(qapp):
     from app.ui.summary_pages import MonthlySummaryPage
 
-    page = MonthlySummaryPage(
-        _StubSummary(stats={"total_tasks": 0, "completed_tasks": 0}),
+    empty = MonthlySummaryPage(
+        _StubSummary(stats={
+            "total_tasks": 0, "completed_tasks": 0,
+            "category_ranking": [],
+        }),
         today_provider=lambda: "2026-01-05",
     )
-    assert page.empty_banner.isVisible() is False or True
-    assert page.empty_banner.title() == "本月暂无学习记录"
+    assert empty.empty_banner.title() == "本月暂无学习记录"
+    assert empty.empty_banner.isHidden() is False
+
+    populated = MonthlySummaryPage(
+        _StubSummary(), today_provider=lambda: "2026-01-05"
+    )
+    assert populated.empty_banner.isHidden() is True
 
 
 # ============================================================
