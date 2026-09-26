@@ -1,6 +1,6 @@
 # UI-5 Final Visual Audit
 
-> 基线 `5ae2069`。仅记录真实观察到的问题；不做凭感觉的大改。
+> Historical UI-5 audit at `5ae2069`; not the current product baseline. S1–S5 retired Review/Monthly/Today Career/Generic Todo. Current baseline: `docs/PRODUCT_BASELINE.md`.
 
 ## P0（必须修）
 1. `tests/test_ui4_pages.py` 恒真断言 `assert ... is False or True` → 已改为真实 empty/populated 验证。

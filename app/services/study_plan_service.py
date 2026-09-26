@@ -520,8 +520,7 @@ class StudyPlanService:
         规则（Phase 8 起）：
         1. 当天已存在的任务占用预算（延期任务优先）；
         2. 高优先级主题优先；薄弱（低掌握或有 weak_points）主题按证据提前；
-        3. 已经完成过的主题不再重复生成；高掌握且最近验收良好、或有未完成复习任务
-           的主题不再重复安排（不伪造 mastery）；
+        3. 已经完成过的主题不再重复生成；高掌握且最近验收良好的主题不再重复安排（不伪造 mastery）；
         4. 不超过 max_daily_minutes 总预算；
         5. 若当天还没有任何任务，至少安排一个核心主题；
         6. 剩余预算装不下剩余主题时停止。
@@ -598,7 +597,7 @@ class StudyPlanService:
         )
         if max_minutes is not None:
             # Phase D.1：Scheduler 路径下，只有 Agent generated/new 消耗分钟预算；
-            # manual / review / extra 不计入（与全局分钟预算一致）。
+            # manual / legacy review / legacy extra 不计入（与全局分钟预算一致）。
             committed = sum(
                 t.estimated_minutes
                 for t in today_tasks
@@ -885,7 +884,7 @@ class StudyPlanService:
         self.repo.conn.commit()
         return repaired
 
-    # ================= topic -> knowledge_point 关联（Review 链路修复） =================
+    # ================= topic -> knowledge_point 关联（学习 / Assessment） =================
 
     # 允许建立 topic -> kp 关联的任务种类（source, task_type）
     # manual/new：用户手动添加的“正式知识学习任务”（关联已有 topic）
@@ -905,7 +904,7 @@ class StudyPlanService:
         - 只处理 topic_id 非空且能查到 topic 的任务；
         - 只写 tasks.knowledge_point_id（以及 updated_at），其它字段一律不动；
         - 幂等：已有 knowledge_point_id 直接返回，不重复建 kp；
-        - 绝不伪造验收证据（kp 的 mastery/复习字段保持原样）。
+        - 绝不伪造验收证据（kp 的 mastery/legacy review 字段保持原样）。
         """
         if task is None:
             return task
@@ -923,7 +922,7 @@ class StudyPlanService:
                 task = self.repo.get(task.id)
         if task.knowledge_point_id is not None:
             return task
-        # 正式新知识任务可关联知识点（manual/review 不在此列）
+        # 正式新知识任务可关联知识点（手动学习活动和 legacy review 不在此列）
         if (task.source, task.task_type) not in self._LINKABLE_TASK_KINDS:
             return task
         if task.topic_id is None or self.assessment_repo is None:

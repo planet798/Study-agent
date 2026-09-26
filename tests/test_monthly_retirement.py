@@ -1,11 +1,21 @@
 """S2 regression: Monthly is retired as a product; legacy history survives."""
 from __future__ import annotations
 
+import pytest
+
 import importlib.util
 
 from app.ai.prompt_registry import PromptOverrideRepository, PromptRegistry
 from app.database.schema import SCHEMA_VERSION
 from app.ui.app_shell import PAGE_SPECS, PageKey
+
+
+@pytest.fixture(autouse=True)
+def _restore_theme(qapp):
+    """Keep UI smoke tests from leaking a Dark system palette to other files."""
+    yield
+    from app.ui.design.theme_manager import ThemeManager
+    ThemeManager.instance().set_theme("light")
 
 
 def test_sidebar_and_main_window_have_no_monthly_page(make_window):

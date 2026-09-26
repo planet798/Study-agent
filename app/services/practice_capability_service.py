@@ -17,7 +17,7 @@
 严格边界（禁止）：
 - 不自动遍历 Project Topics；不自动 backfill；
 - 不因 project completed / outputs / topic relation 自动产生 PROJECT；
-- 不影响 Planner / Scheduler / Review / Mastery / Activity / Curriculum；
+- 不影响 Planner / Scheduler / Mastery / Activity / Curriculum；
 - 不做 AI 自动判断；
 - 不访问网络“外部验证”。
 """

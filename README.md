@@ -2,12 +2,13 @@
 
 Windows 桌面学习管理工具（Python + PySide6 + SQLite）
 
-## 当前阶段：MVP
+## 当前产品基线（S6）
 
-- 今日学习任务展示
-- 任务完成勾选 / 未完成原因 / 延期
-- 日期切换与延期任务自动搬运
-- 今日 / 周 / 月统计
+主要页面：Today、Learning Routes、Practice、Settings。核心链路：Curriculum → Planning → Today → Assessment / Practice Evidence → Mastery / Capability。未来 Agent Study Session 尚未实现；canonical 边界见 [`docs/PRODUCT_BASELINE.md`](docs/PRODUCT_BASELINE.md)。
+
+- 今日学习任务与简要待处理/预计时长
+- 任务完成、未完成原因、延期与跨日补确认
+- 日期切换与 Planner / Scheduler 的合法任务规划
 
 ## 环境
 
@@ -271,7 +272,7 @@ study-agent/
 - 历史 Topic 采用三种策略迁移：
   - **MOVE**：保留原 topic id，reparent 到新路线对应的 phase；
     topic-linked `tasks.route_id` / `knowledge_points.route_id` 同步更新。
-    assessment / review / mastery 不复制、不删除、不改分。
+    assessment / mastery 和历史 legacy review rows 不复制、不删除、不改分。
   - **SPLIT_NEW**：跨路线语义的旧 Topic 保留在 LEGACY；新的 route-specific
     Topic 由 canonical seed 创建，**不继承**旧 mastery。
   - **KEEP_LEGACY / MANUAL_REVIEW**：保留在旧路线，不迁移。
@@ -296,7 +297,7 @@ python -m app.main six-routes apply --db "...\\study_agent.db"
 ## Capability Evidence（能力证据）
 
 Capability 与 Mastery 是两个独立维度：Capability 只由真实证据推导，
-不使用 mastery 阈值，也不修改 mastery / review。
+不使用 mastery 阈值，也不修改 mastery 或历史 legacy review 字段。
 
 | Level | 含义 | 来源 |
 | --- | --- | --- |
@@ -345,7 +346,7 @@ Level 5 **只能**由实践项目的“项目使用证据”产生，且必须�
 > 历史完整性目前由 Service invariant 保证（生产代码永不删除被引用的 Output），
 > 并有测试锁定。Phase 5.1 不做危险的表重建。
 
-Project Skill / Activity / Curriculum / Mastery / Review / Planner / Scheduler
+Project Skill / Activity / Curriculum / Mastery / Planner / Scheduler
 均**不**因 PROJECT evidence 改变。
 
 ## Planner Feedback Loop / Project Readiness（v20）
@@ -374,7 +375,7 @@ Project Skill / Activity / Curriculum / Mastery / Review / Planner / Scheduler
   Practice / Capability：14 天模拟证明加入任意数量的 Practice blocker 后，
   route allocation 序列与全局 budget（≤3 task / ≤180 min）不变；
 - route.priority 永远由用户控制，Practice blocker 不会自动改 priority；
-- Mastery 仍只服务 Assessment / Review / weak / Skill gate；
+- Mastery 由 Assessment 正式更新，并服务 weak evidence / Skill gate 等学习决策；Review 不再是 production consumer。
   Capability 仍只由真实证据推导；三者继续独立；
 - 不为项目单独分配每日预算；不自动创建 requirement / project / evidence；
 - 没有 requirement 的 Project Topic 只是项目关联，不产生 Planner blocker。

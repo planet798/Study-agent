@@ -7,8 +7,8 @@
 4 legacy extra(+kp) 仍显示验收入口（历史记录兼容）
 5 legacy extra 只有 topic_id 时仍显示入口
 6 legacy extra 无 topic/kp 不显示
-7 review 验收行为不回归
-8 验收成功写 mastery / next_review_date
+7 历史 review 行的关联信息保留（legacy compatibility）
+8 验收成功写 mastery / last_assessed_at，legacy next_review_date 保持原值
 9 new task 验收不被 done 状态阻止
 10 legacy extra 验收正确关联 task_id / kp_id
 11 完成/未完成按钮不回归
@@ -269,7 +269,7 @@ class TestAssessmentFlow:
         # 安全网已把 done 任务也补上 kp
         assert repo.get(t.id).knowledge_point_id == at["knowledge_point_id"]
 
-    def test_review_flow_not_regressed(
+    def test_historical_review_row_assessment_compatibility(
         self, qtbot, repo, task_service, date_service, conn, monkeypatch
     ):
         captured = _dummy_flow(monkeypatch)

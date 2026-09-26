@@ -6,8 +6,8 @@
 - Milestone / Output 的 CRUD。
 
 严格边界：
-- Practice 不是 LearningRoute，也不影响 Planner / Scheduler / Review /
-  Mastery / Capability；
+- Practice 不是 LearningRoute，也不影响 Planner / Scheduler / Mastery /
+  Capability；
 - 不自动创建项目，不自动生成 LearningOutcome / capability evidence。
 
 Phase 5 追加保护：

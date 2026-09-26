@@ -1,6 +1,6 @@
 # Study Agent · Prompt 全量审计清单
 
-> 本清单为「AI 设置中心」交付的一部分（需求 #45）。
+> 本清单为「AI 设置中心」交付的一部分（需求 #45）；现行 active prompts 以 registry 为准。S1–S5 冻结产品见 `docs/PRODUCT_BASELINE.md`。
 > 所有会真实发送给 LLM 的系统 Prompt 均已纳入 `PromptRegistry`，
 > 稳定 key 见下表；系统默认模板位于 `app/ai/prompt_defaults.py`。
 >

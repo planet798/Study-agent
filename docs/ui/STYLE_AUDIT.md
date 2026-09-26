@@ -1,3 +1,5 @@
+> Historical UI audit: counts and paths below describe pre-S1–S3 snapshots; ReviewTag, Monthly UI and career_dialogs are retired, not active product surfaces. See `docs/PRODUCT_BASELINE.md`.
+
 # Study-Agent — Style System Audit (UI-0)
 
 > 基线 commit: `a36e688`
@@ -45,7 +47,7 @@ QSS 覆盖的控件：
 | `EmptyHint` | 7 | 空状态文案 | ✅ |
 | `TaskTitle` | 6 | 卡片/条目标题 | ✅ |
 | `TaskCard` | 6 | 卡片容器 | ✅（含 `[done]` / `[postponing]` 属性） |
-| `ReviewTag` | 5 | 标签（复习/来源/路线/活动复用同一 name） | ✅ |
+| `ReviewTag` | historical | S1 前旧复习标签；现已退役 | 历史审计 |
 | `AppTitle` | 5 | 页面主标题 | ✅ |
 | `QErrorMessage` | 3 | 错误文本 | ⚠️ 用 Qt 内置类名当 objectName |
 | `PostponeButton` | 3 | 延期按钮 | ✅ |
@@ -91,7 +93,7 @@ Daily Review / Review Scheduler / Daily Retention 已退出生产 UI。TaskWidge
 
 内联 `setStyleSheet("color: #e74c3c;")` 出现 **18 次**（`route_dialogs`×4、
 `practice_dialogs`×4、`dialogs`×2、`manual_task_dialog`×1、`capability_dialog`×1、
-`assessment_dialog`×1、`past_task_dialog`×1、`career_dialogs`×1，其余在 `styles.py`）。
+`assessment_dialog`×1、`past_task_dialog`×1、历史 `career_dialogs`×1（S3 已移除），其余在 `styles.py`）。
 这是最典型的“散布式修复”：同一个错误文本样式在 10 个文件里各写一遍。
 
 ---
@@ -162,7 +164,7 @@ button.setPalette(pal)
 ```
 
 它在 **31 处** `SecondaryButton` 创建点被逐一调用（`TaskWidget`、`main_window`、
-`routes_page`、`practice_page`、`past_task_dialog`、`career_dialogs`、
+`routes_page`、`practice_page`、`past_task_dialog`、历史 `career_dialogs`（S3 已移除）、
 `manual_task_dialog`、`route_dialogs`、`route_builder_dialogs`、`ai_settings_page`），
 外加 `project`/`routes` 页面各自的 `_secondary()` 工厂里也包了一层。
 

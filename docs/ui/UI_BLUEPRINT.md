@@ -1,6 +1,6 @@
 # Study-Agent — UI Blueprint (UI-0)
 
-> 基线 commit: `a36e688`
+> Historical UI-0 design audit at commit `a36e688` (not the canonical current product; see `docs/PRODUCT_BASELINE.md`).
 > 本文件定义 **UI-1 → UI-5** 的目标方向与实现边界。UI-0 **不实现**，只定义。
 > 技术栈不变：**PySide6 + Qt Widgets**，不迁移 QML。
 > 边界不变：`ui → services → database`。UI 只调用 service，禁止本阶段改任何
@@ -89,123 +89,28 @@ Settings               ← 底部独立放置
 
 ---
 
-## 2.5 MainWindow Responsibility Audit（专项）
+## 2.5 Historical UI-0 MainWindow audit
 
-`app/ui/main_window.py` = 1,856 LOC，是全 UI 最大技术债。**UI-0 不重写，只分类。**
-
-### 1) 当前窗口整体结构
-`QMainWindow` → central `QWidget` → `QVBoxLayout`：
-`[顶部导航 QHBoxLayout]` + `[QStackedWidget]`；`QStackedWidget` 依序追加：
-Today(0) → Routes(可选) → Practice(可选) → Settings。
-外加 `QStatusBar` 与 `QSystemTrayIcon`。
-
-### 2) 当前 navigation 实现
-5 个 `QPushButton`，全部 `objectName="PrimaryButton"`，点击直接 `lambda: self._switch_page(n)`
-或专用方法。没有独立的 navigation 组件，按钮与业务方法同处一个类。
-
-### 3) Today 页面是否混在 MainWindow
-**完全混在内部**。Today 的标题、日期、区块标题、添加任务行、路线筛选、路线统计、
-阶段信息、AI 规划状态、`QScrollArea` + 动态列表、空状态，
-全部在 `_build_ui` 与 `refresh` 系列方法里，直接操作 `self.*`。现已提取 `TodayPage` View。
-
-### 4) 不应长期留在 MainWindow 的职责
-- Today 页面全部渲染（标题/列表/空状态）
-- 路线筛选与统计
-- 手动任务对话框编排
-- （S3 已移除）Today 技能 / JD 面板渲染与候选处理
-- 验收流程编排
-- 规划状态展示与 replan
-- `_switch_*` 导航
-
-### 5) refresh / scroll / task rendering 的关系
-`refresh(preserve_scroll)`：
-1. 可选 `capture_today_view_state()`（只存 `verticalScrollBar().value()`）
-2. `get_tasks_by_date` → `_today_tasks`
-3. `_update_phase_info` / `_update_planner_info`
-4. `_reload_route_filter` / `_selected_route_filter` / `_route_name_map`
-5. `_clear_dynamic_list()`（销毁所有动态 widget，包含 stretch）
-6. 按 status/type/route 过滤，重建「今日学习」；历史 review task 不展示、不计数
-7. 重新 `addStretch`
-8. 计算 `empty_hint` / `scroll` 可见性
-9. `restore_today_view_state()`：先 `clearFocus()`，再在
-   `0/16/60/160/400/800 ms` 多次尝试恢复（clamp 到 maximum）
-
-**必须保持行为不变**：过滤语义、cancelled 不进完成率分母、
-`addStretch` 顺序、scroll 的 6 次延迟恢复。
-
-### 6) statusBar 使用
-作为轻量 toast：`showMessage(msg, timeout)`。共约 20 处，覆盖添加任务、移除、延期、
-replan、验收、设置等反馈。UI-5 可替换为统一 `SAToast`，但消息文案与时限语义不变。
-
-### 7) page switching
-Today 使用 `_switch_to_today()`；Routes / Practice 可选，Settings 始终可用。
-`statusBar` 提示。`_switch_to_routes/practice/ai_settings` 在切换前调用对应 `page.refresh()`。
-Sidebar 化时必须保留“不可用则提示且不切换”“切换前 refresh”的行为。
-
-### 8) dialogs mounting
-所有对话框都在 MainWindow 内 `import`（部分延迟）并 `dlg.exec()`；验收与 AI 复核使用
-`QThread` worker，通过 `self._ai_workers` 持有引用，`finished` 时释放。
-
-### 9) service dependency injection
-`__init__` 接受 **30+ 个可选 service**，几乎全部 `if xxx is not None` 降级。
-这是当前 UI 灵活性的来源，也是 MainWindow 臃肿的根因。UI-1 之后建议引入
-`WorkspaceDependencies` 容器（dataclass）承接，但不改变 service 语义与降级行为。
-
-### 10) styling responsibilities
-`_apply_styles()` 把 `APP_STYLE` 设到 `QApplication`；Today 内联
-`scroll.setStyleSheet("background: transparent;")`。MainWindow 不应承担主题管理，
-应交给 `design/theme_manager.py`。
-
-### 职责分类（用于拆分）
-
-| 代号 | 职责 | 现状位置 | 未来归属 |
-|---|---|---|---|
-| **A** | App Shell | `_build_ui`(外壳)、`_build_tray`、`_apply_styles`、`run_app`、`closeEvent`、`_shutdown`、`_stop_ai_workers` | `MainWindow` / `AppShell` |
-| **B** | Today Page | `_build_ui`(today 部分)、`refresh`、`_clear_dynamic_list`、`_add_section_*`、`_add_task_widget`、`_update_phase_info` | `TodayPage`（新建） |
-| **C** | Navigation | 5 个 nav 按钮、`_switch_page`、`_switch_to_*` | `NavigationSidebar` + `NavigationController` |
-| **D** | State / refresh | `current_date`、`_today_tasks`、`_task_widgets`、`_route_names`、`_route_filter_loading`、`TodayViewState`、`capture/restore_today_view_state`、`_reload_route_filter`、`_update_route_stats` | `TodayViewModel` / `TodayState`（纯状态，可测） |
-| **E** | Dialog orchestration | 所有 `dlg = ...; dlg.exec()`、worker 创建/释放、`_on_*` 处理器 | `TodayController` / `RouteController` / `PracticeController` |
-| **F** | Business interaction | `task_service.*`、`assessment_service.*`、`scheduler.generate`、`daily_planner_service.*`、`jd_summary_service.*`、`skill_service.*` | 控制器调用；**语义与调用顺序不得改变** |
-
-**可安全抽出（UI-2/UI-3）**：B、C、D、E 的结构性搬迁。
-**必须保持行为完全不变**：F 的每个 service 调用及其顺序、refresh 的过滤/滚动逻辑、
-worker 生命周期、托盘与关闭语义、迁移 gate（不在 UI 层）。
-
----
+The original five-button top navigation and Career/Review/Monthly pages described in UI-0 are retired. Current shell uses Sidebar Today / Learning Routes / Practice / Settings (footer). `TodayPage` owns the layout; `MainWindow` orchestrates services and task actions. This archived blueprint is not a source of new product requirements: see `docs/PRODUCT_BASELINE.md`.
 
 ## 3. Today Page Blueprint
 
 ### 3.1 定位
 回答唯一问题：**“今天我应该做什么？”**
 
-### 3.2 目标结构
+### 3.2 当前结构（S6 冻结）
 
-```
-PageHeader   Today · Sep 22 · Tuesday
-             [添加学习任务]
-Today Summary
-  Tasks 3     Expected 120 min     Reviews 2
-Focus Tasks
-  ┌─────────────────────────────┐
-  │ R4 AI Agent · THEORY        │
-  │ Planning 任务规划            │
-  │ Practice blocker            │
-  │ Study-Agent                 │
-  │ 45 min          [开始学习] ⋯ │
-  └─────────────────────────────┘
-Review / secondary section
-Small contextual info
+```text
+PageHeader             Today · 日期
+Today Summary          待处理 · 预计时长
+Route Filter           路线筛选 · 当日任务状态
+Current Phase          当前阶段 / 阶段目标
+Planner State          规划状态 / 说明 / 重新规划
+今日学习                学习任务卡片
+添加学习任务            学习活动 / 知识学习
 ```
 
-- `SATag` 表示 route / activity / source；不再用 `【…】` 文本前缀。
-- `⋯` 为 `SAIconButton`（溢出菜单：移除今日任务 / 验收等）。
-- 主操作（开始学习 / 完成）使用主按钮；次级与危险操作降级。
-
-### 3.3 S3 当前产品语义
-- Today = execution-focused learning surface：日期、待处理/预计时长、路线筛选、阶段目标、Planner 状态/重新规划、今日学习任务、手动添加与学习空状态。
-- JD / Skill / Market 仅为 Planner 后台信号，不在 Today 渲染 Career dashboard。
-- 任务保留原有状态与动作语义：cancelled 不计入完成率、完成≠掌握、移除≠删除、延期计数与滚动位置恢复。
-- 复习与 Monthly 页面均已退役；historical schema/rows 不因 UI 减法删除。
+没有 Review / Monthly / Career dashboard。Mastery 只由 Assessment 更新；Skill/JD/Market 数据保留为 Planner 后台信号。手动学习不是 Generic Todo（见 `docs/PRODUCT_BASELINE.md`）。
 
 ---
 
@@ -235,9 +140,8 @@ Route Dashboard + Route Detail。路线是「长期学习结构」，不是任�
 ### 4.3 Route Detail
 层级：**Route → Phase → Topic → Activity → Task**。
 - 顶部：目标 / 描述 / priority / planning / status + 动作（添加阶段、AI 生成计划、暂停/恢复、归档）。
-- 进度区：课程覆盖 / 已验收 / 已掌握 / 待复习 / 薄弱。
+- 进度区：课程覆盖 / 掌握度 / 已验收 / 已掌握 / 薄弱 / 最近验收。
 - Knowledge 行：`Mastery：xx%` 与 `Capability：xxx` **分列**，不得合并为同一进度条。
-- 复习状态：今日到期 / 未来 7 天 / 逾期 / 最近复习。
 - Phase 卡片：phase → topic → activity chips。
 - 关联：技能、课程缺口、关联项目、Practice blocker。
 
@@ -486,7 +390,7 @@ No route / No task / No project / No AI profile / No assessment。
 | `setFixedHeight(70/60/80/90/56/…)*` | 多语言/字体缩放时文字截断 |
 | `summary_pages` `setFixedWidth(120)` | 长 key 或大字体溢出 |
 | `ai_settings_dialogs` `setFixedWidth(40)`、`topic_learning_dialog` `setFixedWidth(30)` / `setMinimumWidth(80)` | ICON/排序按钮在缩放时失配 |
-| 顶部 5 个按钮横排 | 窗口变窄时换行/拥挤（将改左侧栏解决） |
+| 历史顶部按钮横排 | 已由 Sidebar 取代（UI-2） |
 | QSS px padding/font-size | Qt 的 px 在高 DPI 下按 devicePixelRatio 缩放，但固定字号无法随系统字体设置变化 |
 
 ### 14.2 目标

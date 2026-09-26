@@ -119,8 +119,8 @@ class SkillService:
 
         定义：一个技能的 linked_topics 全部存在 done 任务→其材料已被安排并完成。
         用途：前置门禁的**解锁**条件之一（“学过前置才能学下一课”）；
-        **绝不等于掌握**：不写 mastery、不影响 active_needed / Review / Assessment /
-        已掌握跳过逻辑。前置主题尚未完成时仍为 blocked（硬约束不变）。
+        **绝不等于掌握**：不写 mastery，不修改 active_needed 定义、Assessment / Mastery
+        更新路径或已掌握跳过逻辑。前置主题尚未完成时仍为 blocked（硬约束不变）。
         """
         done_topics: set[int] = set()
         if self.topic_learning_service is not None:

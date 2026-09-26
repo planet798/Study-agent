@@ -17,13 +17,13 @@
 优先级：…　自动规划：…
 课程进度 ▓▓▓▓░ done/total
 掌握度 Mastery ▓▓▓░░ xx%        （无 assessment 时为“暂无验收数据”）
-能力 Capability  [Lx · label]      待复习 N
+能力 Capability  [Lx · label]
 [查看路线] [调整] [暂停/恢复自动规划] [归档]
 ```
 
 - 优先：名称 / 当前阶段 / 当前 Topic / 下一步。
 - 其次：课程进度 / Mastery / Capability。
-- 再次：状态 / Priority / Review due。
+- 再次：状态 / Priority。
 - 复杂技能 / Gap / Projects 仍在 Route Detail。
 
 ## Mastery vs Capability（关键）
@@ -49,8 +49,8 @@
 
 ## Route Status
 
-`SAStatusBadge`：`active` / `paused`（暂停自动规划，Review 仍继续）/
-`archived`（不再产生新学习与新 Review）。文案不模糊这两者。
+`SAStatusBadge`：`active` / `paused`（暂停自动规划）/
+`archived`（不再产生新学习任务）。
 
 ## Route Detail（仍为 Dialog）
 
@@ -60,8 +60,8 @@
    Current Phase / Current Topic）——不再用单个多行 `info_label`。
 2. Learning Progress `SACard`（课程覆盖 `SAProgressBar`；学习活动 必需/可选）
    ——不再用 `【路线进度】` / `【学习活动】` 前缀。
-3. Mastery & Review `SACard`（Mastery bar 或“暂无验收数据”；已验收 / 已掌握 /
-   薄弱 / 今日到期 / 未来7天 / 逾期 / 最近复习）——不再用 `【掌握】`。
+3. Mastery `SACard`（掌握度 bar 或“暂无验收数据”；已验收 / 已掌握 /
+   薄弱 / 最近验收）。不读取或显示任何 review schedule。
 4. Capability `SACard`（evidence count + level distribution；下面逐 Knowledge Point
    Mastery 行 + Capability 行分离）
 5. Curriculum（Phase `SACard` → Topic + 学习活动状态文本）

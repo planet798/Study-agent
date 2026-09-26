@@ -64,7 +64,7 @@ class Task:
     not_done_at: str | None = None
     source: str = "manual"
     topic_id: int | None = None
-    # v4 起：区分任务性质（new / review / extra），并关联知识点
+    # v4 起：区分任务性质（new / legacy review / legacy extra），并关联知识点
     task_type: str = "new"
     knowledge_point_id: int | None = None
     # v5 起：额外任务难度（basic / practice / challenge）
@@ -182,7 +182,7 @@ class TaskRepository:
     ) -> int:
         """某天 Agent 已发布的 new task 数（cancelled 不计）。
 
-        只统计 source='generated' AND task_type='new'；manual/review/extra
+        只统计 source='generated' AND task_type='new'；manual / legacy review / legacy extra
         均不消耗 Agent Daily Budget。
         """
         sql = (
@@ -271,13 +271,13 @@ class TaskRepository:
         """新增一条任务，返回带 id 的 Task。
 
         :param source: 任务来源（manual=手动 / generated=学习计划自动生成 /
-            review=复习任务；LEGACY COMPATIBILITY ONLY: extra=已移除的额外学习，
+            LEGACY COMPATIBILITY ONLY: review=历史复习来源；extra=已移除的额外学习，
             仅用于读取/过滤历史行，无创建入口）
         :param topic_id: 关联的 study_topics 主题 id（自动生成任务使用）
-        :param task_type: 任务性质（new / review；LEGACY COMPATIBILITY ONLY:
-            extra=已移除的额外学习，仅历史行；Phase 11 起也允许 project /
+        :param task_type: 任务性质（new / manual；LEGACY COMPATIBILITY ONLY:
+            review=历史复习、extra=已移除的额外学习；Phase 11 起也允许 project /
             experiment，无数据库 CHECK 约束）
-        :param knowledge_point_id: 关联的知识点 id（复习任务使用）
+        :param knowledge_point_id: 关联的知识点 id（知识学习/验收；历史复习任务也可能有关联）
         :param difficulty: 难度（basic / practice / challenge，额外任务用）
         :param project_name/project_repo/deliverable/acceptance_criteria/
             expected_artifact: Phase 11 项目化学习字段（默认空串）
@@ -313,7 +313,7 @@ class TaskRepository:
         return self._rows_to_tasks(cur.fetchall())
 
     def list_by_knowledge_point(self, knowledge_point_id: int) -> list[Task]:
-        """按知识点 id 查找所有关联任务（复习任务用）。"""
+        """按知识点 id 查找所有关联任务（包括历史复习数据）。"""
         cur = self.conn.execute(
             "SELECT * FROM tasks WHERE knowledge_point_id = ? "
             "ORDER BY scheduled_date ASC, id ASC",

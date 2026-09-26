@@ -135,7 +135,7 @@ semantic tokens → ThemeManager.render_qss(template, map) → setStyleSheet
 
 - `styles.py::APP_STYLE` 仍在，且**代理到 Light theme 渲染结果**；
   legacy objectName selectors 继续生效（`PrimaryButton` `SecondaryButton` `DangerButton`
-  `TaskCard` `TaskTitle` `TaskMeta` `SectionTitle` `EmptyHint` `ReviewTag` ...）。
+  `TaskCard` `TaskTitle` `TaskMeta` `SectionTitle` `EmptyHint` ...）。
 - `styles.py::apply_secondary_button_text` 仍在，委托给 `SAButton` 内部的同一实现；
   旧调用点不动，UI-3/UI-4 渐进迁移后再删除。
 - `MainWindow._apply_styles()` 改为 `ThemeManager.instance().apply(app)`；

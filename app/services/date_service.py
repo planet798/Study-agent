@@ -161,7 +161,7 @@ class DateService:
 
         策略（优先级从高到低）：
         0. 若当前学习路线的自动规划已暂停/归档（planning_enabled=0 或 archived），
-           则不生成任何新 Agent task（manual / Review / Assessment 不受影响）；
+           则不生成任何新 Agent task（manual learning / Assessment 不受自动规划影响）；
         1. 若注入了 daily_planner_service（AI），先试 AI 动态规划，
            失败时内部自动 fallback 到规则型生成；
         2. 否则若注入了 study_plan_service，使用规则型 generate_daily_tasks；

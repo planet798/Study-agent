@@ -1,4 +1,4 @@
-"""Phase E：RouteProgressService（课程覆盖 / 掌握 / 薄弱 / 复习状态）。
+"""Phase E：RouteProgressService（课程覆盖 / 掌握 / 薄弱；legacy review 日程不进入模型）。
 
 覆盖需求 36 的 21~31。
 """

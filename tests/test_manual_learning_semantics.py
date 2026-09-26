@@ -1,6 +1,8 @@
 """S5: new manual tasks are learning, while historical manual rows remain valid."""
 from __future__ import annotations
 
+import pytest
+
 from PySide6.QtWidgets import QLabel
 
 from app.database.assessment_repository import AssessmentRepository
@@ -18,6 +20,14 @@ from app.ui.manual_task_dialog import AddLearningTaskDialog, KIND_ACTIVITY, KIND
 from app.ui.task_widget import TaskWidget
 
 DAY = "2026-09-15"
+
+
+@pytest.fixture(autouse=True)
+def _restore_theme(qapp):
+    """Keep UI smoke tests from leaking a Dark system palette to other files."""
+    yield
+    from app.ui.design.theme_manager import ThemeManager
+    ThemeManager.instance().set_theme("light")
 
 
 def test_dialog_product_terms_and_default(qtbot):

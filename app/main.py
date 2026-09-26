@@ -1256,7 +1256,7 @@ def main() -> int:
     )
     # Phase F：route-specific curriculum gap 需要 route_skills
     skill_service.route_repo = route_repo
-    # Phase E：路线进度 / 掌握 / 复习状态统一计算
+    # Phase E：路线进度 / Mastery / Capability 统一读取
     from app.services.route_progress_service import RouteProgressService
     from app.services.route_repair_service import repair_route_assignments
 
@@ -1324,7 +1324,7 @@ def main() -> int:
         skill_service=skill_service,
         task_repo=repo,
     )
-    # 幂等修复历史 route 归属（绝不猜 manual NULL / ordinary todo）
+    # 幂等修复历史 route 归属（绝不猜历史未分类 manual route_id=NULL）
     try:
         repaired = repair_route_assignments(conn, assessment_repo)
         if any(repaired.values()):

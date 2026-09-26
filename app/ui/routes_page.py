@@ -349,7 +349,7 @@ class RouteDetailDialog(QDialog):
             lay.addWidget(empty)
         self.body_layout.addWidget(card)
 
-    # ---------- Mastery & Review ----------
+    # ---------- Mastery ----------
 
     def _build_mastery_card(self, rp) -> None:
         card, lay = self._card("掌握情况")

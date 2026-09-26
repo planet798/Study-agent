@@ -89,7 +89,7 @@ docs/ui/screenshots/
 ## 5. UI-3 后人工重点检查（Today / Routes）
 
 **Today**
-- 信息是否首先聚焦今日任务（Summary → Focus → Review）。
+- 信息是否首先聚焦今日任务（Summary → 当前阶段/Planner → 今日学习）。
 - Today 不展示 Career / JD / Skill dashboard；后台 JD/Market 仍供 Planner 使用。
 - Task Card 信息是否清晰：路线/活动/来源/复习标签、时间、优先级。
 - 按钮是否过多；完成/验收/未完成/移除层级是否清楚。

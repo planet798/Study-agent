@@ -24,7 +24,7 @@ app/
 
 ```
 study_plans ─ study_phases ─ study_topics ─┬─ knowledge_points (Assessment / Mastery)
-                                           ├─ learning activit{ies} (component)
+                                           ├─ learning components
                                            └─ tasks
 learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / task
 ```
@@ -35,7 +35,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
 - **Manual Learning (S5)**：产品不是通用 Todo Manager。Learning Activity（`source=manual, task_type=manual`）是一次性学习行为，不形成 Assessment/Mastery；Knowledge Learning（`task_type=new`）关联 Topic 或临时知识点，可验收。新建 UI 有 active route 时要求路线；历史 NULL-route manual 行保持可用，不做 schema migration。
 - **Assessment / Mastery**：`assessment_service` → `knowledge_evidence` /
   `skill_service`。JD 30-day / market / skill priority 是 Planner 后台信号，不占据 Today UI。
-- **Today (S3)**：execution-focused learning surface；只呈现日期、当前阶段、Planner、路线筛选、两项 Summary、今日学习任务与添加入口。正式 Mastery 只由 Assessment 更新；弱点与最近验收证据仍可供 Planner 使用。
+- **Assessment evidence**：正式 Mastery 只由 Assessment 更新；weak points 与最近验收证据仍可供 Planner 使用。
 - **Daily Review retired (S1)**：Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
   Historical review rows/schema are retained for migration and history preservation only.
   Review-like recall will be handled by future Agent contextual learning, not by scheduled review tasks.
@@ -54,6 +54,12 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
+## Agentization frozen boundary (NOT IMPLEMENTED YET)
+
+Planner 决定学什么；未来 Agent Runtime 负责陪用户把任务学完。Agent Tool 不得直接操作 Repository 或 raw SQLite：必须经 `Agent Tool → existing Service → Repository → SQLite`。Agent 不能直接 set Mastery 或 Capability；只有 `Assessment → Mastery` 和真实 `Evidence → Capability`。
+
+现有 `SkillService` / `skills` 表属于职业/技术技能域。未来 Agent Skills 必须使用独立命名（`AgentSkill`、`AgentSkillRegistry`、`agent/skills/`），不能复用或重解释现有技能表。本节仅冻结架构约束，不实现 Agent。
+
 ## 3. 关键不变式（CRITICAL INVARIANTS）
 
 1. **Route 身份**用稳定 `route_key`（如 `R3_LLM_INFRA`），不用显示名。
@@ -70,7 +76,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
    必须走 `db-release backup/inventory/migrate/verify`。
 8. **release / legacy 迁移只走真实 `migrate_stepwise()` 路径**，不得使用
    `initialize_fresh_database()`（后者仅用于全新空库）。
-9. **Verifier 历史保留是子集语义**（fingerprint v3）：before IDs 必须仍是 after 的
+9. **Verifier 历史保留是子集语义**（fingerprint v4）：before IDs 必须仍是 after 的
    子集且 immutable 字段不变；after 新增业务行合法。不能要求正式库迁移后冻结不增长。
 10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
@@ -92,7 +98,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
 |---|---|---|
 | Planner 排序 | `daily_planner_service`, `planner_feedback`, `planner_context` | `route_scheduler`, `practice_*` |
 | Scheduler | `route_scheduler` | Practice / Capability |
-| Capability | `capability_*`, `capability_repository` | Mastery / Review / Scheduler |
+| Capability | `capability_*`, `capability_repository` | Mastery / Scheduler |
 | Practice | `practice_*`, `practice_repository` | Mastery / route.priority / Scheduler |
 | Migration | `schema`, `route_migration_service`, `diagnostics/release_migration` | 业务 service 行为 |
 | UI | 对应 `ui/*.py` | 业务 service（UI 只调用） |

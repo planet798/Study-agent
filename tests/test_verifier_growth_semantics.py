@@ -7,7 +7,7 @@
 正确语义：before 已有历史行必须保留且 immutable 字段不变；after 新增行合法。
 即 before IDs ⊆ after IDs，而不是相等。
 
-本文件锁定 fingerprint v3 的子集语义与 legacy snapshot 兼容行为。
+本文件锁定当前 fingerprint v4 的子集语义与 legacy v1–v3 snapshot 兼容行为。
 """
 
 from __future__ import annotations
@@ -301,7 +301,7 @@ class TestModificationDetected:
 
 
 class TestSnapshotFormat:
-    """3/14/15. fingerprint v3 + legacy 兼容。"""
+    """3/14/15. fingerprint v4 + legacy 兼容。"""
 
     def test_inventory_is_v4_with_row_level_hashes(self, tmp_path):
         from app.diagnostics import release_migration as rm

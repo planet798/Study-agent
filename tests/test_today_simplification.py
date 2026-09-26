@@ -1,7 +1,16 @@
 """S3: Today is an execution surface; JD/Skill signals stay in Planner."""
 from __future__ import annotations
 
+import pytest
 from PySide6.QtWidgets import QLabel
+
+
+@pytest.fixture(autouse=True)
+def _restore_theme(qapp):
+    """UI smoke windows must not leak the system/Dark palette into other suites."""
+    yield
+    from app.ui.design.theme_manager import ThemeManager
+    ThemeManager.instance().set_theme("light")
 
 from app.database.jd_summary_repository import JdSkillCandidateRepository
 from app.database.skill_repository import JdRepository, SkillRepository

@@ -26,16 +26,16 @@
 | 项 | 内容 |
 |---|---|
 | 主要 class | `TodayViewState` (dataclass)、`MainWindow(QMainWindow)` |
-| 职责 | 应用外壳 + Today 页面 + 顶部导航 + 托盘 + 生命周期 + 业务编排 |
+| 职责 | 应用外壳 + Today 页面 + Sidebar 导航 + 托盘 + 生命周期 + 业务编排 |
 | 依赖 service | `TaskService`、`DateService`、`TaskReviewService`、`ManualTaskService`、`StudyPlanService`、`DailyPlannerService`、`AssessmentService`、`SkillService`、`LearningRouteService`、`RoutePlanService`、`CapabilityService`、`PracticeProjectService`、`PracticeCapabilityService`、`PracticeReadinessService`、`AIConfigService`、`PromptRegistry`、`scheduler`、`ai_route_service` … |
 | 依赖 UI | `ai_worker`、`assessment_dialog`、`dialogs`、`manual_task_dialog`、`styles`、`task_widget`；延迟 import `routes_page` / `practice_page` / `ai_settings_page` |
 | 局部 style/QSS | `self.scroll.setStyleSheet("background: transparent;")`（第 313 行）；全局 `APP_STYLE` 注入 |
-| 是否值得拆分 | **是，最高优先级**。包含至少 A–F 六类职责（见 §main_window 审计）。Today 页面整体混在 MainWindow 内。 |
+| 是否值得拆分 | 历史 UI-0 结论；Today view 与导航已抽出，现行结构见 `docs/PRODUCT_BASELINE.md`。 |
 
 `MainWindow` 内部功能区块：
 
 - 构建与生命周期：`_build_ui` / `_build_tray` / `_apply_styles` / `_on_startup` / `run_app` / `closeEvent` / `_shutdown` / `_stop_ai_workers`
-- 导航：`_switch_page` / `_switch_to_routes` / `_switch_to_practice` / `_switch_to_ai_settings`
+- 导航：`_switch_to_today` / `_switch_to_routes` / `_switch_to_practice` / `_switch_to_ai_settings`
 - Today 渲染：`refresh` / `_clear_dynamic_list` / `_add_section_header` / `_add_section_hint` / `_add_task_widget`
 - Today 滚动保持：`capture_today_view_state` / `restore_today_view_state`
 - 路线筛选/统计：`_route_name_map` / `_active_learning_routes` / `_reload_route_filter` / `_selected_route_filter` / `_matches_route` / `_on_route_filter_changed` / `_update_route_stats`
