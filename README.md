@@ -66,7 +66,7 @@ Monthly Dashboard、Monthly AI Summary 与 summary cache production path 已移�
 
 ## 当前功能（GUI 阶段）
 
-- 主窗口：标题 + 日期 + 今日学习任务列表 + 今日统计
+- Today = execution-focused learning surface：日期、当前阶段、Planner 状态与解释、路线筛选、待处理/预计时长、今日学习任务与添加入口。JD/Skill/Market 数据继续作为 Planner 后台信号，不在 Today 展示。
 - 任务卡片：标题/描述/分类/优先级/预计时间/状态
 - 完成：勾选后即时完成并更新统计
 - 未完成：必须填写原因（非空校验），否则不能提交

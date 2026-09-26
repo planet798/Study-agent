@@ -33,7 +33,8 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   R1–R6 + JOB_PREP 存在；`study_plan_service` 管 phase/topic；`topic_learning_profile_service`
   管 topic 的 activity component；`task_service` / `daily_planner_service` 产 task。
 - **Assessment / Mastery**：`assessment_service` → `knowledge_evidence` /
-  `skill_service`。正式 Mastery 只由 Assessment 更新；弱点与最近验收证据仍可供 Planner 使用。
+  `skill_service`。JD 30-day / market / skill priority 是 Planner 后台信号，不占据 Today UI。
+- **Today (S3)**：execution-focused learning surface；只呈现日期、当前阶段、Planner、路线筛选、两项 Summary、今日学习任务与添加入口。正式 Mastery 只由 Assessment 更新；弱点与最近验收证据仍可供 Planner 使用。
 - **Daily Review retired (S1)**：Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
   Historical review rows/schema are retained for migration and history preservation only.
   Review-like recall will be handled by future Agent contextual learning, not by scheduled review tasks.
@@ -46,7 +47,8 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
 - **Global Scheduler**：`route_scheduler`（route allocation / fairness / budget
   ≤3 task & ≤180 min），**完全不读 Practice / Capability**。
 - **JD / Market / Skill**：`jd_service` / `jd_summary_service` / `market_signal` /
-  `skill_service`。
+  `skill_service`。JD 30-day / market / skill priority 是 Planner 后台信号，不占据 Today UI。
+- **Today (S3)**：execution-focused learning surface；只呈现日期、当前阶段、Planner、路线筛选、两项 Summary、今日学习任务与添加入口。
 - **AI Settings / Prompt**：`ai/config_service` + `ai/secrets` + `ai/prompt_registry`
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。

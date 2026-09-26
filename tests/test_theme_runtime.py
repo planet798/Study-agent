@@ -127,13 +127,13 @@ def test_dark_qss_has_today_viewport_rule():
     assert "QWidget#SATodayListContainer" in light
 
 
-# ---------------- Career / buttons ----------------
+# ---------------- Buttons / Today ----------------
 
 def test_secondary_button_follows_theme_once(qapp):
     tm = _tm()
     tm.set_theme(ThemeMode.LIGHT)
     tm.apply(qapp)
-    btn = SAButton("JD", variant="secondary")
+    btn = SAButton("重新规划", variant="secondary")
     assert btn.palette().buttonText().color().name().lower() == \
         colors.LIGHT_COLORS["accent"].lower()
     tm.set_theme(ThemeMode.DARK)
@@ -156,7 +156,7 @@ def test_legacy_helper_reads_current_theme(qapp):
         colors.DARK_COLORS["accent"].lower()
 
 
-def test_career_readability_contrast(qapp):
+def test_today_readability_contrast(qapp):
     """SectionTitle / TaskMeta 前景与容器背景不相同（Dark 下必须可读）。"""
     from app.ui.today_page import TodayPage
     from PySide6.QtWidgets import QLabel
@@ -165,8 +165,8 @@ def test_career_readability_contrast(qapp):
     tm.set_theme(ThemeMode.LIGHT)
     tm.apply(qapp)
     page = TodayPage()
-    page.add_section_header("职业信号")
-    page.add_section_hint("技能概览")
+    page.add_section_header("今日学习")
+    page.add_section_hint("暂无学习任务")
     tm.set_theme(ThemeMode.DARK)
     bg = QColor(colors.DARK_COLORS["background"])
     for lbl in page.list_container.findChildren(QLabel):

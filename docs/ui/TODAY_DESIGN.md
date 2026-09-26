@@ -1,6 +1,6 @@
 # Today Workspace Design (UI-3)
 
-> Today 页面回答唯一问题：**“今天我应该做什么？”**
+> Today = execution-focused learning surface；回答“今天学什么、为什么、怎么开始？”
 > TodayPage 是纯 View；业务编排仍在 MainWindow。
 
 ## Information hierarchy
@@ -13,10 +13,9 @@ PageBody
   Phase context     当前阶段 / 今日目标
   Planner context   AI 规划状态 + 重新规划（SAInfoBanner）
   今日学习          active learning tasks
-  Career Signals    技能概览 / JD 趋势 / 候选 / Gap（secondary）
 ```
 
-职业信号统一放在任务之后，视觉权重低于任务区（提示 `职业信号` 区块标题）。
+Skill / JD / Market 作为 Planner 的后台信号，不直接展示为 Today dashboard。
 
 ## TodayPage extraction
 
@@ -73,3 +72,7 @@ cancelled 永不进入任何指标。数据不可靠时宁可不显示，也不�
 Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
 Historical review rows/schema are retained for migration and history preservation only.
 Review-like recall will be handled by future Agent contextual learning, not by scheduled review tasks.
+
+## S3 — Today simplification
+
+只有日期、两项 Summary、路线筛选/当前阶段、Planner 状态与说明、今日学习任务及手动添加入口。无任务时即使存在 JD/Skill 数据也显示学习空状态。`task_type=new` 历史语义不变。

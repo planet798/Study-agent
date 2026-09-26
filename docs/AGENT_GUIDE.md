@@ -115,6 +115,10 @@ full 失败                 → 只重跑失败测试，修复
 - Monthly Dashboard / SummaryService / StatsService / Monthly AI prompt 与 cache writer 已退出生产产品；历史 `weekly_summaries` / `monthly_summaries` 表及用户 prompt override 仅保留兼容，SCHEMA_VERSION 继续为 20。
 - Route Detail / Practice 页面不依赖 Monthly；JD 30-day trend 使用独立的 `JdSummaryService`，必须保留。
 
+### Today (S3)
+- Today = execution-focused learning surface：日期、阶段、Planner、路线筛选、两项 Summary、今日学习任务及添加入口；无学习任务时按学习内容判断 empty。JD / Market / Skill 为 Planner 后台信号，不在 Today 展示。
+- Routes 保留 SkillService；CLI 保留 add-jd / add-jd-summary / jd-trends。相关回归 `tests/test_today_simplification.py`。
+
 ### JD / Skill / Market
 - production：`app/services/jd_service.py`、`jd_summary_service.py`、`market_signal.py`、
   `skill_service.py`

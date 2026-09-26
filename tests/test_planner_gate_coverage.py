@@ -1,4 +1,4 @@
-"""“今日新知识为空 / 重新规划无效” 根因修复测试 + 近14/30天按钮样式测试。
+"""每日规划 hard gate 回归测试。
 
 根因：当前 phase 的剩余主题全部被前置门禁阻塞（前置技能只有 done 任务、
 从无验收证据）。修复：前置“材料已覆盖”（linked_topics 全部有 done 任务）
@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QLabel, QPushButton
 
 from app.ai.interface import AIServiceError
 from app.ai.planner_context import PlanningContext
@@ -21,14 +19,11 @@ from app.database.study_plan_repository import (
     PlannerDecisionRepository,
     StudyPlanRepository,
 )
-from app.services.date_service import DateService
 from app.services.daily_planner_service import DailyPlannerService
 from app.services.jd_summary_service import JdSummaryService
 from app.services.market_signal import MarketSignal
 from app.services.skill_service import SkillService
 from app.services.study_plan_service import StudyPlanService
-from app.services.task_service import TaskService
-from app.ui.main_window import MainWindow
 from app.utils.date_utils import add_days
 
 TODAY = "2026-09-14"
@@ -199,51 +194,3 @@ class TestGateCoverage:
         assert any(c["name"] == "Post" for c in cands)
         res = env["sps"].generate_daily_tasks(TODAY)
         assert len(res["generated"]) == 1
-
-
-# ================= 13~15：按钮样式 =================
-
-def _window(qtbot, env):
-    w = MainWindow(
-        task_service=TaskService(env["repo"]),
-        date_service=DateService(env["repo"], study_plan_service=env["sps"]),
-        today_provider=lambda: TODAY,
-        study_plan_service=env["sps"],
-        skill_service=env["ss"],
-        jd_summary_service=env["js"],
-        assessment_repo=env["arepo"],
-    )
-    qtbot.addWidget(w)
-    return w
-
-
-def _btn(w, text):
-    for b in w.list_container.findChildren(QPushButton):
-        if b.text() == text:
-            return b
-    return None
-
-
-def _btn_text_rgb(btn):
-    c = btn.palette().color(QPalette.ColorGroup.Active,
-                            QPalette.ColorRole.ButtonText)
-    return (c.red(), c.green(), c.blue())
-
-
-class TestTrendPanel30Days:
-    def test_no_14day_or_toggle_buttons(self, qtbot, conn):
-        env = _env(conn)
-        w = _window(qtbot, env)
-        assert _btn(w, "近14天") is None
-        assert _btn(w, "近30天") is None
-
-    def test_shows_30day_sample_label(self, qtbot, conn):
-        env = _env(conn)
-        env["js"].save_summary(TODAY, "Pre 6", 10)
-        w = _window(qtbot, env)
-        labels = [
-            lbl.text() for lbl in w.list_container.findChildren(QLabel)
-            if lbl.text()
-        ]
-        assert any("近30天样本" in t for t in labels)
-        assert not any("近14天" in t for t in labels)

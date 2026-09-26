@@ -1,6 +1,6 @@
 # Study-Agent — UI Inventory (Historical UI-0 snapshot)
 
-> Historical audit, not a current module inventory. S2 retired MonthlySummaryPage and removed `app/ui/summary_pages.py`; current Sidebar pages are Today / Routes / Practice / Settings.
+> Historical UI-0 audit, not a current module inventory. S2 removed Monthly; S3 removed Today career dashboard and `career_dialogs.py`. Current Sidebar pages: Today / Routes / Practice / Settings.
 
 > 基线 commit: `a36e688`
 > 审查范围: `app/ui/` 全部 20 个 Python 文件，共 **9,366 LOC**。
@@ -27,8 +27,8 @@
 |---|---|
 | 主要 class | `TodayViewState` (dataclass)、`MainWindow(QMainWindow)` |
 | 职责 | 应用外壳 + Today 页面 + 顶部导航 + 托盘 + 生命周期 + 业务编排 |
-| 依赖 service | `TaskService`、`DateService`、`TaskReviewService`、`ManualTaskService`、`StudyPlanService`、`DailyPlannerService`、`AssessmentService`、`SkillService`、`JdService`、`JdSummaryService`、`LearningRouteService`、`RoutePlanService`、`CapabilityService`、`PracticeProjectService`、`PracticeCapabilityService`、`PracticeReadinessService`、`AIConfigService`、`PromptRegistry`、`scheduler`、`ai_route_service` … |
-| 依赖 UI | `ai_worker`、`assessment_dialog`、`dialogs`、`manual_task_dialog`、`styles`、`task_widget`；延迟 import `routes_page` / `practice_page` / `ai_settings_page` / `career_dialogs` |
+| 依赖 service | `TaskService`、`DateService`、`TaskReviewService`、`ManualTaskService`、`StudyPlanService`、`DailyPlannerService`、`AssessmentService`、`SkillService`、`LearningRouteService`、`RoutePlanService`、`CapabilityService`、`PracticeProjectService`、`PracticeCapabilityService`、`PracticeReadinessService`、`AIConfigService`、`PromptRegistry`、`scheduler`、`ai_route_service` … |
+| 依赖 UI | `ai_worker`、`assessment_dialog`、`dialogs`、`manual_task_dialog`、`styles`、`task_widget`；延迟 import `routes_page` / `practice_page` / `ai_settings_page` |
 | 局部 style/QSS | `self.scroll.setStyleSheet("background: transparent;")`（第 313 行）；全局 `APP_STYLE` 注入 |
 | 是否值得拆分 | **是，最高优先级**。包含至少 A–F 六类职责（见 §main_window 审计）。Today 页面整体混在 MainWindow 内。 |
 
@@ -36,11 +36,11 @@
 
 - 构建与生命周期：`_build_ui` / `_build_tray` / `_apply_styles` / `_on_startup` / `run_app` / `closeEvent` / `_shutdown` / `_stop_ai_workers`
 - 导航：`_switch_page` / `_switch_to_routes` / `_switch_to_practice` / `_switch_to_ai_settings`
-- Today 渲染：`refresh` / `_clear_dynamic_list` / `_add_section_header` / `_add_section_hint` / `_add_task_widget` / `_add_label`
+- Today 渲染：`refresh` / `_clear_dynamic_list` / `_add_section_header` / `_add_section_hint` / `_add_task_widget`
 - Today 滚动保持：`capture_today_view_state` / `restore_today_view_state`
 - 路线筛选/统计：`_route_name_map` / `_active_learning_routes` / `_reload_route_filter` / `_selected_route_filter` / `_matches_route` / `_on_route_filter_changed` / `_update_route_stats`
 - 手动任务：`_available_topics` / `_topics_by_route` / `_on_add_learning_task` / `_confirm_remove_dialog` / `_on_remove_task`
-- 职业面板（Today 内嵌）：`_add_skill_overview` / `_add_jd_trend_panel` / `_add_jd_candidates` / `_add_curriculum_gap` / `_add_skill_gap_from_trend` / `_on_add_jd_summary` / `_on_view_history_jd` / `_on_accept_candidate` / `_on_ignore_candidate` / `_on_add_jd` / `_show_jd_detail`
+- S3：Today 的 Career / JD / Skill dashboard 已删除；Routes 仍使用 SkillService，后台 JD/Market 信号仍进入 Planner。
 - 验收编排：`_on_start_assessment` / `_ensure_task_knowledge_point` / `_on_assessment_ready` / `_on_assessment_failed` / `_open_assessment_dialog` / `_on_assessment_completed`
 - 规划状态：`_update_phase_info` / `_planning_paused` / `_planning_route_name` / `_update_planner_info` / `_on_replan`
 - 任务操作：`_on_complete` / `_on_not_done` / `_on_dialog_postpone` / `_on_dialog_no_postpone` / `_on_postpone`
@@ -120,7 +120,7 @@
 | `route_dialogs.py` | 332 | `CreateLearningRouteDialog`、`EditLearningRouteDialog`、`AddPhaseDialog`、`AddTopicDialog` | 路线/阶段/主题 CRUD | 局部红字 ×4 | 中 |
 | `route_builder_dialogs.py` | 435 | `AIRouteBuilderDialog`、`RouteDraftPreviewDialog`、`SkillPickerDialog` | AI 路线草稿生成与预览 | 局部无 `setStyleSheet`（用 `setFixedHeight`） | 中 |
 | `practice_dialogs.py` | 703 | 11 个 class（Create/Edit/Manage×3/Milestone/Output/Evidence/Revoke/Requirement） | Practice 组合管理 | 局部红字 ×4；`setFixedHeight` ×7 | **是** |
-| `career_dialogs.py` | 703 | `JdInputDialog`、`JdDetailDialog`、`ResumeMaterialDialog`、`JdCandidateAcceptDialog`、`JdSummaryInputDialog`、`JdHistoryDialog` | JD / 简历材料 / 面试准备 | 局部红字 | **是** |
+| `career_dialogs.py` | Historical UI-0 only | S3 已删除 Today-only dialogs | — | — | — |
 | `capability_dialog.py` | 300 | `CapabilityEvidenceDialog`、`ExperimentOutcomeDialog` | Capability 证据查看 / 实验成果 | 局部红字 | 中 |
 | `assessment_dialog.py` | 236 | `AssessmentDialog` | 验收问答 + 提交线程 | 局部红字 | 中 |
 | `topic_learning_dialog.py` | 224 | `TopicLearningProfileDialog` | Topic 学习活动配置（上下移排序） | 无 | 中 |

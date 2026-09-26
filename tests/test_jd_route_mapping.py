@@ -18,7 +18,6 @@ from app.services.ai_route_service import AIRouteBuilderService
 from app.services.jd_summary_service import JdSummaryService
 from app.services.learning_route_service import LearningRouteService
 from app.services.route_plan_service import RoutePlanService
-from app.ui.career_dialogs import JdCandidateAcceptDialog
 
 CANDIDATE = "后训练 / 对齐"
 
@@ -135,46 +134,3 @@ class TestAiSuggestion:
         svc = AIRouteBuilderService(client)
         sugg = svc.suggest_routes(CANDIDATE, routes)
         assert sugg.suggested_route_names == ("强化学习",)
-
-    def test_suggestion_failure_still_manual(self, qtbot):
-        from app.ai.interface import AIServiceError
-
-        routes = [{"id": 1, "name": "强化学习", "goal": "RL"}]
-        client = FakeClient(error=AIServiceError("timeout"))
-        svc = AIRouteBuilderService(client)
-        with pytest.raises(AIServiceError):
-            svc.suggest_routes(CANDIDATE, routes)
-        # Dialog 仍可正常手动选择
-        dlg = JdCandidateAcceptDialog(
-            {"canonical_name": CANDIDATE, "frequency_30d": 0.467,
-             "mention_count_30d": 7},
-            routes=routes,
-        )
-        qtbot.addWidget(dlg)
-        dlg.set_suggestion_failed()
-        dlg.route_checks[1].setChecked(True)
-        dlg._confirm()
-        assert dlg.result_route_ids == [1]
-        assert "手动选择" in dlg.suggestion_label.text()
-
-    def test_user_can_override_suggestion(self, qtbot):
-        routes = [{"id": 1, "name": "强化学习", "goal": "RL"},
-                  {"id": 2, "name": "C++", "goal": "cpp"}]
-        dlg = JdCandidateAcceptDialog(
-            {"canonical_name": CANDIDATE, "frequency_30d": 0.4},
-            routes=routes,
-        )
-        qtbot.addWidget(dlg)
-        dlg.apply_ai_suggestion(["强化学习"], "AI建议")
-        assert dlg.route_checks[1].isChecked() is True
-        # 用户取消建议，改选 C++
-        dlg.route_checks[1].setChecked(False)
-        dlg.route_checks[2].setChecked(True)
-        dlg._confirm()
-        assert dlg.result_route_ids == [2]
-
-    def test_no_routes_keeps_dialog_usable(self, qtbot):
-        dlg = JdCandidateAcceptDialog({"canonical_name": CANDIDATE}, routes=[])
-        qtbot.addWidget(dlg)
-        dlg._confirm()
-        assert dlg.result_route_ids == []

@@ -9,7 +9,6 @@
     Phase context
     Planner context
     今日学习
-    Career Signals（由 MainWindow 追加）
 """
 
 from __future__ import annotations

@@ -36,7 +36,7 @@
 
 | # | 截图 | 页面/入口 | 备注 |
 |---|---|---|---|
-| 1 | Today（有任务） | 启动后默认页 | 今日学习 + 两项统计 + 技能概览 + JD 趋势 |
+| 1 | Today（有任务） | 启动后默认页 | 今日学习 + 两项统计 + 当前阶段 + Planner 状态 |
 | 2 | Routes overview | 导航「学习路线」 | 含分组卡片 + 子路线卡片 + 归档开关 |
 | 3 | Route detail | 路线卡片「查看路线」 | 进度/Mastery/Capability/Phase/Topic/Skill/Gap/Project |
 | 4 | Practice overview | 导航「实践项目」 | 项目卡片列表 + 状态筛选 |
@@ -52,7 +52,6 @@
 | # | 截图 | 入口 |
 |---|---|---|
 | 13 | 路线/阶段/主题新建对话框 | 新建学习路线 / 添加阶段 / 添加 Topic |
-| 14 | JD 汇总输入 & 候选接受 | Today「添加今日 JD 技术汇总」/「加入技能体系」 |
 | 15 | Capability 证据 / 实验成果 | Route detail「查看证据」/「记录实验成果」 |
 | 16 | 未完成原因 + AI 复核结果 | Today「未完成」流程 |
 | 17 | 跨日未确认任务确认框 | 启动 preflight（如可复现） |
@@ -91,7 +90,7 @@ docs/ui/screenshots/
 
 **Today**
 - 信息是否首先聚焦今日任务（Summary → Focus → Review）。
-- Career Signals 是否退居任务之后（secondary）。
+- Today 不展示 Career / JD / Skill dashboard；后台 JD/Market 仍供 Planner 使用。
 - Task Card 信息是否清晰：路线/活动/来源/复习标签、时间、优先级。
 - 按钮是否过多；完成/验收/未完成/移除层级是否清楚。
 - 长标题 / 长描述是否截断；review 与 new 是否易区分。

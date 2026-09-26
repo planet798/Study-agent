@@ -128,22 +128,3 @@ def test_today_date_still_in_page_header(make_window, fixed_today):
     w = make_window()
     assert w.date_label.text() == fixed_today
     assert w.page_header.subtitle() == fixed_today
-
-
-def test_career_section_header_when_service_present(
-    qtbot, conn, task_service, date_service, fixed_today
-):
-    """Career signals 作为 secondary section 追加在任务之后。"""
-    from PySide6.QtWidgets import QLabel
-
-    from app.ui.main_window import MainWindow
-
-    w = MainWindow(
-        task_service=task_service,
-        date_service=date_service,
-        today_provider=lambda: fixed_today,
-    )
-    qtbot.addWidget(w)
-    texts = [lbl.text() for lbl in w.list_container.findChildren(QLabel)]
-    # 无 career service 时不应凭空出现“职业信号”
-    assert "职业信号" not in texts

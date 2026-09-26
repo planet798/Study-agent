@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
-    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
@@ -48,7 +47,6 @@ from .ai_worker import (
     AIReviewWorker,
     AIRouteBuilderWorker,
     AssessmentWorker,
-    RouteSuggestionWorker,
     run_start_assessment,
 )
 from .app_shell import PAGE_SPECS_BY_KEY, AppShell, PageKey
@@ -56,7 +54,6 @@ from .components.navigation import key_value
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
-from .components.button import SAButton
 from .task_widget import TaskWidget
 from .today_page import TodayPage
 
@@ -100,8 +97,6 @@ class MainWindow(QMainWindow):
         assessment_service=None,
         assessment_repo=None,
         skill_service=None,
-        jd_service=None,
-        jd_summary_service=None,
         outcome_service=None,
         notes_service=None,
         assessment_service_factory=None,
@@ -147,9 +142,6 @@ class MainWindow(QMainWindow):
         )
         # Phase A~E 服务：可选；未传则对应职业面板隐藏（不回归旧行为）
         self.skill_service = skill_service
-        self.jd_service = jd_service
-        # 每日 JD 技术汇总服务（Step 5）：只读展示 + 保存，不接 Planner
-        self.jd_summary_service = jd_summary_service
         self.outcome_service = outcome_service
         self.notes_service = notes_service
         # Phase C：学习路线服务（可选；不传则隐藏“学习路线”页）
@@ -446,11 +438,8 @@ class MainWindow(QMainWindow):
         # 清空滚动区动态内容
         self._clear_dynamic_list()
         self._task_widgets.clear()
-        self._career_panel_added = False
 
-        # legacy 兼容：
-        # - review 单独区域；
-        # - 已移除的 extra 不再展示（历史记录保留在 DB，但不作为产品功能）。
+        # Legacy review / extra rows remain in DB but are not shown on Today.
         new_tasks = [
             t for t in tasks
             if t.task_type not in ("review", "extra")
@@ -478,8 +467,8 @@ class MainWindow(QMainWindow):
         pending_minutes = sum(int(t.estimated_minutes or 0) for t in pending)
         self.today_page.set_summary_metrics(len(pending), pending_minutes)
 
-        # 1) 今日新知识
-        self._add_section_header("今日新知识")
+        # 今日学习
+        self._add_section_header("今日学习")
         for t in new_tasks:
             self._add_task_widget(t)
         if cancelled_tasks:
@@ -488,24 +477,14 @@ class MainWindow(QMainWindow):
                 f"已移除今日任务 {len(cancelled_tasks)} 个（不计入完成率）：{names}"
             )
 
-        # Phase E：职业 / 技能 / JD 面板（secondary section，排在任务之后）
-        if (self.skill_service is not None
-                or self.jd_summary_service is not None
-                or self.jd_service is not None):
-            self._add_section_header("职业信号")
-        self._add_skill_overview()
-        self._add_jd_trend_panel()
-
         self.list_layout.addStretch()
 
         has_effective = any(
             t.task_type != "review" and t.status != STATUS_CANCELLED
             for t in tasks
         )
-        has_content = bool(self._task_widgets) or self._career_panel_added
-        scroll_visible = has_effective or self._career_panel_added
-        self.empty_hint.setVisible(not has_content)
-        self.scroll.setVisible(scroll_visible)
+        self.empty_hint.setVisible(not bool(self._task_widgets))
+        self.scroll.setVisible(has_effective)
 
         if state is not None:
             self.restore_today_view_state(state)
@@ -787,518 +766,6 @@ class MainWindow(QMainWindow):
             return
         self.refresh(preserve_scroll=True)
         self.statusBar().showMessage("已移除今日任务（不算未完成）", 4000)
-
-    # ---------- Phase E：职业面板 ----------
-
-    def _add_label(self, text: str, object_name: str = "TaskMeta",
-                   word_wrap: bool = True) -> None:
-        """往滚动区加一行文本。"""
-        lbl = QLabel(text)
-        lbl.setObjectName(object_name)
-        lbl.setWordWrap(word_wrap)
-        self.list_layout.addWidget(lbl)
-
-    # ---------- 技能概览（Phase E 简化版） ----------
-
-    # 内部状态 -> 面向用户的文案（不暴露 learning / not_started 等）
-    _STATUS_TEXT = {
-        "learning": "学习中",
-        "not_started": "待学习",
-        "mastered": "已掌握",
-        "deferred": "暂缓",
-    }
-    _TIER_RANK = {"S": 4, "A": 3, "B": 2, "C": 1}
-    _MAX_CURRENT = 5
-    _MAX_BLOCKED = 5
-    _MAX_MASTERED_NAMES = 5
-
-    def _skill_mastery_text(self, skill: dict) -> str | None:
-        """只有存在真实验收证据时才返回“AI验收 NN%”，否则 None。
-
-        只读现有 assessment evidence（knowledge_points.mastery_estimate +
-        last_assessed_at），不改变任何 mastery 计算。
-        """
-        ref = (skill.get("mastery_ref") or "").strip()
-        repo = self.assessment_repo or getattr(
-            self.skill_service, "assessment_repo", None
-        )
-        if not ref.startswith("kp:") or repo is None:
-            return None
-        try:
-            kp = repo.get_knowledge_point(int(ref[3:]))
-        except (TypeError, ValueError):
-            return None
-        if not kp or not kp.get("last_assessed_at") \
-                or kp.get("mastery_estimate") is None:
-            return None
-        pct = round(float(kp["mastery_estimate"]) * 100)
-        return f"AI验收 {pct}%"
-
-    def _skill_row(self, skill: dict, status_text: str) -> str:
-        """一行技能：名称 + tier + 面向用户状态 +（可选）掌握度。"""
-        line = (
-            f"{skill.get('name')}    {skill.get('tier') or '?'}级 · "
-            f"{status_text}"
-        )
-        m = self._skill_mastery_text(skill)
-        if m:
-            line += f" · {m}"
-        return line
-
-    def _add_skill_overview(self) -> None:
-        """技能概览：当前学习 / 待解锁 / 已掌握（替代旧的技能状态面板）。"""
-        if self.skill_service is None:
-            return
-        self._career_panel_added = True
-        try:
-            all_skills = self.skill_service.skill_repo.list_all()
-        except Exception:  # noqa: BLE001
-            self._add_section_header("技能概览")
-            self._add_label("技能服务异常", object_name="QErrorMessage")
-            return
-
-        self._add_section_header("技能概览")
-        if not all_skills:
-            self._add_label("暂无技能数据", object_name="EmptyHint")
-            return
-
-        def _by_score(items):            return sorted(
-                items,
-                key=lambda s: (-(s.get("priority_score") or 0.0), s["name"]),
-            )
-
-        # ---- 当前学习：仅 (status==learning) 或 (当前 phase active topic 关联) ----
-        # 注意：不能仅因为 priority_score 高 / gate 已放行(select_active_candidates)
-        # 就把“未来阶段”的技能塞进“当前学习”。
-        current: list[dict] = []
-        seen: set[str] = set()
-
-        def _push(skill):
-            if not skill or skill["name"] in seen:
-                return
-            # 当前学习只包含可学习的技能（排除已掌握 / 前置未满足）
-            try:
-                if self.skill_service.effective_status(skill) not in (
-                    "learning", "not_started"
-                ):
-                    return
-            except Exception:  # noqa: BLE001
-                pass
-            seen.add(skill["name"])
-            current.append(skill)
-
-        # 1) 真正在学习的技能
-        for s in _by_score(all_skills):
-            if s.get("status") == "learning":
-                _push(s)
-        # 2) 与当前 phase 的 active study_topic 明确关联的技能
-        if self.study_plan_service is not None:
-            try:
-                phase = self.study_plan_service.get_current_phase(self.current_date)
-            except Exception:  # noqa: BLE001
-                phase = None
-            if phase is not None:
-                names: set[str] = set()
-                for topic in phase.topics:
-                    try:
-                        names.update(self.skill_service.skills_for_topic(topic.id) or [])
-                    except Exception:  # noqa: BLE001
-                        pass
-                for s in _by_score(all_skills):
-                    if s["name"] in names:
-                        _push(s)
-        current = current[: self._MAX_CURRENT]
-
-        # ---- 待解锁：前置未满足的技能（S/A 优先，再按 priority） ----
-        blocked: list[tuple[dict, list[str]]] = []
-        for s in all_skills:
-            if s["name"] in seen:
-                continue
-            try:
-                if not self.skill_service.is_blocked(s):
-                    continue
-                missing = self.skill_service.missing_prerequisites(s)
-            except Exception:  # noqa: BLE001
-                continue
-            blocked.append((s, missing))
-        blocked.sort(key=lambda p: (
-            -self._TIER_RANK.get(p[0].get("tier"), 0),
-            -(p[0].get("priority_score") or 0.0),
-            p[0]["name"],
-        ))
-        blocked = blocked[: self._MAX_BLOCKED]
-
-        # ---- 已掌握：摘要 ----
-        mastered = [s["name"] for s in all_skills if s.get("status") == "mastered"]
-
-        # 只在确实展示了掌握度时，才写一次来源说明
-        if any(self._skill_mastery_text(s) for s in current):
-            self._add_label(
-                "掌握度来自客观验收的 AI 估计。", object_name="TaskMeta"
-            )
-
-        # 1) 当前学习
-        self._add_label("当前学习", object_name="TaskTitle")
-        if current:
-            for s in current:
-                self._add_label(
-                    self._skill_row(
-                        s, self._STATUS_TEXT.get(s.get("status"), "待学习")
-                    )
-                )
-        else:
-            self._add_label("当前暂无正在学习的技能", object_name="EmptyHint")
-
-        # 2) 待解锁
-        self._add_label("待解锁", object_name="TaskTitle")
-        if blocked:
-            for s, missing in blocked:
-                miss = "、".join(missing) if missing else "-"
-                self._add_label(f"{s.get('name')}    缺：{miss}")
-        else:
-            self._add_label("当前无前置阻塞", object_name="EmptyHint")
-
-        # 3) 已掌握（摘要，不逐条展开）
-        self._add_label("已掌握", object_name="TaskTitle")
-        if mastered:
-            head = mastered[: self._MAX_MASTERED_NAMES]
-            names = " / ".join(head)
-            if len(mastered) > self._MAX_MASTERED_NAMES:
-                names += " / …"
-            self._add_label(f"已掌握 {len(mastered)} 项：{names}")
-        else:
-            self._add_label("暂无已掌握技能记录", object_name="EmptyHint")
-
-    def _add_jd_trend_panel(self) -> None:
-        """近期 JD 技术趋势（统一近30天）：只展示 Service 结果，不算频率、不接 Planner。
-
-        展示：已匹配技能频率 + JD 新技能候选（可加入/忽略） + 课程缺口。
-        """
-        if self.jd_summary_service is None and self.jd_service is None:
-            return
-        self._career_panel_added = True
-        self._add_section_header("近期 JD 技术趋势")
-
-        trend = None
-        error = None
-        candidates: list[dict] = []
-        if self.jd_summary_service is not None:
-            try:
-                trend = self.jd_summary_service.compute_skill_trends(
-                    self.current_date, 30, "internship"
-                )
-                candidates = self.jd_summary_service.refresh_candidates(
-                    self.current_date, 30, "internship"
-                )
-            except Exception:  # noqa: BLE001 - 趋势异常不崩溃
-                error = "JD 趋势服务异常"
-
-        if error is not None:
-            self._add_label(error, object_name="QErrorMessage")
-        elif trend is None or (
-            not trend["skills"] and not candidates
-        ):
-            self._add_label("暂无近期 JD 技术汇总", object_name="EmptyHint")
-        else:
-            self._add_label(f"近30天样本：{trend['sample_count']} 个实习岗位")
-            self._add_label(
-                "以下趋势基于你最近收集的目标岗位样本。",
-                object_name="TaskMeta",
-            )
-            for r in trend["skills"][:8]:
-                self._add_label(
-                    f"{r['name']}    {r['frequency'] * 100:.1f}%"
-                )
-            self._add_jd_candidates(candidates)
-            self._add_skill_gap_from_trend(trend)
-            self._add_curriculum_gap()
-            self._add_label(
-                "频率 = 近30天汇总中提到该技能的岗位数 / 总样本岗位数。",
-                object_name="TaskMeta",
-            )
-
-        btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(0, 0, 0, 0)
-        if self.jd_summary_service is not None:
-            add_btn = SAButton("添加今日 JD 技术汇总", variant="secondary", size="small")
-            add_btn.clicked.connect(self._on_add_jd_summary)
-            btn_row.addWidget(add_btn)
-        if self.jd_service is not None:
-            hist_btn = SAButton("查看历史 JD", variant="secondary", size="small")
-            hist_btn.clicked.connect(self._on_view_history_jd)
-            btn_row.addWidget(hist_btn)
-        btn_row.addStretch()
-        btn_w = QWidget()
-        btn_w.setLayout(btn_row)
-        self.list_layout.addWidget(btn_w)
-
-    def _add_jd_candidates(self, candidates: list[dict]) -> None:
-        """JD 新技能候选：高频但当前无等价正式技能，用户可加入/忽略。"""
-        if not candidates:
-            return
-        self._add_label("JD 新技能候选", object_name="TaskTitle")
-        self._add_label(
-            "这些技术在近30天 JD 中高频出现，但尚无等价正式技能；"
-            "确认后才会加入技能体系。",
-            object_name="TaskMeta",
-        )
-        for c in candidates[:6]:
-            row_w = QWidget()
-            row = QHBoxLayout(row_w)
-            row.setContentsMargins(0, 0, 0, 0)
-            info = QLabel(
-                f"{c['canonical_name']}    {c['mention_count_30d']} 次 · "
-                f"近30天 {c['frequency_30d'] * 100:.0f}%"
-            )
-            info.setObjectName("TaskMeta")
-            add_btn = SAButton("加入技能体系", variant="secondary", size="small")
-            add_btn.clicked.connect(
-                lambda _=False, cid=c["id"]: self._on_accept_candidate(cid)
-            )
-            ign_btn = SAButton("忽略", variant="secondary", size="small")
-            ign_btn.clicked.connect(
-                lambda _=False, cid=c["id"]: self._on_ignore_candidate(cid)
-            )
-            row.addWidget(info, 1)
-            row.addWidget(add_btn)
-            row.addWidget(ign_btn)
-            self.list_layout.addWidget(row_w)
-
-    def _add_curriculum_gap(self) -> None:
-        """课程缺口：正式技能近30天高频但当前无正式学习主题。只读展示。"""
-        if self.skill_service is None:
-            return
-        try:
-            gaps = self.skill_service.curriculum_gap_skills()
-        except Exception:  # noqa: BLE001
-            return
-        if not gaps:
-            return
-        self._add_label("课程缺口", object_name="TaskTitle")
-        for g in gaps[:6]:
-            self._add_label(
-                f"{g['skill']}    近30天需求 {g['frequency_30d'] * 100:.0f}%"
-                "    暂无正式学习主题",
-                object_name="TaskMeta",
-            )
-
-    def _add_skill_gap_from_trend(self, trend: dict) -> None:
-        """只读展示“高频但未掌握 / 前置未满足”，gate 全部来自 SkillService。"""
-        if self.skill_service is None:
-            return
-        try:
-            by_name = {s["name"]: s for s in self.skill_service.skill_repo.list_all()}
-        except Exception:  # noqa: BLE001
-            return
-        gaps: list[str] = []
-        blocked: list[tuple[str, list[str]]] = []
-        for r in trend.get("skills") or []:
-            skill = by_name.get(r["name"])
-            if skill is None:
-                continue
-            try:
-                if self.skill_service.is_blocked(skill):
-                    blocked.append((
-                        r["name"],
-                        self.skill_service.missing_prerequisites(skill),
-                    ))
-                elif skill.get("status") != "mastered":
-                    gaps.append(r["name"])
-            except Exception:  # noqa: BLE001
-                continue
-        if gaps:
-            self._add_label("当前主要技能缺口", object_name="TaskTitle")
-            for name in gaps[:5]:
-                self._add_label(f"{name}    高频 · 尚未掌握")
-        if blocked:
-            self._add_label("暂不提前", object_name="TaskTitle")
-            for name, missing in blocked[:5]:
-                self._add_label(f"{name}    缺：{'、'.join(missing)}")
-
-    def _on_add_jd_summary(self) -> None:
-        """添加今日 JD 技术汇总：只保存 + 刷新 UI；不重规划、不改 active task。"""
-        if self.jd_summary_service is None:
-            return
-        from .career_dialogs import JdSummaryInputDialog
-
-        dlg = JdSummaryInputDialog(
-            self.jd_summary_service, self.current_date, parent=self
-        )
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.saved:
-            saved = dlg.saved
-            # Step 6：市场信号变化 → 重算技能优先级（不重写当前 active task）
-            if self.skill_service is not None:
-                try:
-                    market = self.skill_service.refresh_market(
-                        saved["summary_date"]
-                    )
-                    self.skill_service.recompute_all_priority_scores(
-                        saved["summary_date"]
-                    )
-                    if not market or market.get("source") != "daily_summary":
-                        pass
-                except Exception:  # noqa: BLE001 - 重算失败不影响保存
-                    pass
-            self.statusBar().showMessage(
-                f"{saved['summary_date']} JD 技术汇总已保存，共 "
-                f"{saved['sample_count']} 个岗位样本。"
-                "近期岗位需求已更新，将影响后续学习规划。",
-                6000,
-            )
-            self.refresh(preserve_scroll=True)
-
-    def _on_view_history_jd(self) -> None:
-        if self.jd_service is None:
-            return
-        from .career_dialogs import JdHistoryDialog
-
-        JdHistoryDialog(self.jd_service, parent=self).exec()
-
-    def _on_accept_candidate(self, candidate_id: int) -> None:
-        """用户确认把 JD 新技能候选加入正式技能体系（不自作主张）。"""
-        if self.jd_summary_service is None:
-            return
-        cand = None
-        try:
-            for c in self.jd_summary_service.list_candidates():
-                if c["id"] == candidate_id:
-                    cand = c
-                    break
-        except Exception:  # noqa: BLE001
-            cand = None
-        if cand is None:
-            return
-        from .career_dialogs import JdCandidateAcceptDialog
-
-        existing_names = []
-        if self.skill_service is not None:
-            try:
-                existing_names = [
-                    s["name"] for s in self.skill_service.skill_repo.list_all()
-                ]
-            except Exception:  # noqa: BLE001
-                existing_names = []
-        routes = []
-        if self.route_service is not None:
-            try:
-                routes = [
-                    {"id": r.id, "name": r.name, "goal": r.goal or ""}
-                    for r in self.route_service.route_repo.list_learning_routes()
-                    if not r.is_archived
-                ]
-            except Exception:  # noqa: BLE001
-                routes = []
-        # 确定性优先：若同名技能已存在，直接显示已有关联
-        existing_route_ids: list[int] = []
-        suggested_name = (cand.get("suggested_name")
-                          or cand.get("canonical_name") or "").strip()
-        if suggested_name and self.skill_service is not None:
-            try:
-                s = self.skill_service.skill_repo.get_by_name(suggested_name)
-                if s is not None and self.route_service is not None:
-                    existing_route_ids = self.route_service.route_repo \
-                        .list_route_ids_for_skill(s["id"])
-            except Exception:  # noqa: BLE001
-                existing_route_ids = []
-        dlg = JdCandidateAcceptDialog(
-            cand, existing_names=existing_names, parent=self,
-            routes=routes, existing_route_ids=existing_route_ids,
-        )
-        # AI 建议：仅在无确定关联且 AI 可用时；失败不影响手动选择
-        self._suggestion_worker = None
-        if (not existing_route_ids and routes
-                and self.ai_route_service is not None
-                and self.ai_route_service.is_configured()):
-            worker = RouteSuggestionWorker(
-                self.ai_route_service, suggested_name, routes, parent=self
-            )
-            worker.succeeded.connect(
-                lambda sugg, d=dlg: d.apply_ai_suggestion(
-                    sugg.suggested_route_names, sugg.reason
-                )
-            )
-            worker.failed.connect(
-                lambda _msg, d=dlg: d.set_suggestion_failed()
-            )
-            self._suggestion_worker = worker
-            worker.start()
-        elif routes:
-            dlg.set_suggestion_failed()
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        try:
-            result = self.jd_summary_service.accept_candidate(
-                candidate_id,
-                name=dlg.result_name,
-                tier=dlg.result_tier,
-                linked_skill=dlg.result_linked_skill,
-                route_ids=dlg.result_route_ids,
-            )
-        except Exception as e:  # noqa: BLE001 - 不崩溃
-            self.statusBar().showMessage(f"加入技能失败：{e}", 5000)
-            return
-        skill = (result or {}).get("skill") or {}
-        if self.skill_service is not None:
-            try:
-                self.skill_service.sync_skill_topic_links()
-                self.skill_service.refresh_market(self.current_date)
-                self.skill_service.recompute_all_priority_scores(
-                    self.current_date
-                )
-            except Exception:  # noqa: BLE001
-                pass
-            gaps = []
-            try:
-                gaps = [
-                    g["skill"]
-                    for g in self.skill_service.curriculum_gap_skills()
-                ]
-            except Exception:  # noqa: BLE001
-                gaps = []
-        else:
-            gaps = []
-        name = skill.get("name", dlg.result_name)
-        if name in gaps:
-            self.statusBar().showMessage(
-                f"已加入技能「{name}」，但暂无正式课程（已标记为课程缺口）。",
-                6000,
-            )
-        else:
-            self.statusBar().showMessage(f"已加入技能「{name}」。", 5000)
-        self.refresh(preserve_scroll=True)
-
-    def _on_ignore_candidate(self, candidate_id: int) -> None:
-        if self.jd_summary_service is None:
-            return
-        try:
-            self.jd_summary_service.ignore_candidate(candidate_id)
-        except Exception:  # noqa: BLE001
-            return
-        self.statusBar().showMessage("已忽略该 JD 新技能候选。", 3000)
-        self.refresh(preserve_scroll=True)
-
-    def _add_jd_panel(self) -> None:
-        """兼容保留：旧“最新 JD / 岗位需求”面板（已由 _add_jd_trend_panel 取代）。"""
-        self._add_jd_trend_panel()
-
-    # ---------- 职业面板处理器 ----------
-
-    def _on_add_jd(self) -> None:
-        from .career_dialogs import JdInputDialog
-
-        dlg = JdInputDialog(self.jd_service, parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self.statusBar().showMessage(
-                "JD 已保存，技能优先级已更新（只影响近期优先级）", 6000
-            )
-            if self.jd_service is not None:
-                self.skill_service.recompute_all_priority_scores()
-                self.refresh(preserve_scroll=True)
-
-    def _show_jd_detail(self, jd: dict) -> None:
-        from .career_dialogs import JdDetailDialog
-
-        JdDetailDialog(self.jd_service, jd, parent=self).exec()
 
     # ---------- 验收流程 ----------
 

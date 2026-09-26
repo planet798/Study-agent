@@ -1591,8 +1591,6 @@ def main() -> int:
         assessment_service=assessment_service,
         assessment_repo=assessment_repo,
         skill_service=skill_service,
-        jd_service=jd_service,
-        jd_summary_service=jd_summary_service,
         outcome_service=outcome_service,
         notes_service=notes_service,
         manual_task_service=manual_task_service,

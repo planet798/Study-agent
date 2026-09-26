@@ -192,25 +192,3 @@ class AIRouteBuilderWorker(QThread):
             self.succeeded.emit(draft)
         except Exception as e:  # noqa: BLE001
             self.failed.emit(str(e))
-
-
-class RouteSuggestionWorker(QThread):
-    """后台为 JD 候选技能建议关联路线（Phase F，纯数据，无 DB）。"""
-
-    succeeded = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, service, candidate_name: str, routes: list,
-                 parent=None):
-        super().__init__(parent)
-        self._service = service
-        self._candidate_name = candidate_name
-        self._routes = list(routes or [])
-
-    def run(self) -> None:  # noqa: D102
-        try:
-            self.succeeded.emit(
-                self._service.suggest_routes(self._candidate_name, self._routes)
-            )
-        except Exception as e:  # noqa: BLE001
-            self.failed.emit(str(e))

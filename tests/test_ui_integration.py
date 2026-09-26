@@ -114,7 +114,7 @@ class TestSections:
             assessment_repo=assessment_repo,
         )
 
-        assert _find_label(w, "今日新知识")
+        assert _find_label(w, "今日学习")
         assert not _find_label(w, "今日复习")
         assert not _find_label(w, "额外学习")
         assert not _find_label(w, "课外探索")

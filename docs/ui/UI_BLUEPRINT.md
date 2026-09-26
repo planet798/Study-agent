@@ -105,14 +105,14 @@ Today(0) → Routes(可选) → Practice(可选) → Settings。
 
 ### 3) Today 页面是否混在 MainWindow
 **完全混在内部**。Today 的标题、日期、区块标题、添加任务行、路线筛选、路线统计、
-阶段信息、AI 规划状态、`QScrollArea` + 动态列表、空状态、技能概览、JD 趋势面板，
-全部在 `_build_ui` 与 `refresh` 系列方法里，直接操作 `self.*`。没有 `TodayPage` 类。
+阶段信息、AI 规划状态、`QScrollArea` + 动态列表、空状态，
+全部在 `_build_ui` 与 `refresh` 系列方法里，直接操作 `self.*`。现已提取 `TodayPage` View。
 
 ### 4) 不应长期留在 MainWindow 的职责
-- Today 页面全部渲染（标题/列表/空状态/职业面板）
+- Today 页面全部渲染（标题/列表/空状态）
 - 路线筛选与统计
 - 手动任务对话框编排
-- 技能 / JD 面板渲染与候选处理
+- （S3 已移除）Today 技能 / JD 面板渲染与候选处理
 - 验收流程编排
 - 规划状态展示与 replan
 - `_switch_*` 导航
@@ -124,18 +124,18 @@ Today(0) → Routes(可选) → Practice(可选) → Settings。
 3. `_update_phase_info` / `_update_planner_info`
 4. `_reload_route_filter` / `_selected_route_filter` / `_route_name_map`
 5. `_clear_dynamic_list()`（销毁所有动态 widget，包含 stretch）
-6. 按 status/type/route 过滤，重建「今日学习 / 职业面板」；历史 review task 不展示、不计数
+6. 按 status/type/route 过滤，重建「今日学习」；历史 review task 不展示、不计数
 7. 重新 `addStretch`
 8. 计算 `empty_hint` / `scroll` 可见性
 9. `restore_today_view_state()`：先 `clearFocus()`，再在
    `0/16/60/160/400/800 ms` 多次尝试恢复（clamp 到 maximum）
 
-**必须保持行为不变**：过滤语义、cancelled 不进完成率分母、review 独立区块、
+**必须保持行为不变**：过滤语义、cancelled 不进完成率分母、
 `addStretch` 顺序、scroll 的 6 次延迟恢复。
 
 ### 6) statusBar 使用
 作为轻量 toast：`showMessage(msg, timeout)`。共约 20 处，覆盖添加任务、移除、延期、
-replan、验收、JD、设置等反馈。UI-5 可替换为统一 `SAToast`，但消息文案与时限语义不变。
+replan、验收、设置等反馈。UI-5 可替换为统一 `SAToast`，但消息文案与时限语义不变。
 
 ### 7) page switching
 Today 使用 `_switch_to_today()`；Routes / Practice 可选，Settings 始终可用。
@@ -161,7 +161,7 @@ Sidebar 化时必须保留“不可用则提示且不切换”“切换前 refre
 | 代号 | 职责 | 现状位置 | 未来归属 |
 |---|---|---|---|
 | **A** | App Shell | `_build_ui`(外壳)、`_build_tray`、`_apply_styles`、`run_app`、`closeEvent`、`_shutdown`、`_stop_ai_workers` | `MainWindow` / `AppShell` |
-| **B** | Today Page | `_build_ui`(today 部分)、`refresh`、`_clear_dynamic_list`、`_add_section_*`、`_add_task_widget`、`_add_label`、`_add_skill_overview`、`_add_jd_*`、`_update_phase_info` | `TodayPage`（新建） |
+| **B** | Today Page | `_build_ui`(today 部分)、`refresh`、`_clear_dynamic_list`、`_add_section_*`、`_add_task_widget`、`_update_phase_info` | `TodayPage`（新建） |
 | **C** | Navigation | 5 个 nav 按钮、`_switch_page`、`_switch_to_*` | `NavigationSidebar` + `NavigationController` |
 | **D** | State / refresh | `current_date`、`_today_tasks`、`_task_widgets`、`_route_names`、`_route_filter_loading`、`TodayViewState`、`capture/restore_today_view_state`、`_reload_route_filter`、`_update_route_stats` | `TodayViewModel` / `TodayState`（纯状态，可测） |
 | **E** | Dialog orchestration | 所有 `dlg = ...; dlg.exec()`、worker 创建/释放、`_on_*` 处理器 | `TodayController` / `RouteController` / `PracticeController` |
@@ -201,22 +201,11 @@ Small contextual info
 - `⋯` 为 `SAIconButton`（溢出菜单：移除今日任务 / 验收等）。
 - 主操作（开始学习 / 完成）使用主按钮；次级与危险操作降级。
 
-### 3.3 当前审计
-- **Current Purpose**：今天待执行任务（新知识 + 复习）+ 职业面板。
-- **Current Layout**：标题/日期 → 区块标题 → 添加行(路线筛选) → 统计 → 阶段 → AI 规划状态 → 滚动卡片列表 → 空状态；列表内还会追加技能概览与 JD 趋势面板。
-- **Primary User Action**：完成 / 开始学习。
-- **Secondary Actions**：未完成（填原因）、延期、移除、开始验收、添加任务、重新规划、路线筛选。
-- **Displayed Information**：任务标题/分类/优先级/来源/路线/活动/描述/预计时间/原因/延期警告；统计；阶段；技能三态；JD 趋势/候选/缺口。
-- **Problems**：
-  1. Today 与“职业情报面板（技能/JD/课程缺口）”混在一起，与“今天做什么”不相关。
-  2. 页面无 Header 层级，`AppTitle` + `SectionTitle` 语义混乱。
-  3. 7 种过滤/排序维度挤在一屏。
-  4. 添加任务按钮与路线筛选同排，主次不清。
-- **Information Hierarchy Problems**：任务卡信息未分层（meta/tag/desc/action 同权重）；日期与标题无主次；统计只有完成率。
-- **Visual Problems**：标签全部 `ReviewTag` 同色；卡片无 hover；按钮数量多且都是方框。
-- **Interaction Problems**：完成/未完成立即重建整页（会闪）；无 loading；无 toast 统一层；溢出操作未收纳。
-- **Candidate Components**：`SAPageHeader`、`SAStatCard`、`SATag`、`SACard`、`SAIconButton`、`SAButton`、`SAEmptyState`、`SAInfoBanner`。
-- **Must NOT Change Semantically**：过滤规则、cancelled 不计入分母、review 独立区块、完成≠掌握、移除≠删除、延期计数、scroll 恢复。
+### 3.3 S3 当前产品语义
+- Today = execution-focused learning surface：日期、待处理/预计时长、路线筛选、阶段目标、Planner 状态/重新规划、今日学习任务、手动添加与学习空状态。
+- JD / Skill / Market 仅为 Planner 后台信号，不在 Today 渲染 Career dashboard。
+- 任务保留原有状态与动作语义：cancelled 不计入完成率、完成≠掌握、移除≠删除、延期计数与滚动位置恢复。
+- 复习与 Monthly 页面均已退役；historical schema/rows 不因 UI 减法删除。
 
 ---
 
@@ -574,7 +563,7 @@ UI-5  States / Micro-interactions / DPI / Accessibility / Polish  ← done (UI5_
 ## 18. Issue List（阻塞与优先级）
 
 ### P0 — 会阻塞 UI 重构
-1. **MainWindow 单体 1,856 LOC**：Today 页面、导航、业务编排、职业面板全糅在一起，不做结构性拆分无法安全引入 App Shell / Sidebar。
+1. **历史 UI-0 审计**：当时 MainWindow 含 Career 面板；S3 已移除，TodayPage/AppShell 已独立。
 2. **无 token / 无主题层**：QSS 全是 magic hex，无法实现 Light/Dark；必须先在 UI-1 建 token，否则所有页面改造都会再次硬编码。
 3. **`objectName` 是唯一样式契约，且被 31 个测试文件依赖**：样式与结构重构前必须确定兼容策略，否则 UI 改动会大面积破坏测试。
 4. **`apply_secondary_button_text` 散布 31 个调用点**：不改会造成主题切换时颜色不同步；必须在 UI-1 收敛进 `SAButton`。
@@ -585,7 +574,7 @@ UI-5  States / Micro-interactions / DPI / Accessibility / Polish  ← done (UI5_
 7. 状态体系缺失：无统一 loading / empty / error / disabled / success 组件。
 8. 错误色 18 处内联 + `QErrorMessage` 误用 → 统一 `SAInfoBanner`/error text 组件。
 9. 原生控件（ComboBox/Tab/List/Tree/Splitter/ScrollBar）未样式化，视觉不统一。
-10. Today 页面信息架构：职业面板与“今天做什么”混排，需重排 hierarchy。
+10. （S3 已完成）Today 页面仅呈现学习执行内容，JD / Skill / Market 留作 Planner 信号。
 11. Routes/Practice 详情 dialog 单方法堆叠 7–10 个 section，需组件化。
 12. Mastery / Capability / Readiness / Milestone / Output / Evidence 视觉未分离，存在被用户误解为同一进度的风险。
 

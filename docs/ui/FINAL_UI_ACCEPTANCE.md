@@ -14,7 +14,7 @@
 - Page Header 显示页面标题与副标题。
 
 ## B. Today
-- Summary（待处理/预计时长）；今日学习；Career Signals 退居其后。
+- Summary（待处理/预计时长）；当前阶段与 Planner 状态；今日学习任务、手动添加与学习空状态。JD/Skill/Market 仅作为 Planner 后台信号，不在 Today 展示。
 - 任务卡标签（路线/活动/来源）、操作层级、Done≠Mastery、延期 ≥3 警告。
 - Empty：「今天还没有学习任务」+ 添加。
 
