@@ -20,7 +20,6 @@ from PySide6.QtGui import QCloseEvent
 from app.database.assessment_repository import AssessmentRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
-from app.services.review_service import ReviewService
 from app.services.study_plan_service import StudyPlanService
 from app.ui.assessment_dialog import AssessmentDialog
 from app.ui.main_window import MainWindow
@@ -101,49 +100,35 @@ class TestSections:
         self, qtbot, repo, task_service, date_service, conn
     ):
         assessment_repo = AssessmentRepository(conn)
-        review_scheduler = ReviewService(repo, assessment_repo)
 
-        # 造两类任务：新知识（无 kp）、复习（kp）
+        # 历史 Review row 保留在 DB，但 Today 只显示正常学习任务。
         new_t = task_service.create_task("新知识任务", scheduled_date=TODAY)
         kp = assessment_repo.create_knowledge_point("pytorch.autograd")
         review_t = repo.create(
-            title="复习 pytorch.autograd", scheduled_date=TODAY,
+            title="历史复习 pytorch.autograd", scheduled_date=TODAY,
             source="review", task_type="review", knowledge_point_id=kp["id"],
         )
 
         w = _build_window(
             qtbot, repo, task_service, date_service,
-            review_scheduler=review_scheduler,
             assessment_repo=assessment_repo,
         )
 
-        # 只保留“今日新知识 / 今日复习”两个区域
         assert _find_label(w, "今日新知识")
-        assert _find_label(w, "今日复习")
+        assert not _find_label(w, "今日复习")
         assert not _find_label(w, "额外学习")
         assert not _find_label(w, "课外探索")
 
         ids = {wd.task().id for wd in w._task_widgets}
-        assert {new_t.id, review_t.id} <= ids
-
-        for wd in w._task_widgets:
-            if wd.task().id == review_t.id:
-                assert hasattr(wd, "assessment_btn")
-            elif wd.task().id == new_t.id:
-                assert not hasattr(wd, "assessment_btn")
+        assert ids == {new_t.id}
+        assert conn.execute("SELECT id FROM tasks WHERE id = ?", (review_t.id,)).fetchone() is not None
 
 
 class TestEmptyStates:
-    def test_no_review_shows_hint(self, qtbot, repo, task_service, date_service,
-                                  conn):
-        assessment_repo = AssessmentRepository(conn)
-        review_scheduler = ReviewService(repo, assessment_repo)
+    def test_no_review_section_when_no_review_tasks(self, qtbot, repo, task_service, date_service):
         task_service.create_task("只有新知识", scheduled_date=TODAY)
-        w = _build_window(
-            qtbot, repo, task_service, date_service,
-            review_scheduler=review_scheduler,
-        )
-        assert _find_label(w, "暂无可复习内容")
+        w = _build_window(qtbot, repo, task_service, date_service)
+        assert not _find_label(w, "今日复习")
 
     def test_no_tasks_global_empty(self, qtbot, repo, task_service, date_service):
         w = _build_window(qtbot, repo, task_service, date_service)
@@ -159,13 +144,11 @@ class TestAssessmentEntry:
         kp = assessment_repo.create_knowledge_point("pytorch.autograd")
         assessment_repo.update_knowledge_point(kp["id"], last_assessed_at="2026-09-05T10:00:00", mastery_estimate=0.4, review_count=1)
         t = repo.create(
-            title="复习 pytorch.autograd", scheduled_date=TODAY,
-            source="review", task_type="review", knowledge_point_id=kp["id"],
+            title="学习 pytorch.autograd", scheduled_date=TODAY,
+            source="manual", task_type="new", knowledge_point_id=kp["id"],
         )
-        review_scheduler = ReviewService(repo, assessment_repo)
         assessment_service = AssessmentService(
             FakeQuestionAI(), assessment_repo=assessment_repo,
-            review_service=review_scheduler,
         )
         w = _build_window(
             qtbot, repo, task_service, date_service,
@@ -312,7 +295,6 @@ class TestTrayNoRegression:
         assessment_repo = AssessmentRepository(conn)
         w = _build_window(
             qtbot, repo, task_service, date_service,
-            review_scheduler=ReviewService(repo, assessment_repo),
         )
         from tests.test_main_window_exit import _TrayStub
 
@@ -329,7 +311,6 @@ class TestTrayNoRegression:
         assessment_repo = AssessmentRepository(conn)
         w = _build_window(
             qtbot, repo, task_service, date_service,
-            review_scheduler=ReviewService(repo, assessment_repo),
         )
         w.quit_app()
         assert w._quit_requested is True

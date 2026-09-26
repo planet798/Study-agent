@@ -66,8 +66,6 @@ class KnowledgeEvidence:
     mastery_estimate: float | None = None
     weak_points: tuple[str, ...] = ()
     last_assessed_at: str | None = None
-    review_count: int = 0
-    next_review_date: str | None = None
     recent_result_level: str | None = None
 
 
@@ -222,8 +220,6 @@ class PlanningContext:
                     "mastery_estimate": e.mastery_estimate,
                     "weak_points": list(e.weak_points),
                     "last_assessed_at": e.last_assessed_at,
-                    "review_count": e.review_count,
-                    "next_review_date": e.next_review_date,
                     "recent_result_level": e.recent_result_level,
                 }
                 for e in self.knowledge_evidence

@@ -348,7 +348,6 @@ class MonthlySummaryPage(QWidget):
                 f"课程覆盖：{rs.get('covered_topics', 0)} Topic",
                 f"验收：{rs.get('assessment_evidence_count', 0)}",
                 f"掌握：{rs.get('mastered_count', 0)}",
-                f"复习：{rs.get('review_count', 0)}",
             ]
             weak = rs.get("weak_topics") or []
             if weak:

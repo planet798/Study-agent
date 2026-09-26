@@ -8,8 +8,7 @@
     Controls（路线筛选 / 添加任务）
     Phase context
     Planner context
-    Focus / 今日学习
-    Review / 今日复习
+    今日学习
     Career Signals（由 MainWindow 追加）
 """
 
@@ -57,10 +56,7 @@ class TodayPage(QWidget):
         self.minutes_card = SAStatCard(
             "预计时长", "0 分钟", icon_name=_icons.IconName.CALENDAR
         )
-        self.review_card = SAStatCard(
-            "今日复习", "0", icon_name=_icons.IconName.BOOK
-        )
-        for card in (self.pending_card, self.minutes_card, self.review_card):
+        for card in (self.pending_card, self.minutes_card):
             summary_row.addWidget(card, stretch=1)
         root.addWidget(self.summary_container)
 
@@ -144,12 +140,9 @@ class TodayPage(QWidget):
         self.planner_replan_btn.clicked.connect(self.replan_requested)
 
     # ---------- View API ----------
-    def set_summary_metrics(
-        self, pending: int, minutes: int, reviews: int
-    ) -> None:
+    def set_summary_metrics(self, pending: int, minutes: int) -> None:
         self.pending_card.set_value(str(int(pending)))
         self.minutes_card.set_value(f"{int(minutes)} 分钟")
-        self.review_card.set_value(str(int(reviews)))
 
     def set_phase_context(self, text: str, goal: str = "") -> None:
         self.phase_label.setText(text)

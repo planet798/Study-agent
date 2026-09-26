@@ -169,7 +169,7 @@ class StudyPlanService:
         self.plan_repo = plan_repo or StudyPlanRepository(repo.conn)
         # 允许测试/日后调整预算
         self.max_daily_minutes = max_daily_minutes
-        # 可选：读到知识掌握证据，用于“薄弱优先 / 高掌握与复习中不重复”（Phase 8）
+        # 可选：读到知识掌握证据，用于薄弱优先与高掌握去重（Phase 8）
         self.assessment_repo = assessment_repo
         # 可选：SkillService，用于“JD/技能优先级 + 前置门禁”（Phase C）；
         # 不注入时行为与旧版完全一致（无 jd_boost / 无 gate）
@@ -521,7 +521,7 @@ class StudyPlanService:
         1. 当天已存在的任务占用预算（延期任务优先）；
         2. 高优先级主题优先；薄弱（低掌握或有 weak_points）主题按证据提前；
         3. 已经完成过的主题不再重复生成；高掌握且最近验收良好、或有未完成复习任务
-           的主题不再重复安排（复习交给 ReviewService，不伪造 mastery）；
+           的主题不再重复安排（不伪造 mastery）；
         4. 不超过 max_daily_minutes 总预算；
         5. 若当天还没有任何任务，至少安排一个核心主题；
         6. 剩余预算装不下剩余主题时停止。

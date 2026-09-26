@@ -236,10 +236,3 @@ class TestHardBoundaries:
 
         assert a._PREVIOUS_WEIGHT == 0.7
         assert a._NEW_WEIGHT == 0.3
-
-    def test_review_interval_unchanged(self):
-        from app.services.review_service import ReviewService
-
-        assert ReviewService.next_interval(0, "good") == 3
-        assert ReviewService.next_interval(3, "good") == 6
-        assert ReviewService.next_interval(0, "poor") == 1

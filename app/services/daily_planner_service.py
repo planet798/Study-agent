@@ -451,8 +451,6 @@ class DailyPlannerService:
                     mastery_estimate=float(kp.get("mastery_estimate") or 0.0),
                     weak_points=tuple(_attempt_weak_points(attempt)),
                     last_assessed_at=kp.get("last_assessed_at"),
-                    review_count=int(kp.get("review_count") or 0),
-                    next_review_date=kp.get("next_review_date"),
                     recent_result_level=(
                         attempt.get("result_level") if attempt else None
                     ),
@@ -473,12 +471,17 @@ class DailyPlannerService:
         out: list[DaySummary] = []
         day = add_days(anchor, -week)
         for _ in range(week):
-            stats = self.repo.stats_by_date(day)
-            # cancelled 是“用户主动移除”，不进入有效任务 / 预计时间 / 完成率
+            # Legacy review rows are not current learning activity or planner signal.
             tasks = [
                 t for t in self._scoped_tasks(self.repo.list_by_date(day))
-                if t.status != STATUS_CANCELLED
+                if t.task_type != "review" and t.status != STATUS_CANCELLED
             ]
+            total = len(tasks)
+            done_count = sum(1 for t in tasks if t.status == STATUS_DONE)
+            not_done_count = sum(
+                1 for t in tasks if t.status in (STATUS_ACTIVE, STATUS_NOT_DONE)
+            )
+            rate = round(done_count / total * 100, 1) if total else 0.0
             postponed = sum(
                 1 for t in tasks if t.postpone_count > 0
             )
@@ -486,13 +489,12 @@ class DailyPlannerService:
                 t.estimated_minutes for t in tasks if t.status == STATUS_DONE
             )
             estimated = sum(t.estimated_minutes for t in tasks)
-            rate = stats["rate"]
             out.append(
                 DaySummary(
                     date=day,
-                    total_tasks=stats["total"],
-                    completed_tasks=stats["done"],
-                    not_done_tasks=stats["not_done"],
+                    total_tasks=total,
+                    completed_tasks=done_count,
+                    not_done_tasks=not_done_count,
                     postponed_tasks=postponed,
                     completion_rate=rate,
                     estimated_minutes=estimated,
@@ -514,6 +516,8 @@ class DailyPlannerService:
         completed: list[ContextTask] = []
 
         for t in tasks:
+            if t.task_type == "review":
+                continue
             if t.status == STATUS_NOT_DONE:
                 unfinished.append(self._ctx_task(t))
             elif t.status == STATUS_DONE:
@@ -821,8 +825,7 @@ class DailyPlannerService:
         # 当天被用户主动移除（cancelled）的 topic：今天 replan 不再重新生成，
         # 但次日不受影响（次日 plan_date 不同，查不到该 cancelled 记录）。
         today_cancelled_topic_ids = self._cancelled_topic_ids(plan_date)
-        # Phase 8：高掌握且最近良好 / 已有未完成复习任务 的主题不重复安排
-        # （复习交给 ReviewService；此处视为去重，不当作规划失败）
+        # Phase 8：高掌握且最近良好的主题不重复安排
         evidence_skip: set[int] = set()
         if self.assessment_repo is not None:
             from .knowledge_evidence import skip_topic_ids
@@ -866,7 +869,7 @@ class DailyPlannerService:
                 )
                 continue
             if rec.topic_id in evidence_skip:
-                # 已掌握/复习进行中：不生成正式新任务，也不判为规划失败
+                # 已掌握：不生成正式新任务，也不判为规划失败
                 continue
             if rec.topic_id in today_cancelled_topic_ids:
                 # 今天已移除过该 topic：去重，不重新安排
@@ -951,7 +954,7 @@ class DailyPlannerService:
         """某天已安排（active）主题的 topic_id 集合（用于去重）。"""
         rows = self.repo.conn.execute(
             "SELECT topic_id FROM tasks WHERE scheduled_date = ? AND status = ? "
-            "AND topic_id IS NOT NULL",
+            "AND task_type != 'review' AND topic_id IS NOT NULL",
             (date_str, STATUS_ACTIVE),
         ).fetchall()
         return {r["topic_id"] for r in rows}
@@ -963,7 +966,8 @@ class DailyPlannerService:
             tasks = [t for t in tasks if t.route_id == self._route_id()]
         return {
             t.topic_id for t in tasks
-            if t.topic_id is not None and t.status != STATUS_CANCELLED
+            if t.task_type != "review" and t.topic_id is not None
+            and t.status != STATUS_CANCELLED
         }
 
     def _cancelled_topic_ids(self, date_str: str) -> set[int]:
@@ -973,7 +977,7 @@ class DailyPlannerService:
         """
         rows = self.repo.conn.execute(
             "SELECT topic_id FROM tasks WHERE scheduled_date = ? AND status = ? "
-            "AND topic_id IS NOT NULL",
+            "AND task_type != 'review' AND topic_id IS NOT NULL",
             (date_str, STATUS_CANCELLED),
         ).fetchall()
         return {r["topic_id"] for r in rows}

@@ -90,32 +90,6 @@ class TestScrollPreservation:
         assert bar.value() <= bar.maximum()
         assert abs(bar.value() - min(before, bar.maximum())) <= 80
 
-    def test_review_complete_keeps_position(self, qtbot, make_window,
-                                            task_service, repo, conn):
-        from app.database.assessment_repository import AssessmentRepository
-
-        arepo = AssessmentRepository(conn)
-        kp = arepo.create_knowledge_point("kp")
-        task_service.create_task("复习", scheduled_date=TODAY)
-        repo.create("复习任务", scheduled_date=TODAY, source="review",
-                    task_type="review", knowledge_point_id=kp["id"])
-        _seed(task_service, n=23)
-        w = make_window()
-        qtbot.addWidget(w)
-        w.show()
-        qtbot.waitExposed(w)
-        qtbot.waitUntil(
-            lambda: w.scroll.verticalScrollBar().maximum() > 0, timeout=3000
-        )
-        before = _set_mid(w)
-        # 找到 review 卡片（在“今日复习”区，可能靠后）
-        target = next((wd for wd in w._task_widgets
-                       if wd.task().task_type == "review"), None)
-        assert target is not None
-        qtbot.mouseClick(target.complete_btn, Qt.MouseButton.LeftButton)
-        qtbot.wait(320)
-        _settle_and_assert(qtbot, w, before)
-
     def test_manual_task_mutation(self, qtbot, make_window, task_service):
         w = _prepare(qtbot, make_window, task_service)
         before = _set_mid(w)

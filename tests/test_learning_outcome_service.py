@@ -42,7 +42,6 @@ from app.services.learning_outcome_service import (
     KIND_PROJECT,
     LearningOutcomeService,
 )
-from app.services.review_service import ReviewService
 from app.services.skill_service import SkillService
 from app.services.study_plan_service import StudyPlanService
 from app.services.task_service import TaskService
@@ -138,10 +137,9 @@ class TestAssessmentOutcome:
     def _run_assessment(self, conn, lo_service, judge_ai, today="2026-09-10"):
         assessment_repo = AssessmentRepository(conn)
         kp = assessment_repo.create_knowledge_point("pytorch.autograd")
-        review_scheduler = ReviewService(TaskRepository(conn), assessment_repo)
         svc = AssessmentService(
             judge_ai, assessment_repo=assessment_repo,
-            review_service=review_scheduler, outcome_service=lo_service,
+            outcome_service=lo_service,
         )
         attempt = assessment_repo.create_attempt(
             kp["id"], '[{"question":"q","type":"concept","expected_points":1}]')

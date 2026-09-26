@@ -33,17 +33,19 @@ def _build(conn, plan_repo):
     lo_repo = LearningOutcomeRepository(conn)
     lo_service = LearningOutcomeService(lo_repo)
 
-    # 当日新知识 / 复习
-    repo.create(title="PyTorch 实现 Attention", scheduled_date=DAY,
-                description="实现 scaled dot-product attention",
-                source="generated", topic_id=1, task_type="new")
+    # 当日新知识与其真实 assessment evidence
     kp = assessment_repo.create_knowledge_point("pytorch.autograd")
+    learning_task = repo.create(title="PyTorch 实现 Attention", scheduled_date=DAY,
+                description="实现 scaled dot-product attention",
+                source="generated", topic_id=1, task_type="new",
+                knowledge_point_id=kp["id"])
     repo.create(title="复习 pytorch.autograd", scheduled_date=DAY,
                 source="review", task_type="review",
                 knowledge_point_id=kp["id"])
     # 一个失败任务的薄弱验收证据
     att = assessment_repo.create_attempt(
-        kp["id"], '[{"question":"q","type":"concept","expected_points":1}]')
+        kp["id"], '[{"question":"q","type":"concept","expected_points":1}]',
+        task_id=learning_task.id)
     assessment_repo.update_attempt(
         att["id"], judge_status="judged", result_level="poor",
         mastery_estimate=0.3, weak_points_json='["梯度清零"]')
@@ -76,7 +78,6 @@ class TestNoteGeneration:
             "# 2026-09-11 学习笔记",
             "## 今日学习目标",
             "## 今日新知识",
-            "## 今日复习",
             "## 学习成果",
             "## 薄弱点",
             "## 简历素材",
@@ -85,11 +86,10 @@ class TestNoteGeneration:
             assert section in content
         # 真实数据出现
         assert "PyTorch 实现 Attention" in content
-        assert "mastery 估计 0.30（AI 估计，非绝对事实）" in content
+        assert "mastery 估计" not in content
         assert "梯度清零" in content
         assert "Attention 实现项目" in content
-        # 明确说明 mastery 是估计，不是绝对事实
-        assert "AI 估计，非绝对事实" in content
+        assert "## 今日复习" not in content
 
     def test_idempotent_export(self, conn, plan_repo, tmp_path):
         ns, _, _ = _build(conn, plan_repo)

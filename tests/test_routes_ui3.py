@@ -251,9 +251,10 @@ def _dlg_texts(dlg):
 
 def test_detail_sections_present(qtbot, routes_env):
     texts = _dlg_texts(_detail(qtbot, routes_env))
-    for section in ("概览", "学习进度", "掌握与复习",
+    for section in ("概览", "学习进度", "掌握情况",
                     "能力证据 Capability", "课程覆盖"):
         assert any(section in t for t in texts), section
+    assert not any("下次复习" in t or "待复习" in t for t in texts)
 
 
 def test_detail_no_legacy_bracket_prefixes(qtbot, routes_env):

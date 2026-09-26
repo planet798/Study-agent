@@ -68,17 +68,12 @@ def test_activity_tag(qtbot, repo):
     assert w.activity_tag_label.isHidden() is False
 
 
-def test_review_tag(qtbot, repo):
-    t = repo.create("复习", scheduled_date=TODAY, task_type="review",
+def test_task_widget_has_no_review_tag(qtbot, repo):
+    t = repo.create("历史复习", scheduled_date=TODAY, task_type="review",
                     source="daily_retention")
     w = TaskWidget(repo.get(t.id))
     qtbot.addWidget(w)
-    assert w.review_tag_label.text() == "每日巩固"
-    # 非复习任务不显示
-    t2 = repo.create("new", scheduled_date=TODAY)
-    w2 = TaskWidget(repo.get(t2.id))
-    qtbot.addWidget(w2)
-    assert w2.review_tag_label.isHidden() is True
+    assert not hasattr(w, "review_tag_label")
 
 
 def test_active_action_hierarchy(qtbot, repo):
@@ -91,11 +86,11 @@ def test_active_action_hierarchy(qtbot, repo):
     assert w.remove_btn.objectName() == "SAButton"  # subtle
 
 
-def test_review_has_no_remove(qtbot, repo):
-    t = repo.create("复习", scheduled_date=TODAY, task_type="review")
+def test_legacy_review_has_generic_remove_action(qtbot, repo):
+    t = repo.create("历史复习", scheduled_date=TODAY, task_type="review")
     w = TaskWidget(repo.get(t.id))
     qtbot.addWidget(w)
-    assert getattr(w, "remove_btn", None) is None
+    assert getattr(w, "remove_btn", None) is not None
 
 
 def test_done_formal_task_keeps_assessment(qtbot, repo):

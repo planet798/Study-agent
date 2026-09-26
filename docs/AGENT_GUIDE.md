@@ -81,10 +81,11 @@ full 失败                 → 只重跑失败测试，修复
 - 测试：`tests/test_multi_route_scheduler.py`、`test_phase6_regression.py`
 - 不变式：budget ≤3 task & ≤180 min；fairness；**完全不读 Practice / Capability**。
 
-### Assessment / Mastery / Review
-- production：`app/services/assessment_service.py`、`review_service.py`、
-  `skill_service.py`、`knowledge_evidence.py`、`app/database/assessment_repository.py`
-- 测试：`tests/test_assessment_*.py`、`test_review_service.py`、`test_skill_service.py`
+### Assessment / Mastery（Daily Review retired）
+- production：`app/services/assessment_service.py`、`skill_service.py`、
+  `knowledge_evidence.py`、`app/database/assessment_repository.py`
+- Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除；历史表和字段只用于迁移与历史保全。未来 recall 是 Agent contextual learning 方向，不是已实现功能。
+- 测试：`tests/test_assessment_*.py`、`test_review_retirement.py`、`test_skill_service.py`
 
 ### Migration / Schema（**高危，必须真实路径**）
 - production：`app/database/schema.py`、`app/database/connection.py`、

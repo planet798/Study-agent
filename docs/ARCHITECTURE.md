@@ -23,7 +23,7 @@ app/
 ## 2. 核心领域模型（写给 agent）
 
 ```
-study_plans ─ study_phases ─ study_topics ─┬─ knowledge_points (Mastery / Review)
+study_plans ─ study_phases ─ study_topics ─┬─ knowledge_points (Assessment / Mastery)
                                            ├─ learning activit{ies} (component)
                                            └─ tasks
 learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / task
@@ -32,8 +32,11 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
 - **Route → Phase → Topic → Activity → Task**：`canonical_route_service` 保证
   R1–R6 + JOB_PREP 存在；`study_plan_service` 管 phase/topic；`topic_learning_profile_service`
   管 topic 的 activity component；`task_service` / `daily_planner_service` 产 task。
-- **Assessment / Mastery / Review**：`assessment_service` → `knowledge_evidence` /
-  `review_service` / `skill_service`。Mastery 只服务验收/复习/weak/Skill gate。
+- **Assessment / Mastery**：`assessment_service` → `knowledge_evidence` /
+  `skill_service`。正式 Mastery 只由 Assessment 更新；弱点与最近验收证据仍可供 Planner 使用。
+- **Daily Review retired (S1)**：Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
+  Historical review rows/schema are retained for migration and history preservation only.
+  Review-like recall will be handled by future Agent contextual learning, not by scheduled review tasks.
 - **Capability**（独立维度，只由真实证据推导，不看 mastery 阈值）：
   `capability_service` + `capability_extractors` + `database/capability_repository`。
 - **Practice**：`practice_project_service`（project / milestone / output）+
@@ -55,7 +58,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
    （`status` / `priority` / `planning_enabled` / `archived_at`）**绝不被 seed 覆盖**。
    archive 不自动 restore。
 3. **同一 route 只能有一个 active plan**（v15 partial unique index）。
-4. **Mastery / Capability / Review 三者独立**，互不隐式改写。
+4. **Mastery / Capability 分离**；Assessment 是 Mastery 正式更新路径。Review schema/rows 仅作为 legacy history 保留。
 5. **Practice 不反作用于 Scheduler / priority / budget**；route.priority 只由用户控制。
 6. **历史完整性**：已产生过 evidence 的 Output / Project-Topic 禁止物理删除；
    冻结 `output_type/description/uri/details_json`，撤销用 `is_active=0` + `revoked_at`。

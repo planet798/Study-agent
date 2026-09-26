@@ -25,7 +25,7 @@
 |---|---|
 | 主要 class | `TodayViewState` (dataclass)、`MainWindow(QMainWindow)` |
 | 职责 | 应用外壳 + Today 页面 + 顶部导航 + 托盘 + 生命周期 + 业务编排 |
-| 依赖 service | `TaskService`、`DateService`、`TaskReviewService`、`ManualTaskService`、`StudyPlanService`、`DailyPlannerService`、`SummaryService`、`AssessmentService`、`ReviewService`、`SkillService`、`JdService`、`JdSummaryService`、`LearningRouteService`、`RoutePlanService`、`CapabilityService`、`PracticeProjectService`、`PracticeCapabilityService`、`PracticeReadinessService`、`AIConfigService`、`PromptRegistry`、`scheduler`、`ai_route_service` … |
+| 依赖 service | `TaskService`、`DateService`、`TaskReviewService`、`ManualTaskService`、`StudyPlanService`、`DailyPlannerService`、`SummaryService`、`AssessmentService`、`SkillService`、`JdService`、`JdSummaryService`、`LearningRouteService`、`RoutePlanService`、`CapabilityService`、`PracticeProjectService`、`PracticeCapabilityService`、`PracticeReadinessService`、`AIConfigService`、`PromptRegistry`、`scheduler`、`ai_route_service` … |
 | 依赖 UI | `ai_worker`、`assessment_dialog`、`dialogs`、`manual_task_dialog`、`styles`、`task_widget`；延迟 import `summary_pages` / `routes_page` / `practice_page` / `ai_settings_page` / `career_dialogs` |
 | 局部 style/QSS | `self.scroll.setStyleSheet("background: transparent;")`（第 313 行）；全局 `APP_STYLE` 注入 |
 | 是否值得拆分 | **是，最高优先级**。包含至少 A–F 六类职责（见 §main_window 审计）。Today 页面整体混在 MainWindow 内。 |
@@ -57,9 +57,9 @@
 | 依赖 UI | `dialogs.show_warning`、`route_builder_dialogs`、`ai_worker.AIRouteBuilderWorker`、`route_dialogs`、`styles.apply_secondary_button_text` |
 | 依赖 database | `ROUTE_TYPE_GROUP`（仅常量）、`RouteValidationError`/`RouteStructureError`（异常类型） |
 | 局部 style/QSS | 无 `setStyleSheet`；仅 `objectName` |
-| 是否值得拆分 | **是**。总览与详情可拆为两个文件；详情内「知识/能力/复习」「技能」「课程缺口」「项目」四组区块可独立组件化。 |
+| 是否值得拆分 | **是**。总览与详情可拆为两个文件；详情内「知识掌握/能力」「技能」「课程缺口」「项目」四组区块可独立组件化。 |
 
-`RouteDetailDialog.refresh()` 一个方法内叠加了大量 section：路线进度、Mastery、学习活动、知识掌握/能力逐行、复习状态、Phase 卡片、技能、课程缺口、关联项目、Practice blocker。
+`RouteDetailDialog.refresh()` 一个方法内叠加了大量 section：路线进度、Mastery、学习活动、知识掌握/能力逐行、Phase 卡片、技能、课程缺口、关联项目、Practice blocker。
 
 ## 3. `app/ui/practice_page.py` — 723 LOC
 

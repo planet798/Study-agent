@@ -125,7 +125,7 @@ Today(0) → Monthly(可选) → Routes(可选) → Practice(可选) → AI Sett
 3. `_update_phase_info` / `_update_planner_info`
 4. `_reload_route_filter` / `_selected_route_filter` / `_route_name_map`
 5. `_clear_dynamic_list()`（销毁所有动态 widget，包含 stretch）
-6. 按 status/type/route 过滤，重建「今日新知识 / 今日复习 / 职业面板」
+6. 按 status/type/route 过滤，重建「今日学习 / 职业面板」；历史 review task 不展示、不计数
 7. 重新 `addStretch`
 8. 计算 `empty_hint` / `scroll` 可见性
 9. `restore_today_view_state()`：先 `clearFocus()`，再在

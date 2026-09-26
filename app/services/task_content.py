@@ -22,7 +22,6 @@ import re
 
 __all__ = [
     "build_topic_task_content",
-    "build_retention_task_content",
     "has_actionable_content",
 ]
 
@@ -478,65 +477,3 @@ def _build_practice_content(name: str, description: str = "") -> str:
         "- 展示产物并运行",
         "- 回答关于设计取舍的客观验收题",
     ])
-
-
-# ---------------------------------------------------------------------------
-# 每日巩固（Daily Retention）复习内容
-# ---------------------------------------------------------------------------
-
-def build_retention_task_content(
-    name: str, description: str = "", weak_points: list[str] | None = None
-) -> str:
-    """每日巩固的轻量复习内容；同一输入输出确定（不调用 AI）。
-
-    结构：【复习目标】【快速回忆】【最小实践】【完成标准】。
-    复用主题名 / 描述 + 既有主题模板；约 10~20 分钟可完成，不是一整套新课。
-    """
-    T = (name or "").strip() or (description or "").strip() or "该知识点"
-    low = T.lower()
-    info = None
-    for kws, tpl in _MODULES:
-        if any(k in low for k in kws):
-            info = tpl
-            break
-    if info:
-        practice = info["practice"].replace("{T}", T)
-        hints = [i.replace("{T}", T) for i in info["items"][:3]]
-    else:
-        practice = (
-            f"写一个 10 行以内的最小示例或推导，重现「{T}」的关键行为，"
-            "并说明预期结果。"
-        )
-        hints = []
-
-    lines = [
-        "【复习目标】",
-        f"用 10~20 分钟快速巩固「{T}」的短期记忆。本次只是每日巩固，"
-        "不代表已掌握，也不产生验收结论。",
-        "",
-        "【快速回忆】",
-        f"- 先不看笔记，口述/写出「{T}」的核心概念与整体流程。",
-        "- 再回答以下问题：",
-        f"  1. 「{T}」要解决的核心问题是什么？",
-        f"  2. 「{T}」的关键步骤/机制有哪些？",
-        "  3. 哪一处最容易记错，或容易与相邻概念混淆？",
-    ]
-    if hints:
-        lines.append("- 对照检查（回忆不出的重点看）：")
-        lines += [f"  · {h}" for h in hints]
-    if weak_points:
-        lines.append(
-            "- 上次验收的薄弱点："
-            + "；".join(str(w) for w in weak_points[:3])
-        )
-    lines += [
-        "",
-        "【最小实践】",
-        practice,
-        "",
-        "【完成标准】",
-        "- 能不看笔记独立解释核心机制",
-        "- 能完成上面的最小实践并说明结果",
-        "- 能指出一个易错点",
-    ]
-    return "\n".join(lines)

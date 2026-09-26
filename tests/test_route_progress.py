@@ -101,15 +101,12 @@ class TestRouteProgressFields:
         p = env["progress"].get_progress(rl.id, TODAY)
         assert p.weak_count == 1
 
-    def test_review_counts(self, env):
-        rl, ts = _route(env, "RL", ["MDP", "Policy", "Value", "Q"])
-        _assess(env, rl, ts[0], 0.6, next_review="2026-09-14")  # overdue+today
-        _assess(env, rl, ts[1], 0.6, next_review=TODAY)         # due
-        _assess(env, rl, ts[2], 0.6, next_review="2026-09-18")  # upcoming
-        p = env["progress"].get_progress(rl.id, TODAY)
-        assert p.due_review_count == 2
-        assert p.overdue_review_count == 1
-        assert p.upcoming_review_count == 1  # 9/18 在未来7天且未到期
+    def test_review_schedule_fields_are_not_exposed(self, env):
+        rl, ts = _route(env, "RL", ["MDP"])
+        _assess(env, rl, ts[0], 0.6, next_review="2026-09-14")
+        progress = env["progress"].get_progress(rl.id, TODAY)
+        assert not hasattr(progress, "due_review_count")
+        assert not hasattr(progress.knowledge[0], "next_review_date")
 
     def test_knowledge_status_list(self, env):
         rl, ts = _route(env, "RL", ["MDP", "Policy", "Value", "Q"])

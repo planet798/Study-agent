@@ -19,7 +19,6 @@ from app.database.connection import get_connection
 from app.database.repository import TaskRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
-from app.services.review_service import ReviewService
 from app.ui.ai_worker import (
     AssessmentWorker,
     run_start_assessment,
@@ -82,12 +81,7 @@ def _factory(ai):
 
     def build(conn):
         assessment_repo = AssessmentRepository(conn)
-        review = ReviewService(
-            TaskRepository(conn), assessment_repo,
-            plan_repo=StudyPlanRepository(conn),
-        )
-        return AssessmentService(ai, assessment_repo=assessment_repo,
-                                 review_service=review)
+        return AssessmentService(ai, assessment_repo=assessment_repo)
 
     return build
 
@@ -273,7 +267,7 @@ class TestSubmitAnswers:
         kp_after = arepo.get_knowledge_point(kp["id"])
         assert kp_after["mastery_estimate"] == pytest.approx(0.8)
         assert kp_after["last_assessed_at"] is not None
-        assert kp_after["next_review_date"] is not None
+        assert kp_after["next_review_date"] is None
 
     def test_ai_failure_keeps_answers_no_mastery(self, qtbot, main_conn,
                                                  db_path):

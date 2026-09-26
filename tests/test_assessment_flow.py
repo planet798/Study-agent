@@ -133,7 +133,7 @@ class TestSubmitAnswersNormal:
         # 知识点掌握度回写（首次直接采用）
         kp = assessment_repo.get_knowledge_point(kp_id)
         assert kp["mastery_estimate"] == 0.72
-        assert kp["review_count"] == 1
+        assert kp["review_count"] == 0
         assert kp["last_assessed_at"] is not None
 
     def test_second_submission_blends_mastery(self, assessment_repo):
@@ -153,7 +153,7 @@ class TestSubmitAnswersNormal:
         kp = assessment_repo.get_knowledge_point(kp_id)
         # 0.7 * 0.9 + 0.3 * 0.3 = 0.72
         assert kp["mastery_estimate"] == pytest.approx(0.72, abs=1e-4)
-        assert kp["review_count"] == 2
+        assert kp["review_count"] == 0
 
     def test_history_attempts_preserved(self, assessment_repo):
         client = FakeClient(responses=[QUESTIONS_CONTENT, QUESTIONS_CONTENT])
@@ -257,7 +257,7 @@ class TestJudgeFailure:
         assert result["judge_status"] == "judged"
         assert result["mastery_estimate"] == 0.72
         kp = assessment_repo.get_knowledge_point(kp_id)
-        assert kp["review_count"] == 1
+        assert kp["review_count"] == 0
 
 
 class TestJudgmentSchema:

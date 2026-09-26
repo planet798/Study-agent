@@ -36,7 +36,7 @@
 
 | # | 截图 | 页面/入口 | 备注 |
 |---|---|---|---|
-| 1 | Today（有任务） | 启动后默认页 | 今日新知识 + 今日复习 + 统计 + 技能概览 + JD 趋势 |
+| 1 | Today（有任务） | 启动后默认页 | 今日学习 + 两项统计 + 技能概览 + JD 趋势 |
 | 2 | Routes overview | 导航「学习路线」 | 含分组卡片 + 子路线卡片 + 归档开关 |
 | 3 | Route detail | 路线卡片「查看路线」 | 进度/Mastery/Capability/Phase/Topic/Skill/Gap/Project |
 | 4 | Practice overview | 导航「实践项目」 | 项目卡片列表 + 状态筛选 |
@@ -125,3 +125,9 @@ detail 是否不再是 `【】` 文本堆叠；readiness 不是能力百分比�
 - [x] 已确认 offscreen 最小探针可用（不足以自动截取生产页面）
 - [ ] 用户在 Windows 完成 #1–#12 截图（UI-1 开始前）
 - [ ] 记录 Windows 缩放比例与窗口尺寸
+
+
+## S1 — Daily Review retirement
+Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
+Historical review rows/schema are retained for migration and history preservation only.
+Review-like recall will be handled by future Agent contextual learning, not by scheduled review tasks.

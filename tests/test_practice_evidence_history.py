@@ -261,10 +261,6 @@ class TestNoRegression:
         assert "PracticeReadinessService" not in planner_src
         assert "feedback_service" in planner_src
 
-    def test_review_interval_unchanged(self):
-        from app.services.review_service import ReviewService
-
-        assert ReviewService.next_interval(0, "good") == 3
 
     def test_db_still_has_cascade(self, practice_capability_env):
         """Phase 5.1 不做危险表重建；DB 层 CASCADE 仍在，靠 Service invariant 保护。"""

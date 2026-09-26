@@ -60,10 +60,8 @@ QSS 覆盖的控件：
 \* `StatsBar` / `StatsTitle` / `StatsValue` 在 `styles.py` 有规则，但全 `app/ui/`
 已无 `setObjectName` 使用——历史遗留死代码。
 
-### 2.1 `ReviewTag` 语义过载
-`TaskWidget` 用同一个 `ReviewTag` 同时表示：复习来源（到期/每日巩固）、任务来源
-（Agent规划/自定义/自定义知识）、路线标签、学习活动标签。视觉上无法区分“标签种类”，
-只能靠文本前缀 `【…】` 区分。
+### 2.1 Historical Review tag retired
+Daily Review / Review Scheduler / Daily Retention 已退出生产 UI。TaskWidget 只展示路线、学习活动与任务来源标签；历史 review rows 不由 Today 渲染。
 
 ### 2.2 `QErrorMessage` 不是 `objectName`
 `QErrorMessage` 在 Qt 中是**控件类名**。把它当 `objectName` 使用，导致该规则实际

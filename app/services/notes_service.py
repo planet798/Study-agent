@@ -64,7 +64,6 @@ class NotesService:
         lines = [f"# {date} 学习笔记", ""]
         lines += self._section_goals(date)
         lines += self._section_new_knowledge(date)
-        lines += self._section_review(date)
         lines += self._section_outcomes(date)
         lines += self._section_weak_points(date)
         lines += self._section_resume_material(date)
@@ -118,39 +117,6 @@ class NotesService:
             lines.append("")
         return lines
 
-    def _section_review(self, date: str) -> list[str]:
-        lines = ["## 今日复习", ""]
-        reviews = []
-        if self.repo is not None:
-            reviews = [t for t in self.repo.list_by_date(date)
-                       if t.task_type == "review"]
-        if not reviews:
-            return lines + [_NONE, ""]
-        for t in reviews:
-            lines.append(f"### {t.title}")
-            kp_id = t.knowledge_point_id
-            if kp_id is not None and self.assessment_repo is not None:
-                attempt = _latest_judged_attempt(self.assessment_repo, kp_id)
-                kp = self.assessment_repo.get_knowledge_point(kp_id)
-                if attempt is not None:
-                    mastery = attempt.get("mastery_estimate")
-                    m_txt = (
-                        f"mastery 估计 {float(mastery):.2f}"
-                        if mastery is not None else "暂无 mastery 估计"
-                    )
-                    lines.append(f"- 验收结果：{attempt.get('result_level') or '—'}")
-                    lines.append(f"- {m_txt}（AI 估计，非绝对事实）")
-                    weak = _weak_points(attempt.get("weak_points_json"))
-                    if weak:
-                        lines.append("- 薄弱点：" + "、".join(weak))
-                    nxt = (kp or {}).get("next_review_date")
-                    if nxt:
-                        lines.append(f"- 下一次复习日期：{nxt}")
-            else:
-                lines.append("- 暂无关联验收结果")
-            lines.append("")
-        return lines
-
     def _section_outcomes(self, date: str) -> list[str]:
         lines = ["## 学习成果", ""]
         outcomes = []
@@ -179,13 +145,16 @@ class NotesService:
         lines = ["## 薄弱点", ""]
         weak: list[str] = []
         if self.repo is not None and self.assessment_repo is not None:
-            for t in self.repo.list_by_date(date):
-                if t.task_type != "review" or t.knowledge_point_id is None:
+            learning_tasks = [
+                t for t in self.repo.list_by_date(date)
+                if t.task_type == "new" and t.knowledge_point_id is not None
+            ]
+            task_ids = {int(t.id) for t in learning_tasks}
+            for attempt in self.assessment_repo.list_attempts():
+                if (attempt.get("judge_status") != "judged"
+                        or attempt.get("task_id") not in task_ids):
                     continue
-                attempt = _latest_judged_attempt(
-                    self.assessment_repo, t.knowledge_point_id
-                )
-                for w in _weak_points(attempt and attempt.get("weak_points_json")):
+                for w in _weak_points(attempt.get("weak_points_json")):
                     if w and w not in weak:
                         weak.append(w)
         if not weak:

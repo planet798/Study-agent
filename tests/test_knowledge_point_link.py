@@ -16,7 +16,6 @@ from app.database.repository import TaskRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
 from app.services.daily_planner_service import DailyPlannerService
-from app.services.review_service import ReviewService
 from app.services.study_plan_service import StudyPlanService
 
 TODAY = "2026-09-12"
@@ -266,64 +265,33 @@ class TestNoSpuriousKp:
         assert res["error"] == 0
 
 
-# ================= 13~17：Assessment -> Review 真闭环 =================
+# ================= Assessment -> Mastery，不触发 Review =================
 
-class TestAssessmentToReview:
-    def _linked_task(self, env, topic):
-        task = env["repo"].create(title=topic.name, scheduled_date=TODAY,
-                                  source="generated", topic_id=topic.id)
-        return env["sps"].link_task_knowledge_point(task, topic)
-
-    def test_assessment_updates_mastery_and_schedule(self, conn):
+class TestAssessmentDoesNotScheduleReview:
+    def test_assessment_updates_mastery_without_review_side_effects(self, conn):
         env = _env(conn)
-        task = self._linked_task(env, env["topics"]["Transformer"])
-        review_svc = ReviewService(env["repo"], env["arepo"])
+        task = env["repo"].create(title="study", scheduled_date=TODAY,
+                                  source="generated", topic_id=env["topics"]["Transformer"].id)
+        task = env["sps"].link_task_knowledge_point(task)
         svc = AssessmentService(
             FakeClient([QUESTIONS_CONTENT, JUDGMENT_CONTENT]),
-            assessment_repo=env["arepo"], review_service=review_svc)
+            assessment_repo=env["arepo"],
+        )
         attempt = svc.start_assessment(task.knowledge_point_id, task_id=task.id)
-        assert attempt["task_id"] == task.id
-        assert attempt["knowledge_point_id"] == task.knowledge_point_id
-        svc.submit_answers(attempt["id"], ["我的答案"], today="2026-09-13")
-        kp = env["arepo"].get_knowledge_point(task.knowledge_point_id)
+        arepo = env["arepo"]
+        arepo.update_knowledge_point(
+            task.knowledge_point_id, next_review_date="2026-09-20",
+            interval_days=7, review_count=2,
+        )
+        svc.submit_answers(attempt["id"], ["answer"], today="2026-09-13")
+        kp = arepo.get_knowledge_point(task.knowledge_point_id)
         assert kp["mastery_estimate"] == 0.8
-        assert kp["last_assessed_at"] is not None
-        assert kp["next_review_date"] is not None
-        assert kp["review_count"] == 1
-
-    def test_due_generates_review_task_once(self, conn):
-        env = _env(conn)
-        task = self._linked_task(env, env["topics"]["Transformer"])
-        review_svc = ReviewService(env["repo"], env["arepo"])
-        svc = AssessmentService(
-            FakeClient([QUESTIONS_CONTENT, JUDGMENT_CONTENT]),
-            assessment_repo=env["arepo"], review_service=review_svc)
-        attempt = svc.start_assessment(task.knowledge_point_id, task_id=task.id)
-        svc.submit_answers(attempt["id"], ["答案"], today="2026-09-13")
-        kp = env["arepo"].get_knowledge_point(task.knowledge_point_id)
-
-        due = kp["next_review_date"]
-        assert review_svc.generate_due_reviews(today=due)["created"]  # 到期生成
-        # 未到期不生成
-        assert review_svc.generate_due_reviews(
-            today="2026-01-01")["created"] == []
-        # 同日重复调用不重复生成
-        assert review_svc.generate_due_reviews(today=due)["created"] == []
-        review_tasks = [t for t in env["repo"].list_by_knowledge_point(kp["id"])
-                        if t.task_type == "review"]
-        assert len(review_tasks) == 1
-        schedules = env["arepo"].list_review_schedules_for_kp(kp["id"])
-        assert len(schedules) == 1 and schedules[0]["status"] == "pending"
-
-    def test_no_evidence_no_review(self, conn):
-        env = _env(conn)
-        t = env["topics"]["Transformer"]
-        task = self._linked_task(env, t)
-        kp = env["arepo"].get_knowledge_point(task.knowledge_point_id)
-        # 有关联但从未验收 -> 无 next_review_date/last_assessed_at -> 不生成
-        assert kp["last_assessed_at"] is None
-        review_svc = ReviewService(env["repo"], env["arepo"])
-        assert review_svc.generate_due_reviews(today="2030-01-01")["created"] == []
+        assert kp["last_assessed_at"]
+        assert kp["next_review_date"] == "2026-09-20"
+        assert kp["interval_days"] == 7
+        assert kp["review_count"] == 2
+        assert conn.execute("SELECT COUNT(*) FROM review_schedule").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM tasks WHERE task_type='review'").fetchone()[0] == 0
 
 
 # ================= 11~12：UI 安全网 =================

@@ -177,7 +177,7 @@ class RouteDetailDialog(QDialog):
 
         self._build_overview_card(route, structure)
         self._build_learning_progress_card(rp, progress)
-        self._build_mastery_review_card(rp)
+        self._build_mastery_card(rp)
         self._build_capability_card(rp)
 
         done_ids = self._complete_topic_ids()
@@ -351,8 +351,8 @@ class RouteDetailDialog(QDialog):
 
     # ---------- Mastery & Review ----------
 
-    def _build_mastery_review_card(self, rp) -> None:
-        card, lay = self._card("掌握与复习")
+    def _build_mastery_card(self, rp) -> None:
+        card, lay = self._card("掌握情况")
         if rp is None:
             empty = QLabel("暂无掌握数据")
             empty.setObjectName("TaskMeta")
@@ -375,10 +375,7 @@ class RouteDetailDialog(QDialog):
             ("已验收", f"{rp.assessment_evidence_count}"),
             ("已掌握", f"{rp.mastered_count}"),
             ("薄弱", f"{rp.weak_count}"),
-            ("今日到期", f"{rp.due_review_count}"),
-            ("未来7天", f"{rp.upcoming_review_count}"),
-            ("逾期", f"{rp.overdue_review_count}"),
-            ("最近复习", last_assessed or "—"),
+            ("最近验收", last_assessed or "—"),
         ):
             self._value_pair(lay, label, value)
         self.body_layout.addWidget(card)
@@ -1200,10 +1197,6 @@ class LearningRoutesPage(QWidget):
             cap_none.setObjectName("TaskMeta")
             cap_row.addWidget(cap_none)
         cap_row.addStretch()
-        if rp is not None:
-            review_lbl = QLabel(f"待复习 {rp.due_review_count}")
-            review_lbl.setObjectName("TaskMeta")
-            cap_row.addWidget(review_lbl)
         lay.addLayout(cap_row)
 
         if route.goal:

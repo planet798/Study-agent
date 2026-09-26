@@ -14,7 +14,6 @@ from app.database.study_plan_repository import StudyPlanRepository
 from app.services.date_service import DateService
 from app.services.learning_route_service import LearningRouteService
 from app.services.manual_task_service import ManualTaskService
-from app.services.review_service import ReviewService
 from app.services.route_plan_service import RoutePlanService
 from app.services.study_plan_service import StudyPlanService
 from app.services.task_service import TaskService
@@ -285,15 +284,6 @@ class TestPausePlanning:
         res = env["sps"].generate_daily_tasks(TODAY)
         assert res["generated"] == []
 
-    def test_pause_does_not_affect_review_creation(self, env):
-        topic = env["sps"].get_current_phase(TODAY).topics[0]
-        kp = env["arepo"].get_or_create_knowledge_point_for_topic(
-            topic.id, topic.name, route_id=env["default"].id
-        )
-        env["route_service"].pause_planning(env["default"].id)
-        svc = ReviewService(env["repo"], env["arepo"], plan_repo=env["plan_repo"])
-        schedule = svc._create_review_task(kp, TODAY)
-        assert schedule["task_id"] is not None
 
 
 # ================= 39~42：不回归 =================
@@ -315,14 +305,6 @@ class TestNoRegression:
                                               task_id=t.id)
         assert attempt["knowledge_point_id"] == t.knowledge_point_id
 
-    def test_review_inherits_route(self, env):
-        rl, plan, phase, topic = _second_route(env)
-        kp = env["arepo"].get_or_create_knowledge_point_for_topic(
-            topic.id, topic.name, route_id=rl.id
-        )
-        svc = ReviewService(env["repo"], env["arepo"], plan_repo=env["plan_repo"])
-        schedule = svc._create_review_task(kp, TODAY)
-        assert env["repo"].get(schedule["task_id"]).route_id == rl.id
 
     def test_historical_null_manual_kp_not_guessed(self, env):
         kp = env["arepo"].create_knowledge_point("历史基础")

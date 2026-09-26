@@ -100,7 +100,6 @@ class MainWindow(QMainWindow):
         summary_service=None,
         assessment_service=None,
         assessment_repo=None,
-        review_scheduler=None,
         skill_service=None,
         jd_service=None,
         jd_summary_service=None,
@@ -149,8 +148,6 @@ class MainWindow(QMainWindow):
             if assessment_service_factory is not None
             else (lambda conn: self.assessment_service)
         )
-        # 复习调度服务（ReviewService，区别于上面的 review_service=TaskReviewService）
-        self.review_scheduler = review_scheduler
         # Phase A~E 服务：可选；未传则对应职业面板隐藏（不回归旧行为）
         self.skill_service = skill_service
         self.jd_service = jd_service
@@ -452,28 +449,15 @@ class MainWindow(QMainWindow):
     # ---------- 启动 / 刷新 ----------
 
     def _on_startup(self) -> None:
-        """启动流程：日期切换 -> 生成今日到期复习 -> 加载今日任务。"""
+        """启动流程：日期切换后加载今日任务。"""
         today_str = self.today_provider()
         self.date_service.process_date_transition(today_str)
-        # 复习调度（幂等）：为今天到期的知识点生成复习任务
-        if self.review_scheduler is not None:
-            try:
-                self.review_scheduler.generate_due_reviews(today=today_str)
-            except Exception:  # noqa: BLE001 - 复习生成失败不影响启动
-                pass
-            # 到期不足时补足“每日巩固”（幂等；总量目标默认 3）
-            try:
-                self.review_scheduler.generate_daily_retention_reviews(
-                    today=today_str
-                )
-            except Exception:  # noqa: BLE001 - 巩固生成失败不影响启动
-                pass
         self.current_date = today_str
         self.date_label.setText(today_str)
         self.refresh()
 
     def refresh(self, preserve_scroll: bool = False) -> None:
-        """重建今日页（新知识 / 复习 + 职业面板）。
+        """重建今日页（学习任务 + 职业面板）。
 
         :param preserve_scroll: 同页面 mutation（完成/未完成/移除/复习完成等）
             时置 True，重建后恢复原滚动位置，避免自动跳到底部。
@@ -505,15 +489,10 @@ class MainWindow(QMainWindow):
             and t.status != STATUS_CANCELLED
             and self._matches_route(t, selected_route)
         ]
-        review_tasks = [
-            t for t in tasks
-            if t.task_type == "review" and t.status != STATUS_CANCELLED
-            and self._matches_route(t, selected_route)
-        ]
         # 用户主动移除的任务：不进入“今日待执行任务”，仅折叠提示
         cancelled_tasks = [
             t for t in tasks
-            if t.status == STATUS_CANCELLED
+            if t.task_type != "review" and t.status == STATUS_CANCELLED
             and self._matches_route(t, selected_route)
         ]
         self._update_route_stats(tasks, selected_route)
@@ -521,7 +500,7 @@ class MainWindow(QMainWindow):
         # Today Summary metrics（只从已获取的 tasks 推导，不新增 DB query）
         effective_tasks = [
             t for t in tasks
-            if t.status != STATUS_CANCELLED
+            if t.task_type != "review" and t.status != STATUS_CANCELLED
             and self._matches_route(t, selected_route)
         ]
         pending = [
@@ -529,14 +508,7 @@ class MainWindow(QMainWindow):
             if t.status in (STATUS_ACTIVE, STATUS_NOT_DONE)
         ]
         pending_minutes = sum(int(t.estimated_minutes or 0) for t in pending)
-        due_reviews = sum(
-            1 for t in effective_tasks
-            if t.task_type == "review"
-            and t.status in (STATUS_ACTIVE, STATUS_NOT_DONE)
-        )
-        self.today_page.set_summary_metrics(
-            len(pending), pending_minutes, due_reviews
-        )
+        self.today_page.set_summary_metrics(len(pending), pending_minutes)
 
         # 1) 今日新知识
         self._add_section_header("今日新知识")
@@ -548,15 +520,6 @@ class MainWindow(QMainWindow):
                 f"已移除今日任务 {len(cancelled_tasks)} 个（不计入完成率）：{names}"
             )
 
-        # 2) 今日复习
-        if self.review_scheduler is not None or review_tasks:
-            self._add_section_header("今日复习")
-            if review_tasks:
-                for t in review_tasks:
-                    self._add_task_widget(t)
-            else:
-                self._add_section_hint("暂无可复习内容")
-
         # Phase E：职业 / 技能 / JD 面板（secondary section，排在任务之后）
         if (self.skill_service is not None
                 or self.jd_summary_service is not None
@@ -567,7 +530,10 @@ class MainWindow(QMainWindow):
 
         self.list_layout.addStretch()
 
-        has_effective = any(t.status != STATUS_CANCELLED for t in tasks)
+        has_effective = any(
+            t.task_type != "review" and t.status != STATUS_CANCELLED
+            for t in tasks
+        )
         has_content = bool(self._task_widgets) or self._career_panel_added
         scroll_visible = has_effective or self._career_panel_added
         self.empty_hint.setVisible(not has_content)
@@ -674,7 +640,7 @@ class MainWindow(QMainWindow):
         # 完成率分母 = 过滤后 status != cancelled 的任务；cancelled 永不进分母
         effective = [
             t for t in tasks
-            if t.status != STATUS_CANCELLED
+            if t.task_type != "review" and t.status != STATUS_CANCELLED
             and self._matches_route(t, selected)
         ]
         done = sum(1 for t in effective if t.status == "done")
@@ -1472,13 +1438,7 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _on_assessment_completed(self, task_id: int) -> None:
-        """验收成功：复习任务自动标记完成并刷新。"""
-        try:
-            task = self.task_service.get_task(task_id)
-            if task.task_type == "review":
-                self.task_service.complete_task(task_id)
-        except Exception:  # noqa: BLE001
-            pass
+        """验收成功后刷新今日页。"""
         self.refresh(preserve_scroll=True)
 
     def _update_phase_info(self, today_str: str) -> None:

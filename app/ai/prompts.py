@@ -223,15 +223,12 @@ def build_knowledge_evidence_section(context: "object") -> str:
         else:
             parts.append("mastery:—")
         parts.append(f"最近验收:{e.recent_result_level or '—'}")
-        parts.append(f"review_count:{e.review_count}")
-        if e.next_review_date:
-            parts.append(f"下次复习:{e.next_review_date}")
         if e.weak_points:
             parts.append(f"薄弱点:{'、'.join(e.weak_points)}")
         lines.append("- " + "；".join(parts))
     lines.append(
         "用途：只用于调整‘下一步学什么’的优先级与针对性；不要据此跳过整个阶段，"
-        "不要代替复习调度；不要重复已掌握/正在复习的内容。"
+        "不要重复已掌握内容。"
     )
     return "\n".join(lines)
 
@@ -385,8 +382,7 @@ def build_skill_priority_section(context: "object") -> str:
             lines.append(f"  - {w.date}: {line}")
     lines.append(
         "职责与边界：career_context=长期职业方向；study_plan=当前阶段；"
-        "skill_priorities / JD 缺口=近期优先级；knowledge_evidence=实际掌握情况；"
-        "ReviewService=到期复习。"
+        "skill_priorities / JD 缺口=近期优先级；knowledge_evidence=实际掌握情况。"
         "Planner 只能决定“当前阶段下一步优先学什么”，并从 available_topics 中选取："
         "不得跳阶段、不得越级安排前置未满足的技能、不要重复已掌握内容。"
     )

@@ -23,7 +23,6 @@ from app.services.daily_planner_service import DailyPlannerService
 from app.services.learning_route_service import LearningRouteService
 from app.services.manual_task_service import ManualTaskService
 from app.services.past_task_service import PastTaskConfirmationService
-from app.services.review_service import ReviewService
 from app.services.study_plan_service import StudyPlanService
 from app.services.task_service import TaskService
 
@@ -105,20 +104,6 @@ class TestAgentTaskRoute:
             "SELECT route_id FROM planner_decisions WHERE date = ?", (TODAY,)
         ).fetchone()
         assert decision[0] == env["default_route"].id
-
-
-# ================= 28：Review 继承 route =================
-
-class TestReviewRoute:
-    def test_review_task_inherits_kp_route(self, env):
-        topic = env["sps"].get_current_phase(TODAY).topics[0]
-        kp = env["arepo"].get_or_create_knowledge_point_for_topic(
-            topic.id, topic.name, route_id=env["default_route"].id
-        )
-        svc = ReviewService(env["repo"], env["arepo"], plan_repo=env["plan_repo"])
-        schedule = svc._create_review_task(kp, TODAY)
-        task = env["repo"].get(schedule["task_id"])
-        assert task.route_id == env["default_route"].id
 
 
 # ================= 29：Extra 继承 route =================

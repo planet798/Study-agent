@@ -8,12 +8,11 @@
 ```
 PageHeader     今日 · <日期>
 PageBody
-  Summary Metrics   待处理 · 预计时长 · 今日复习
+  Summary Metrics   待处理 · 预计时长
   Controls          路线筛选 · 完成统计 · ＋ 添加学习任务
   Phase context     当前阶段 / 今日目标
   Planner context   AI 规划状态 + 重新规划（SAInfoBanner）
-  Focus             今日学习（new tasks）
-  Review            今日复习（review tasks）
+  今日学习          active learning tasks
   Career Signals    技能概览 / JD 趋势 / 候选 / Gap（secondary）
 ```
 
@@ -41,9 +40,9 @@ add_task_btn`。
 
 | 指标 | 定义 |
 |---|---|
-| 待处理 | `status != cancelled` 且 `status in (active, not_done)` 且匹配当前路线筛选 |
+| 待处理 | 非 historical review、非 cancelled 且 `status in (active, not_done)` 且匹配当前路线筛选 |
 | 预计时长 | 上述待处理任务 `estimated_minutes` 之和 |
-| 今日复习 | `task_type == "review"` 且 `status in (active, not_done)`、匹配筛选 |
+| Historical review tasks | 不展示、不计入任何 Today 指标或 completion metric |
 
 cancelled 永不进入任何指标。数据不可靠时宁可不显示，也不发明统计。
 
@@ -52,11 +51,11 @@ cancelled 永不进入任何指标。数据不可靠时宁可不显示，也不�
 保留 class、signals 与业务行为，重做视觉：
 
 - 标签统一 `SATag`（无 `【】`）：Route=accent/neutral、Activity=info、
-  Source=neutral、Review=info(每日巩固)/warning(到期复习)。
+  Source=neutral。
 - 操作层级（`SAButton`）：完成=primary、开始验收=secondary、
   未完成=danger、延期=secondary、移除今日任务=subtle。
 - Done ≠ Mastery：done 的正式任务仍显示“已完成”+ 验收入口。
-- 正式 Review 不提供 remove（规则不变）。
+- Historical review rows 不由 Today 渲染。
 - 延期 ≥3 次保留 warning 语义（semantic warning，不只靠黄色）。
 
 ## Empty state
@@ -68,3 +67,9 @@ cancelled 永不进入任何指标。数据不可靠时宁可不显示，也不�
 
 `capture_today_view_state` / `restore_today_view_state` 保留原行为，
 重试时机仍为 `0 / 16 / 60 / 160 / 400 / 800 ms`。UI-3 未修改。
+
+## S1 — Daily Review retirement
+
+Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
+Historical review rows/schema are retained for migration and history preservation only.
+Review-like recall will be handled by future Agent contextual learning, not by scheduled review tasks.

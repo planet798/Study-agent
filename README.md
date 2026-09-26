@@ -52,6 +52,13 @@ python app\main.py --date 2026-09-05
 只改内存中的 date provider（`app/utils/date_utils.py` 的 `set_today_provider`），
 不写数据库、不改系统时间、不改任何业务规则；不传 `--date` 时完全使用系统真实日期。
 
+## Daily Review 已退役（S1）
+
+Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
+Historical review rows/schema are retained for migration and history preservation only.
+Review-like recall will be handled by future Agent contextual learning,
+not by scheduled review tasks. Assessment 仍是 Mastery 正式更新路径。
+
 ## 当前功能（GUI 阶段）
 
 - 主窗口：标题 + 日期 + 今日学习任务列表 + 今日统计

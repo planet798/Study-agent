@@ -1499,17 +1499,13 @@ def main() -> int:
     date_service.scheduler = scheduler
     review_service = TaskReviewService(ai_client, prompt_registry=prompt_registry)
 
-    # Phase 3D~6：验收 / 复习调度
+    # Phase 3D~6：Assessment
     from app.services.assessment_service import AssessmentService
-    from app.services.review_service import ReviewService
 
-    # 复习调度（依赖 TaskRepository + AssessmentRepository）
-    review_scheduler = ReviewService(repo, assessment_repo, plan_repo=plan_repo)
-    # 验收（判题成功后自动联动复习调度）
+    # Assessment 判题只更新 assessment/mastery/evidence。
     assessment_service = AssessmentService(
         ai_client,
         assessment_repo=assessment_repo,
-        review_service=review_scheduler,
         outcome_service=outcome_service,
         prompt_registry=prompt_registry,
         capability_service=capability_service,
@@ -1518,12 +1514,7 @@ def main() -> int:
     # 验收后台线程专用：为 worker 的“独立连接”构造一套同配置依赖，
     # 避免把主线程 sqlite 连接传入子线程（SQLite thread affinity）。
     def build_assessment_service(fresh_conn):
-        fresh_repo = TaskRepository(fresh_conn)
-        fresh_plan_repo = StudyPlanRepository(fresh_conn)
         fresh_assessment_repo = AssessmentRepository(fresh_conn)
-        fresh_review = ReviewService(
-            fresh_repo, fresh_assessment_repo, plan_repo=fresh_plan_repo
-        )
         fresh_outcome = LearningOutcomeService(
             LearningOutcomeRepository(fresh_conn)
         )
@@ -1541,7 +1532,6 @@ def main() -> int:
         return AssessmentService(
             ai_client,
             assessment_repo=fresh_assessment_repo,
-            review_service=fresh_review,
             outcome_service=fresh_outcome,
             prompt_registry=prompt_registry,
             capability_service=fresh_capability,
@@ -1614,7 +1604,6 @@ def main() -> int:
         summary_service=summary_service,
         assessment_service=assessment_service,
         assessment_repo=assessment_repo,
-        review_scheduler=review_scheduler,
         skill_service=skill_service,
         jd_service=jd_service,
         jd_summary_service=jd_summary_service,

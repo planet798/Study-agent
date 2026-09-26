@@ -173,7 +173,12 @@ class TestContextEvidence:
         assert ev.mastery_estimate == pytest.approx(0.496)
         assert ev.weak_points == ("zero_grad",)
         assert ev.recent_result_level == "good"
-        assert ev.review_count == 1
+        serialized = json.dumps(ctx.to_dict(), ensure_ascii=False)
+        prompt = build_planner_user_prompt(ctx)
+        assert "review_count" not in serialized
+        assert "next_review_date" not in serialized
+        assert "review_count" not in prompt
+        assert "下次复习" not in prompt
 
 
 class TestWeakPriority:
@@ -210,8 +215,8 @@ class TestLowMasteryKeep:
         assert tb.id in {t.topic_id for t in res2["generated"]}
 
 
-class TestReviewNotDuplicated:
-    def test_in_progress_review_blocks_formal_task(self, conn, assessment_repo):
+class TestHistoricalReviewIsNotPlannerSignal:
+    def test_historical_review_does_not_block_formal_task(self, conn, assessment_repo):
         svc, ta, tb = _mini(conn, assessment_repo, max_minutes=60)
         kp = _seed(assessment_repo, "kp_b", tb.id, mastery=0.5)
         # 该知识点的未完成复习任务已存在
@@ -221,6 +226,6 @@ class TestReviewNotDuplicated:
         )
         res = svc.generate_daily_tasks("2026-09-08")
         generated_ids = {t.topic_id for t in res["generated"]}
-        assert tb.id not in generated_ids  # 复习进行中 -> 不生成正式新任务
+        assert tb.id in generated_ids
         assert ta.id in generated_ids
 

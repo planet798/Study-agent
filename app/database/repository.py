@@ -175,34 +175,6 @@ class TaskRepository:
         )
         return self._rows_to_tasks(cur.fetchall())
 
-    def list_done_learning_tasks_before(self, date_str: str) -> list[Task]:
-        """date_str 之前已完成、且真正“学过”的正式学习任务。
-
-        条件：status=done / task_type='new' / source='generated' /
-        已关联知识点 / scheduled_date < date_str。
-        供每日巩固复习选候选（不含 manual / extra / review / 未完成任务）。
-        """
-        cur = self.conn.execute(
-            "SELECT * FROM tasks WHERE scheduled_date < ? AND status = ? "
-            "AND task_type = 'new' AND source = 'generated' "
-            "AND knowledge_point_id IS NOT NULL "
-            "ORDER BY scheduled_date DESC, id DESC",
-            (date_str, STATUS_DONE),
-        )
-        return self._rows_to_tasks(cur.fetchall())
-
-    def list_review_tasks_by_source(
-        self, source: str, start: str, end: str
-    ) -> list[Task]:
-        """[start, end] 内指定 source 的复习任务（用于每日巩固冷却判断）。"""
-        cur = self.conn.execute(
-            "SELECT * FROM tasks WHERE scheduled_date BETWEEN ? AND ? "
-            "AND task_type = 'review' AND source = ? "
-            "ORDER BY scheduled_date ASC, id ASC",
-            (start, end, source),
-        )
-        return self._rows_to_tasks(cur.fetchall())
-
     # ---------- Phase D：Agent Scheduler 统计 ----------
 
     def count_generated_new_by_date(

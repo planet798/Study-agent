@@ -89,16 +89,14 @@ class TaskWidget(QFrame):
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(6)
 
-        # 标签行：路线 / 复习 / 学习活动 / 来源
+        # 标签行：路线 / 学习活动 / 来源
         tag_row = QHBoxLayout()
         tag_row.setSpacing(6)
         self.route_tag_label = SATag("", "accent")
-        self.review_tag_label = SATag("", "info")
         self.activity_tag_label = SATag("", "info")
         self.source_tag_label = SATag("", "neutral")
         for tag in (
             self.route_tag_label,
-            self.review_tag_label,
             self.activity_tag_label,
             self.source_tag_label,
         ):
@@ -172,8 +170,6 @@ class TaskWidget(QFrame):
     @staticmethod
     def _source_tag(task: Task) -> str:
         """轻量来源标签：Agent 规划 / 自定义 / 自定义知识。"""
-        if task.task_type == "review":
-            return ""
         if task.source == "generated":
             return "Agent 规划"
         if task.source == "manual":
@@ -183,9 +179,7 @@ class TaskWidget(QFrame):
         return ""
 
     def _add_remove_button(self) -> None:
-        """移除今日任务（正式 spaced review 不提供）。"""
-        if self._task.task_type == "review":
-            return
+        """移除今日任务。"""
         self.remove_btn = SAButton("移除今日任务", variant="subtle", size="small")
         self.remove_btn.clicked.connect(
             lambda: self.remove_requested.emit(self._task.id)
@@ -237,17 +231,6 @@ class TaskWidget(QFrame):
 
         self.title_label.setText(task.title)
         self.title_label.setVisible(bool(task.title))
-
-        # 复习标签：到期复习 / 每日巩固
-        if task.task_type == "review":
-            tag = (
-                "每日巩固" if task.source == "daily_retention" else "到期复习"
-            )
-            self.review_tag_label.setText(tag)
-            self.review_tag_label.set_variant("info" if tag == "每日巩固" else "warning")
-            self.review_tag_label.setVisible(True)
-        else:
-            self.review_tag_label.setVisible(False)
 
         # 来源标签
         source_tag = self._source_tag(task)

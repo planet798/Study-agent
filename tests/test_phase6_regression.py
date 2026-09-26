@@ -196,14 +196,6 @@ class TestSchedulerRegression:
 
 
 class TestOtherRegressions:
-    def test_review_service_unchanged(self):
-        from app.services.review_service import ReviewService
-
-        assert ReviewService.next_interval(0, "excellent") == 7
-        assert ReviewService.next_interval(0, "good") == 3
-        assert ReviewService.next_interval(0, "ok") == 2
-        assert ReviewService.next_interval(0, "poor") == 1
-        assert ReviewService.next_interval(30, "good") <= 30
 
     def test_jd_market_signal_unchanged(self):
         from app.services.market_signal import DEFAULT_WINDOW_DAYS

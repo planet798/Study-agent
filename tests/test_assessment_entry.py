@@ -26,7 +26,6 @@ from PySide6.QtWidgets import QPushButton
 from app.database.assessment_repository import AssessmentRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
-from app.services.review_service import ReviewService
 from app.services.study_plan_service import StudyPlanService
 from app.ui.main_window import MainWindow
 from app.ui.task_widget import TaskWidget
@@ -234,14 +233,13 @@ def _window(qtbot, repo, task_service, date_service, conn, **extra):
     arepo = AssessmentRepository(conn)
     plan_repo, _ = _plan(conn)
     sps = StudyPlanService(repo, plan_repo, assessment_repo=arepo)
-    review = ReviewService(repo, arepo)
     w = MainWindow(
         task_service=task_service, date_service=date_service,
         today_provider=lambda: TODAY,
         study_plan_service=sps,
         assessment_service=AssessmentService(
             FakeQuestionAI([QUESTIONS_CONTENT, QUESTIONS_CONTENT]),
-            assessment_repo=arepo, review_service=review,
+            assessment_repo=arepo,
         ),
         assessment_repo=arepo,
         **extra,
@@ -317,24 +315,28 @@ class TestAssessmentFlow:
 
 # ================= Extra 服务创建即关联 kp =================
 
-# ================= 验收成功写 mastery / next_review_date =================
+# ================= 验收只写 mastery，不触碰 legacy review fields =================
 
 class TestAssessmentWritesEvidence:
-    def test_success_writes_mastery_and_next_review(self, conn, repo):
+    def test_success_preserves_legacy_review_fields(self, conn, repo):
         plan_repo, topics = _plan(conn)
         arepo = AssessmentRepository(conn)
         sps = StudyPlanService(repo, plan_repo, assessment_repo=arepo)
         t = repo.create(title="t", scheduled_date=TODAY, source="generated",
                         topic_id=topics["Transformer"].id)
         t = sps.link_task_knowledge_point(t)
-        review = ReviewService(repo, arepo)
         svc = AssessmentService(
             FakeQuestionAI([QUESTIONS_CONTENT, JUDGMENT_CONTENT]),
-            assessment_repo=arepo, review_service=review)
+            assessment_repo=arepo)
         at = svc.start_assessment(t.knowledge_point_id, task_id=t.id)
+        arepo.update_knowledge_point(
+            t.knowledge_point_id, next_review_date="2026-09-10",
+            interval_days=5, review_count=3,
+        )
         svc.submit_answers(at["id"], ["答案"], today="2026-09-13")
         kp = arepo.get_knowledge_point(t.knowledge_point_id)
         assert kp["mastery_estimate"] == 0.8
         assert kp["last_assessed_at"] is not None
-        assert kp["next_review_date"] is not None
-        assert kp["review_count"] == 1
+        assert kp["next_review_date"] == "2026-09-10"
+        assert kp["interval_days"] == 5
+        assert kp["review_count"] == 3

@@ -34,7 +34,6 @@ from ..ai.schemas import (
 )
 from ..database.assessment_repository import AssessmentRepository
 from ..utils.date_utils import now_iso
-from .review_service import ReviewService
 
 # 掌握度平滑策略：旧估计 70% + 本次估计 30%，防止单次结果直接覆盖成极端值
 _PREVIOUS_WEIGHT = 0.7
@@ -62,15 +61,12 @@ class AssessmentService:
         self,
         client: AIClient,
         assessment_repo: AssessmentRepository | None = None,
-        review_service: ReviewService | None = None,
         outcome_service=None,
         prompt_registry: PromptRegistry | None = None,
         capability_service=None,
     ):
         self.client = client
         self.assessment_repo = assessment_repo
-        # 可选注入：判题成功后联动复习调度（Phase 4）
-        self.review_service = review_service
         # 可选注入：验收后沉淀学习成果（Phase D hook；不注入行为不变）
         self.outcome_service = outcome_service
         # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
@@ -242,11 +238,6 @@ class AssessmentService:
                 self.capability_service.sync_from_assessment(attempt_id)
             except Exception:  # noqa: BLE001 - evidence 失败不影响验收
                 pass
-        # 判题成功后联动复习调度（若注入了 ReviewService）
-        if self.review_service is not None:
-            self.review_service.record_assessment_result(
-                repo.get_attempt(attempt_id), today=today
-            )
         # Phase D：验收后沉淀学习成果/掌握证据（若注入了 outcome_service）
         if self.outcome_service is not None:
             try:
@@ -349,5 +340,4 @@ class AssessmentService:
             knowledge_point_id,
             mastery_estimate=new_mastery,
             last_assessed_at=now_iso(),
-            review_count=int(kp["review_count"] or 0) + 1,
         )

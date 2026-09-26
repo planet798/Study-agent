@@ -29,7 +29,6 @@ from app.services.jd_service import JdService
 from app.services.knowledge_evidence import (
     HIGH_MASTERY_THRESHOLD,
 )
-from app.services.review_service import ReviewService
 from app.services.skill_service import SkillService
 from app.services.study_plan_service import StudyPlanService
 
@@ -198,8 +197,8 @@ class TestAiLoop:
         assert env["t3"].id not in {t.topic_id for t in tasks}
 
 
-class TestReviewExtraIsolation:
-    def test_review_in_progress_not_duplicated(self, conn, plan_repo):
+class TestHistoricalReviewIgnoredByPlanner:
+    def test_review_row_does_not_block_current_learning(self, conn, plan_repo):
         env = _build(conn, plan_repo, with_jd=True)
         # 给 T2 关联知识点并安排一个未完成复习任务
         kp = env["assessment_repo"].create_knowledge_point(
@@ -216,8 +215,8 @@ class TestReviewExtraIsolation:
         dp.generate_next_day_plan("2026-09-07")
         formal = [t for t in env["repo"].list_by_date("2026-09-08")
                   if t.task_type == "new"]
-        assert env["t2"].id not in {t.topic_id for t in formal}
-        # 复习任务保留
+        assert env["t2"].id in {t.topic_id for t in formal}
+        # Historical row is retained, but does not block planning.
         assert any(t.task_type == "review"
                    for t in env["repo"].list_by_date("2026-09-08"))
 

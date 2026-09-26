@@ -45,7 +45,6 @@ from app.services.date_service import DateService
 from app.services.jd_service import JdService
 from app.services.learning_outcome_service import LearningOutcomeService
 from app.services.notes_service import NotesService
-from app.services.review_service import ReviewService
 from app.services.skill_service import SkillService
 from app.services.study_plan_service import StudyPlanService
 from app.services.task_service import TaskService
@@ -272,9 +271,9 @@ class TestNoRegression:
         w = _window(qtbot, env)
         txt = _label_text(w)
         assert "今日新知识" in txt
-        assert "今日复习" in txt
+        assert "今日复习" not in txt
         assert "今日新知识任务" in txt
-        assert "复习 kp1" in txt
+        assert "复习 kp1" not in txt
         # 额外学习 / 课外探索区域已完整移除
         assert "额外学习" not in txt
         assert "课外探索" not in txt
@@ -298,16 +297,14 @@ class TestNoRegression:
             kp["id"], mastery_estimate=0.4,
             last_assessed_at="2026-09-19T10:00:00")
         t = env["repo"].create(
-            title="复习 pytorch.autograd", scheduled_date=TODAY,
-            source="review", task_type="review", knowledge_point_id=kp["id"])
-        review_scheduler = ReviewService(env["repo"], env["arepo"])
+            title="学习 pytorch.autograd", scheduled_date=TODAY,
+            source="manual", task_type="new", knowledge_point_id=kp["id"])
         assessment_service = AssessmentService(
             FakeQuestionAI(), assessment_repo=env["arepo"],
-            review_service=review_scheduler, outcome_service=env["lo"],
+            outcome_service=env["lo"],
         )
         w = _window(qtbot, env, assessment_service=assessment_service,
-                    assessment_repo=env["arepo"],
-                    review_scheduler=review_scheduler)
+                    assessment_repo=env["arepo"])
 
         captured = {}
 

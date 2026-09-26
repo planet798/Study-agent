@@ -1,7 +1,7 @@
 """知识掌握证据 → 候选主题优先级/去重的共享计算（Phase 8）。
 
 供 StudyPlanService（规则生成）与 DailyPlannerService（AI 二次校验）共用，
-保证“薄弱优先、高掌握不重复、复习进行中不重复”在两条生成链路上行为一致。
+保证“薄弱优先、高掌握不重复”在两条生成链路上行为一致。
 
 核心原则：
 - 没有验收证据的知识点不参与任何判断（绝不把默认 0.0 当作“已经证明不会”）；
@@ -69,9 +69,8 @@ def weak_topic_ids(repo, assessment_repo) -> set[int]:
 def skip_topic_ids(repo, assessment_repo) -> set[int]:
     """因“已掌握/复习进行中”应跳过（不要再安排正式任务）的 topic_id 集合。
 
-    包含两类：
-    1) 高掌握（mastery >= 0.85）且最近验收良好（good/excellent）——减少重复基础任务；
-    2) 该知识点已有未完成的 review task——复习由 ReviewService 负责，Planner 不要再生成正式任务。
+    高掌握（mastery >= 0.85）且最近验收良好（good/excellent）时，
+    减少重复基础任务。
     """
     if assessment_repo is None:
         return set()
@@ -91,14 +90,4 @@ def skip_topic_ids(repo, assessment_repo) -> set[int]:
             ):
                 out.add(tid)
                 continue
-        # 2) 未完成的复习任务存在
-        if _has_unfinished_review_task(repo, kp["id"]):
-            out.add(tid)
     return out
-
-
-def _has_unfinished_review_task(repo, knowledge_point_id: int) -> bool:
-    for task in repo.list_by_knowledge_point(knowledge_point_id):
-        if task.task_type == "review" and task.status != "done":
-            return True
-    return False

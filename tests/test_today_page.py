@@ -32,10 +32,10 @@ def test_today_page_construct(page):
 
 
 def test_set_summary_metrics(page):
-    page.set_summary_metrics(3, 120, 2)
+    page.set_summary_metrics(3, 120)
     assert page.pending_card.value() == "3"
     assert page.minutes_card.value() == "120 分钟"
-    assert page.review_card.value() == "2"
+    assert not hasattr(page, "review_card")
 
 
 def test_add_task_signal_from_button(qtbot, page):
@@ -115,11 +115,13 @@ def test_summary_metrics_semantics(make_window, task_service, repo, fixed_today)
     assert t3.id not in [wd.task().id for wd in w._task_widgets]
 
 
-def test_review_metric(make_window, repo, fixed_today):
-    repo.create("巩固", scheduled_date=fixed_today, task_type="review",
-                source="daily_retention")
+def test_historical_review_is_ignored(make_window, repo, fixed_today):
+    repo.create("历史巩固", scheduled_date=fixed_today, task_type="review",
+                source="daily_retention", estimated_minutes=45)
     w = make_window()
-    assert w.today_page.review_card.value() == "1"
+    assert w.today_page.pending_card.value() == "0"
+    assert w.today_page.minutes_card.value() == "0 分钟"
+    assert not hasattr(w.today_page, "review_card")
 
 
 def test_today_date_still_in_page_header(make_window, fixed_today):

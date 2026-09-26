@@ -14,14 +14,14 @@
 - Page Header 显示页面标题与副标题。
 
 ## B. Today
-- Summary（待处理/预计时长/今日复习）；Focus / Review 分区；Career Signals 退居其后。
-- 任务卡标签（路线/活动/来源/复习）、操作层级、Done≠Mastery、延期 ≥3 警告。
+- Summary（待处理/预计时长）；今日学习；Career Signals 退居其后。
+- 任务卡标签（路线/活动/来源）、操作层级、Done≠Mastery、延期 ≥3 警告。
 - Empty：「今天还没有学习任务」+ 添加。
 
 ## C. Learning Routes
 - R1–R6 一眼可扫；分组 heading。
 - 课程进度条；**Mastery 百分比条**；**Capability evidence count + Lx distribution**（非百分比）。
-- Route Detail：概览 / 学习进度 / 掌握与复习 / 能力证据（知识状态逐行）等 Card。
+- Route Detail：概览 / 学习进度 / 掌握情况 / 能力证据（知识状态逐行）等 Card。
 
 ## D. Practice
 - Project 卡：status badge / type tag / route tag；里程碑 / 成果 / 项目能力证据 / 学习准备度**分离**；无统一 project %。
@@ -54,3 +54,8 @@
 
 ## README 推荐截图（4 张）
 Today（light）· Learning Routes（light）· Practice（light）· Today（dark）。
+
+## S1 — Daily Review retirement
+- Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除。
+- Historical review rows/schema are retained for migration and history preservation only.
+- Review-like recall will be handled by future Agent contextual learning, not by scheduled review tasks.

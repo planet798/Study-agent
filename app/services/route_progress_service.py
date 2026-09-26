@@ -1,4 +1,4 @@
-"""路线进度 / 知识掌握 / 复习状态（Phase E）。
+"""路线进度 / 知识掌握（Phase E）。
 
 统一在 service 层计算 route-scoped 进度，避免 UI/页面自己拼 SQL。
 
@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..database.learning_route_repository import LearningRouteRepository
-from ..utils.date_utils import add_days
 from .knowledge_evidence import (
     HIGH_MASTERY_THRESHOLD,
     WEAK_MASTERY_THRESHOLD,
@@ -23,7 +22,6 @@ from .knowledge_evidence import (
 
 MASTERED_THRESHOLD = HIGH_MASTERY_THRESHOLD
 WEAK_THRESHOLD = WEAK_MASTERY_THRESHOLD
-UPCOMING_DAYS = 7
 
 # 知识状态语义（沿用现有 mastery 证据，不产生新算法）
 STATUS_NOT_LEARNED = "未学习"
@@ -42,7 +40,6 @@ class KnowledgeStatus:
     mastery: float | None = None
     weak_points: list[str] = field(default_factory=list)
     last_assessed_at: str | None = None
-    next_review_date: str | None = None
     # Phase 3：capability（与 mastery 独立）
     capability_level: int = 0
     capability_label: str = ""
@@ -63,9 +60,6 @@ class RouteProgress:
     assessment_evidence_count: int = 0
     mastered_count: int = 0
     weak_count: int = 0
-    due_review_count: int = 0
-    upcoming_review_count: int = 0
-    overdue_review_count: int = 0
     # Phase 2：学习活动完成度（不混入 mastery）
     activity_required_total: int = 0
     activity_required_done: int = 0
@@ -118,7 +112,8 @@ class RouteProgressService:
         return {
             int(r[0]) for r in self.repo.conn.execute(
                 "SELECT DISTINCT topic_id FROM tasks "
-                "WHERE status = 'done' AND topic_id IS NOT NULL"
+                "WHERE status = 'done' AND task_type != 'review' "
+                "AND topic_id IS NOT NULL"
             ).fetchall()
         }
 
@@ -171,16 +166,6 @@ class RouteProgressService:
         progress.weak_count = sum(
             1 for kp in kps if self._is_weak(kp)
         )
-
-        progress.due_review_count = self.assessment_repo.count_due_reviews_by_route(
-            route_id, today
-        )
-        progress.overdue_review_count = \
-            self.assessment_repo.count_reviews_by_route_before(route_id, today)
-        progress.upcoming_review_count = \
-            self.assessment_repo.count_reviews_by_route_range(
-                route_id, add_days(today, 1), add_days(today, UPCOMING_DAYS)
-            )
 
         # 知识状态列表：先列 topic，再补无 topic 的 manual kp
         seen_kp_ids: set[int] = set()
@@ -255,7 +240,6 @@ class RouteProgressService:
             mastery=float(mastery) if kp.get("last_assessed_at") else None,
             weak_points=_attempt_weak_points(attempt),
             last_assessed_at=kp.get("last_assessed_at"),
-            next_review_date=kp.get("next_review_date"),
         )
 
     def weak_knowledge(self, route_id: int) -> list[dict]:
@@ -295,10 +279,9 @@ class RouteProgressService:
         for route_id, name in buckets:
             tasks = [
                 t for t in self.repo.list_between(start, end)
-                if t.route_id == route_id
+                if t.route_id == route_id and t.task_type != "review"
             ]
             done_tasks = sum(1 for t in tasks if t.status == "done")
-            review_tasks = sum(1 for t in tasks if t.task_type == "review")
             assessed = self.assessment_repo.list_assessed_by_route(route_id)
             mastered = self.assessment_repo.list_mastered_by_route(
                 route_id, MASTERED_THRESHOLD
@@ -324,7 +307,6 @@ class RouteProgressService:
                 "mastered_count": len(mastered),
                 "weak_count": len(weak),
                 "weak_topics": [kp["name"] for kp in weak],
-                "review_count": review_tasks,
                 # Phase 2：学习活动完成度（不是 capability）
                 "activity_required": activity.get("required_total", 0),
                 "activity_completed": activity.get("required_done", 0),

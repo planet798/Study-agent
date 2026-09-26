@@ -294,17 +294,3 @@ class TestSkillAndActivityIsolation:
             (ev["knowledge_point_id"],),
         ).fetchone()
         assert float(kp["mastery_estimate"]) == 0.0
-
-    def test_project_evidence_does_not_change_review(
-        self, practice_capability_env
-    ):
-        from app.services.review_service import ReviewService
-
-        env = practice_capability_env
-        r = ready_lora(env)
-        create_evidence(env, r.project, r.lora, [r.repo["id"]])
-        assert env.conn.execute(
-            "SELECT COUNT(*) FROM knowledge_points WHERE next_review_date IS NOT NULL"
-        ).fetchone()[0] == 0
-        # Review 算法本身不变
-        assert ReviewService.next_interval(0, "good") == 3

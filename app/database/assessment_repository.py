@@ -259,36 +259,6 @@ class AssessmentRepository:
                 out.append(kp)
         return out
 
-    def count_reviews_by_route_range(
-        self, route_id: int | None, start: str, end: str
-    ) -> int:
-        """某路线 next_review_date 落在 [start, end]（含）的已验收 kp 数。"""
-        return sum(
-            1 for kp in self.list_assessed_by_route(route_id)
-            if kp.get("next_review_date")
-            and start <= kp["next_review_date"] <= end
-        )
-
-    def count_reviews_by_route_before(
-        self, route_id: int | None, date_str: str
-    ) -> int:
-        """某路线逾期（next_review_date < date）的已验收 kp 数。"""
-        return sum(
-            1 for kp in self.list_assessed_by_route(route_id)
-            if kp.get("next_review_date")
-            and kp["next_review_date"] < date_str
-        )
-
-    def count_due_reviews_by_route(
-        self, route_id: int | None, date_str: str
-    ) -> int:
-        """某路线今日到期（next_review_date <= date）的已验收 kp 数。"""
-        return sum(
-            1 for kp in self.list_assessed_by_route(route_id)
-            if kp.get("next_review_date")
-            and kp["next_review_date"] <= date_str
-        )
-
     def ensure_knowledge_point_route_consistency(self) -> int:
         """确定性修复：topic-linked kp 的 route 必须等于 topic 的 route。
 
@@ -396,36 +366,6 @@ class AssessmentRepository:
 
     # ---------- review_schedule ----------
 
-    _REVIEW_UPDATABLE = (
-        "scheduled_date",
-        "interval_days",
-        "status",
-        "task_id",
-        "source_attempt_id",
-        "completed_at",
-    )
-
-    def create_review_schedule(
-        self,
-        knowledge_point_id: int,
-        scheduled_date: str,
-        interval_days: int,
-        task_id: int | None = None,
-        source_attempt_id: int | None = None,
-        status: str = "pending",
-    ) -> dict:
-        ts = now_iso()
-        cur = self.conn.execute(
-            "INSERT INTO review_schedule "
-            "(knowledge_point_id, scheduled_date, interval_days, status, task_id,"
-            " source_attempt_id, created_at, completed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
-            (knowledge_point_id, scheduled_date, interval_days, status,
-             task_id, source_attempt_id, ts),
-        )
-        self.conn.commit()
-        return self.get_review_schedule(cur.lastrowid)
-
     def get_review_schedule(self, schedule_id: int) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM review_schedule WHERE id = ?", (schedule_id,)
@@ -456,17 +396,3 @@ class AssessmentRepository:
             (task_id,),
         ).fetchone()
         return _row(row)
-
-    def update_review_schedule(self, schedule_id: int, **fields) -> dict | None:
-        allowed = {
-            k: v for k, v in fields.items() if k in self._REVIEW_UPDATABLE
-        }
-        if not allowed:
-            return self.get_review_schedule(schedule_id)
-        set_clause = ", ".join(f"{k} = ?" for k in allowed)
-        self.conn.execute(
-            f"UPDATE review_schedule SET {set_clause} WHERE id = ?",
-            (*allowed.values(), schedule_id),
-        )
-        self.conn.commit()
-        return self.get_review_schedule(schedule_id)

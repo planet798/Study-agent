@@ -108,16 +108,13 @@ class TestCancelledSemantics:
         except InvalidTransitionError:
             pass
 
-    def test_review_cannot_cancel(self, conn):
+    def test_legacy_review_has_generic_task_transitions(self, conn):
         env = _env(conn)
-        t = env["repo"].create("到期复习", scheduled_date=TODAY,
+        t = env["repo"].create("历史复习", scheduled_date=TODAY,
                                source="review", task_type="review")
-        assert env["ts"].is_cancellable(t) is False
-        try:
-            env["ts"].cancel_task(t.id)
-            assert False, "正式复习任务不应能 cancelled"
-        except InvalidTransitionError:
-            pass
+        assert env["ts"].is_cancellable(t) is True
+        cancelled = env["ts"].cancel_task(t.id)
+        assert cancelled.status == "cancelled"
 
 
 # ================= 15~18：昨日未确认兼容 =================
@@ -311,13 +308,13 @@ class TestUiAndPersistence:
         assert hasattr(w, "remove_btn")
         assert w.remove_btn.text() == "移除今日任务"
 
-    def test_card_hides_remove_button_for_review(self, conn, qtbot):
+    def test_legacy_review_card_has_generic_remove_button(self, conn, qtbot):
         env = _env(conn)
-        t = env["repo"].create("复习", scheduled_date=TODAY,
+        t = env["repo"].create("历史复习", scheduled_date=TODAY,
                                source="review", task_type="review")
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
-        assert hasattr(w, "remove_btn") is False
+        assert hasattr(w, "remove_btn") is True
 
     def test_cancelled_persists_after_reopen(self, tmp_path):
         from app.database.connection import get_connection

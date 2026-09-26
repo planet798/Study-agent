@@ -191,15 +191,6 @@ class TestBoundaries:
         assert "practice_capability_service" not in planner_src
         assert "feedback_service" in planner_src
 
-    def test_review_unchanged_by_practice(self, practice_env):
-        env = practice_env
-        # 项目完成不影响 review interval
-        from app.services.review_service import ReviewService
-
-        p = env.service.create_project("P", "other")
-        env.service.add_output(p["id"], "repository", "repo")
-        env.service.set_status(p["id"], "completed")
-        assert ReviewService.next_interval(0, "good") == 3
 
     def test_learning_outcomes_not_auto_migrated(self, practice_env):
         from app.database.skill_repository import LearningOutcomeRepository
