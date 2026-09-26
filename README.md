@@ -59,6 +59,11 @@ Historical review rows/schema are retained for migration and history preservatio
 Review-like recall will be handled by future Agent contextual learning,
 not by scheduled review tasks. Assessment 仍是 Mastery 正式更新路径。
 
+## Monthly 已退役（S2）
+
+Monthly Dashboard、Monthly AI Summary 与 summary cache production path 已移除。
+`weekly_summaries` / `monthly_summaries` 及旧 Monthly prompt override 仅为历史兼容数据；迁移与 Release Verifier 继续保留，不再作为产品功能使用。
+
 ## 当前功能（GUI 阶段）
 
 - 主窗口：标题 + 日期 + 今日学习任务列表 + 今日统计
@@ -77,12 +82,6 @@ not by scheduled review tasks. Assessment 仍是 Mastery 正式更新路径。
   - AI 只调建议，本地校验后创建；失败自动回退规则型生成
   - 重规划只动 active+generated 任务，永不动 done/not_done/延期/手动任务
   - 每次决策保存到 planner_decisions 表供审计
-- 周/月总结与学习趋势：
-  - 主窗口顶部导航 [今日] [周总结] [月总结]，使用 QStackedWidget（无复杂 Dashboard）
-  - 统计全部本地实时计算（完成率/学习时间/学习天数/连续学习/分类/主题/延期）
-  - AI 只解读数据、找问题、给建议；AI 不可用则仅显示本地统计并提示
-  - 周/月总结结果缓存到 weekly_summaries/monthly_summaries，统计未变则直接复用
-  - 习惯指标：最常延期分类/Topic、平均每日任务数、平均完成率、连续天数等
 
 ## AI 设置中心（推荐）
 

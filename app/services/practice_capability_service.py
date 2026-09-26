@@ -136,10 +136,6 @@ class PracticeCapabilityService:
     def count_active_by_project(self, project_id: int) -> int:
         return self.evidence_repo.count_active_by_project(project_id)
 
-    def list_active_created(self) -> list[dict]:
-        """active evidence 的 (topic_id, created_at)，供月总结计数。"""
-        return self.evidence_repo.list_active_created()
-
     def count_active_by_topic(self, topic_id: int) -> int:
         return self.evidence_repo.count_active_by_topic(topic_id)
 

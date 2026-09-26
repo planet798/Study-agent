@@ -9,7 +9,7 @@
 逐项记录 PASS / FAIL / NOTE。
 
 ## A. Shell
-- 左 Sidebar（今日/学习路线/实践项目/月度回顾）与底部设置。
+- Sidebar 主导航仅 Today / 学习路线 / 实践项目，设置固定在 footer。
 - Sidebar expanded(228) / collapsed(60) 切换；collapsed 有 tooltip+accessibleName。
 - Page Header 显示页面标题与副标题。
 
@@ -27,10 +27,6 @@
 - Project 卡：status badge / type tag / route tag；里程碑 / 成果 / 项目能力证据 / 学习准备度**分离**；无统一 project %。
 - Detail：概览 / 项目范围 / 学习准备 / 里程碑 / 项目成果 / 项目能力证据。
 - Readiness 只为 requirements ratio；能力缺口非红色；L5 只来自 active confirmed evidence。
-
-## E. Monthly
-- 月份导航（chevron 图标）；4 核心指标；分类行；路线维度无伪造 mastery %；项目证据只计数。
-- 无 weekly 文案；AI 不可用 banner；空月份提示。
 
 ## F. Settings
 - 无 AI service 仍可切换主题（Appearance）。

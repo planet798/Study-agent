@@ -263,56 +263,6 @@ class RouteProgressService:
             "archived": sum(1 for c in children if c.is_archived),
         }
 
-    # ================= 月总结 route 维度 =================
-
-    def monthly_route_stats(self, start: str, end: str) -> list[dict]:
-        """本月按路线（含“未分类”桶）的统计；只基于真实数据。"""
-        routes = []
-        if self.route_repo is not None:
-            routes = self.route_repo.list_learning_routes()
-        buckets: list[tuple[int | None, str]] = [
-            (r.id, r.name) for r in routes
-        ]
-        buckets.append((None, "未分类"))
-
-        out: list[dict] = []
-        for route_id, name in buckets:
-            tasks = [
-                t for t in self.repo.list_between(start, end)
-                if t.route_id == route_id and t.task_type != "review"
-            ]
-            done_tasks = sum(1 for t in tasks if t.status == "done")
-            assessed = self.assessment_repo.list_assessed_by_route(route_id)
-            mastered = self.assessment_repo.list_mastered_by_route(
-                route_id, MASTERED_THRESHOLD
-            )
-            weak = self.assessment_repo.list_weak_by_route(route_id, WEAK_THRESHOLD)
-            covered = self._covered_topics_in_route(route_id)
-            if not tasks and not assessed and not covered:
-                continue  # 本月无任何活动/证据的桶不占位（含空“未分类”）
-            activity = {"required_total": 0, "required_done": 0}
-            if self.topic_learning_service is not None and route_id is not None:
-                try:
-                    activity = self.topic_learning_service.\
-                        route_activity_summary(route_id)
-                except Exception:  # noqa: BLE001
-                    activity = {"required_total": 0, "required_done": 0}
-            out.append({
-                "route_id": route_id,
-                "route_name": name,
-                "done_tasks": done_tasks,
-                "total_tasks": len(tasks),
-                "covered_topics": covered,
-                "assessment_evidence_count": len(assessed),
-                "mastered_count": len(mastered),
-                "weak_count": len(weak),
-                "weak_topics": [kp["name"] for kp in weak],
-                # Phase 2：学习活动完成度（不是 capability）
-                "activity_required": activity.get("required_total", 0),
-                "activity_completed": activity.get("required_done", 0),
-            })
-        return out
-
     def _covered_topics_in_route(self, route_id: int | None) -> int:
         if route_id is None:
             return 0

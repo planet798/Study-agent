@@ -9,6 +9,8 @@
 
 ## 汇总表
 
+S2 后 Monthly Summary 不再是 active PromptDefinition；旧 `summary.monthly.*` override 行可留在用户 DB，但不显示、不调用。表中仅列 active production prompts。
+
 | Prompt Key | 功能 | 角色 | 默认文件 | Runtime variables | UI 可编辑 | 生产调用位置 |
 |---|---|---|---|---|---|---|
 | `task_review.system` | 未完成原因复核 · 系统提示 | system | `prompt_defaults.py` | 无 | 是 | `app/services/task_review_service.py` |
@@ -19,8 +21,6 @@
 | `assessment.generate.user` | 验收出题 · 用户提示 | user | `prompt_defaults.py` | knowledge_point_name, knowledge_point_description, num_questions, types, max_questions, max_points, output_instruction | 是 | `app/services/assessment_service.py` |
 | `assessment.judge.system` | 验收判题 · 系统提示 | system | `prompt_defaults.py` | 无 | 是 | `app/services/assessment_service.py` |
 | `assessment.judge.user` | 验收判题 · 用户提示 | user | `prompt_defaults.py` | questions_json, answers_json, verdicts, levels, output_instruction | 是 | `app/services/assessment_service.py` |
-| `summary.monthly.system` | 月总结 · 系统提示 | system | `prompt_defaults.py` | 无 | 是 | `app/ai/summary.py` |
-| `summary.monthly.user` | 月总结 · 用户提示 | user | `prompt_defaults.py` | stats_json | 是 | `app/ai/summary.py` |
 | `route_builder.system` | AI 路线草稿 · 系统提示 | system | `prompt_defaults.py` | 无 | 是 | `app/services/ai_route_service.py` |
 | `route_builder.user` | AI 路线草稿 · 用户提示 | user | `prompt_defaults.py` | route_context_json, route_skills_section, market_section | 是 | `app/services/ai_route_service.py` |
 | `route_suggestion.system` | 候选技能关联路线 · 系统提示 | system | `prompt_defaults.py` | 无 | 是 | `app/services/ai_route_service.py` |

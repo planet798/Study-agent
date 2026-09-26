@@ -303,14 +303,14 @@ class TestModificationDetected:
 class TestSnapshotFormat:
     """3/14/15. fingerprint v3 + legacy 兼容。"""
 
-    def test_inventory_is_v3_with_row_level_hashes(self, tmp_path):
+    def test_inventory_is_v4_with_row_level_hashes(self, tmp_path):
         from app.diagnostics import release_migration as rm
 
         conn = _make_v20(tmp_path / "f.db")
         try:
             _seed(conn, tasks=3)
             inv = rm.inventory(conn)
-            assert inv["fingerprint_version"] == 3
+            assert inv["fingerprint_version"] == 4
             fp = inv["fingerprints"]["tasks"]
             assert fp["row_level"] is True
             assert len(fp["rows"]) == 3

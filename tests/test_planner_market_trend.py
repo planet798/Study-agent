@@ -31,7 +31,7 @@ TODAY = "2026-09-10"
 NEXT = "2026-09-11"
 
 
-def _env(conn, with_summary_service=True):
+def _env(conn, with_jd_summary_service=True):
     repo = TaskRepository(conn)
     arepo = AssessmentRepository(conn)
     prepo = StudyPlanRepository(conn)
@@ -56,7 +56,7 @@ def _env(conn, with_summary_service=True):
     sr.update(sr.get_by_name("RAG")["id"], status="not_started",
               prerequisites=["LLM 基础", "Embedding"])
     js = (JdSummaryService(JdDailySummaryRepository(conn), sr)
-          if with_summary_service else None)
+          if with_jd_summary_service else None)
     ss = SkillService(sr, plan_repo=prepo, assessment_repo=arepo,
                       market_signal=MarketSignal(js) if js else None)
     ss.link_topic_by_name("Transformer", "Transformer 主题")

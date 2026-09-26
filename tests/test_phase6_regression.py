@@ -278,10 +278,3 @@ class TestOtherRegressions:
         make_requirement_project(env, env.r3.id, ["vLLM 与 PagedAttention"])
         # requirement 不改变 curriculum 完成状态
         assert env.tl.is_topic_curriculum_complete(vllm.id) is False
-
-    def test_monthly_summary_no_composite_score(self):
-        import app.ui.summary_pages as sp
-
-        src = inspect.getsource(sp)
-        assert "综合能力评分" not in src
-        assert "平均能力" not in src

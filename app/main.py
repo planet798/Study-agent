@@ -28,7 +28,6 @@ from app.ai.config_service import AIConfigService
 from app.ai.long_term_context import load_long_term_context
 from app.ai.planner import AIPlanner
 from app.ai.prompt_registry import PromptOverrideRepository, PromptRegistry
-from app.ai.summary import AISummaryGenerator
 from app.database.connection import (
     get_connection,
     get_raw_connection,
@@ -38,14 +37,11 @@ from app.database.connection import (
 from app.database.repository import TaskRepository
 from app.database.study_plan_repository import (
     StudyPlanRepository,
-    SummaryCacheRepository,
 )
 from app.services.daily_planner_service import DailyPlannerService
 from app.services.date_service import DateService
 from app.services.canonical_route_service import CanonicalRouteService
-from app.services.stats_service import StatsService
 from app.services.study_plan_service import StudyPlanService
-from app.services.summary_service import SummaryService
 from app.services.task_review_service import TaskReviewService
 from app.services.task_service import TaskService
 from app.ui.main_window import MainWindow
@@ -1546,14 +1542,6 @@ def main() -> int:
         topic_learning_service=topic_learning_service,
     )
 
-    # 周/月总结（本地统计 + AI 解读 + 缓存）
-    summary_service = SummaryService(
-        stats_service=StatsService(repo),
-        cache_repo=SummaryCacheRepository(conn),
-        ai_generator=AISummaryGenerator(ai_client, prompt_registry=prompt_registry),
-        route_progress_service=route_progress_service,
-    )
-
     # Phase F：AI 学习路线草稿（纯 AI，不碰 DB）
     from app.services.ai_route_service import AIRouteBuilderService
 
@@ -1570,7 +1558,6 @@ def main() -> int:
         daily_planner_service=daily_planner,
         scheduler=scheduler,
         route_repo=route_repo,
-        summary_service=summary_service,
         assessment_repo=assessment_repo,
         outcome_service=outcome_service,
         task_repo=repo,
@@ -1601,7 +1588,6 @@ def main() -> int:
         review_service=review_service,
         study_plan_service=study_plan_service,
         daily_planner_service=daily_planner,
-        summary_service=summary_service,
         assessment_service=assessment_service,
         assessment_repo=assessment_repo,
         skill_service=skill_service,

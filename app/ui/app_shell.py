@@ -21,7 +21,6 @@ class PageKey(str, Enum):
     TODAY = "today"
     ROUTES = "routes"
     PRACTICE = "practice"
-    MONTHLY = "monthly"
     SETTINGS = "settings"
 
 
@@ -34,7 +33,7 @@ class PageSpec:
     footer: bool = False
 
 
-# 主导航顺序固定：Today → Routes → Practice → Monthly →（footer）Settings。
+# 主导航顺序固定：Today → Routes → Practice →（footer）Settings。
 PAGE_SPECS: tuple[PageSpec, ...] = (
     PageSpec(PageKey.TODAY, "今日", "今天的学习计划", _icons.IconName.HOME),
     PageSpec(
@@ -42,9 +41,6 @@ PAGE_SPECS: tuple[PageSpec, ...] = (
     ),
     PageSpec(
         PageKey.PRACTICE, "实践项目", "项目与实践证据", _icons.IconName.PROJECT
-    ),
-    PageSpec(
-        PageKey.MONTHLY, "月度回顾", "学习复盘", _icons.IconName.CALENDAR
     ),
     PageSpec(
         PageKey.SETTINGS, "设置", "模型、Prompt 与外观设置",

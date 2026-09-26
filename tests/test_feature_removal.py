@@ -16,8 +16,6 @@ from app.database.study_plan_repository import StudyPlanRepository
 from app.database.learning_route_repository import LearningRouteRepository
 from app.services.date_service import DateService
 from app.services.notes_service import NotesService
-from app.services.stats_service import StatsService
-from app.services.summary_service import SummaryService
 from app.services.task_service import TaskService
 from app.ui.main_window import MainWindow
 
@@ -85,18 +83,6 @@ class TestUiSectionsRemoved:
         content = ns.build_daily_note(TODAY)
         assert "今日额外学习" not in content
         assert "课外探索" not in content
-
-    def test_monthly_summary_no_extra_exploration(self, conn):
-        repo = TaskRepository(conn)
-        repo.create("x", scheduled_date=TODAY)
-        svc = SummaryService(StatsService(repo),
-                             __import__("app.database.study_plan_repository",
-                                        fromlist=["SummaryCacheRepository"])
-                             .SummaryCacheRepository(conn))
-        stats = svc.get_monthly_summary(2026, 9)["stats"]
-        assert "extra" not in stats
-        assert "exploration" not in stats
-        assert "extra_count" not in stats
 
     def test_planner_prompt_no_extra_service(self):
         from app.ai.prompts import build_planner_system_prompt

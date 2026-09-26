@@ -255,10 +255,10 @@
     "repo": "planet798/Study-agent",
     "version": "v0.1.0",
     "implemented": [
-      "PySide6 GUI", "SQLite", "任务 CRUD", "每日/每周/月度学习任务",
-      "日期注入/日期模拟", "AI 任务规划", "AI 任务复核", "AI Summary",
+      "PySide6 GUI", "SQLite", "任务 CRUD", "每日学习任务",
+      "日期注入/日期模拟", "AI 任务规划", "未完成任务 AI 复核",
       "LLM Structured Output", "AI 失败规则回退", "Windows 一键启动",
-      "DeepSeek API 接入", "客观验收 + AI 判题 + 掌握度", "复习调度",
+      "DeepSeek API 接入", "客观验收 + AI 判题 + 掌握度",
       "额外学习", "课外探索", "掌握度回流 Planner（Phase 8）",
       "技能/JD/学习成果底座（Phase A v6）", "Git 版本控制",
       "GitHub 私有仓库", "445+ 测试"

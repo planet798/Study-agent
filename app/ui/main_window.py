@@ -97,7 +97,6 @@ class MainWindow(QMainWindow):
         review_service: TaskReviewService | None = None,
         study_plan_service=None,
         daily_planner_service=None,
-        summary_service=None,
         assessment_service=None,
         assessment_repo=None,
         skill_service=None,
@@ -135,8 +134,6 @@ class MainWindow(QMainWindow):
         self.study_plan_service = study_plan_service
         # AI 动态规划服务：可选，用于”AI 今日规划“区域；未传则显示不可用
         self.daily_planner_service = daily_planner_service
-        # 周/月总结服务：可选；未传则隐藏周/月总结页
-        self.summary_service = summary_service
         # Phase 3D~6 服务：可选；未传则对应区域隐藏
         self.assessment_service = assessment_service
         self.assessment_repo = assessment_repo
@@ -158,7 +155,7 @@ class MainWindow(QMainWindow):
         # Phase C：学习路线服务（可选；不传则隐藏“学习路线”页）
         self.route_service = route_service
         self.route_plan_service = route_plan_service
-        # Phase E：路线进度/掌握/复习状态
+        # Phase E：路线进度/掌握情况
         self.route_progress_service = route_progress_service
         # Phase F：AI 路线草稿（纯 AI，不碰 DB，可跨线程）
         self.ai_route_service = ai_route_service
@@ -229,7 +226,6 @@ class MainWindow(QMainWindow):
         self.nav_today_btn = self.sidebar.item(PageKey.TODAY)
         self.nav_routes_btn = self.sidebar.item(PageKey.ROUTES)
         self.nav_practice_btn = self.sidebar.item(PageKey.PRACTICE)
-        self.nav_monthly_btn = self.sidebar.item(PageKey.MONTHLY)
         self.nav_ai_btn = self.sidebar.item(PageKey.SETTINGS)
         self.sidebar.page_requested.connect(self._on_nav_requested)
 
@@ -261,23 +257,8 @@ class MainWindow(QMainWindow):
             self._on_route_filter_changed
         )
         self.today_page.replan_requested.connect(self._on_replan)
-        self.monthly_page_index = None
         self.routes_page_index = None
         self.ai_settings_page_index = None
-
-        # ----- 月总结页（可选，索引 1） -----
-        if self.summary_service is not None:
-            from .summary_pages import MonthlySummaryPage
-
-            self.monthly_page = MonthlySummaryPage(
-                self.summary_service, today_provider=self.today_provider,
-                practice_capability_service=self.practice_capability_service,
-            )
-            self.stack.addWidget(self.monthly_page)
-            self.monthly_page_index = self.stack.count() - 1
-            self.nav_monthly_btn.setEnabled(True)
-        else:
-            self.nav_monthly_btn.setEnabled(False)
 
         # ----- 学习路线页（可选） -----
         if self.route_service is not None:
@@ -343,13 +324,11 @@ class MainWindow(QMainWindow):
 
     def _on_nav_requested(self, key: str) -> None:
         if key == PageKey.TODAY.value:
-            self._switch_page(0)
+            self._switch_to_today()
         elif key == PageKey.ROUTES.value:
             self._switch_to_routes()
         elif key == PageKey.PRACTICE.value:
             self._switch_to_practice()
-        elif key == PageKey.MONTHLY.value:
-            self._switch_page(1)
         elif key == PageKey.SETTINGS.value:
             self._switch_to_ai_settings()
 
@@ -367,20 +346,9 @@ class MainWindow(QMainWindow):
             self.app_shell.set_page_header(key)
         self.sidebar.set_current(key)
 
-    def _switch_page(self, index: int) -> None:
-        """切换今日 / 月总结页面（保留旧索引语义）。"""
-        if index == 0:
-            self.stack.setCurrentIndex(0)
-            self._update_page_header(PageKey.TODAY)
-            return
-        if index == 1 and self.monthly_page_index is not None:
-            self.stack.setCurrentIndex(1)
-            self._update_page_header(PageKey.MONTHLY)
-            return
-        if index == 1:
-            self.statusBar().showMessage("月度回顾不可用", 3000)
-            return
-        self.stack.setCurrentIndex(index)
+    def _switch_to_today(self) -> None:
+        self.stack.setCurrentIndex(0)
+        self._update_page_header(PageKey.TODAY)
 
     def _switch_to_routes(self) -> None:
         if self.routes_page_index is None:
@@ -459,7 +427,7 @@ class MainWindow(QMainWindow):
     def refresh(self, preserve_scroll: bool = False) -> None:
         """重建今日页（学习任务 + 职业面板）。
 
-        :param preserve_scroll: 同页面 mutation（完成/未完成/移除/复习完成等）
+        :param preserve_scroll: 同页面 mutation（完成/未完成/移除等）
             时置 True，重建后恢复原滚动位置，避免自动跳到底部。
         """
         state = self.capture_today_view_state() if preserve_scroll else None

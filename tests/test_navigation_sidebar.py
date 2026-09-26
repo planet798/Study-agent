@@ -38,7 +38,7 @@ def _main_texts(sidebar):
 
 
 def test_nav_item_order(sidebar):
-    assert _main_texts(sidebar) == ["今日", "学习路线", "实践项目", "月度回顾"]
+    assert _main_texts(sidebar) == ["今日", "学习路线", "实践项目"]
 
 
 def test_settings_is_footer(sidebar):
@@ -93,13 +93,12 @@ def test_selected_state_and_filled_icon(sidebar):
     assert routes.icon().cacheKey() != regular_key
 
 
-def test_unavailable_page_disabled(sidebar):
-    item = sidebar.item(PageKey.MONTHLY)
-    assert item.isEnabled() is True
-    sidebar.set_item_available(PageKey.MONTHLY, False)
-    assert item.isEnabled() is False
-    sidebar.set_item_available(PageKey.MONTHLY, True)
-    assert item.isEnabled() is True
+def test_sidebar_pages_are_today_routes_practice_and_settings(sidebar):
+    assert {key_value(spec.key) for spec in PAGE_SPECS} == {
+        "today", "routes", "practice", "settings"
+    }
+    assert not hasattr(PageKey, "MONTHLY")
+    assert sidebar.item(PageKey.SETTINGS).text() == "设置"
 
 
 def test_click_emits_page_requested(qtbot, sidebar):

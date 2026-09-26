@@ -267,57 +267,6 @@ def parse_daily_plan_from_json(text: str) -> DailyPlan:
 
 
 # ============================================================
-# AI 学习总结（月）输出结构
-# ============================================================
-
-
-@dataclass(frozen=True)
-class MonthlySummary:
-    overview: str
-    progress: str
-    strengths: tuple[str, ...]
-    weaknesses: tuple[str, ...]
-    recommendations: tuple[str, ...]
-    next_month_focus: tuple[str, ...]
-
-
-def _require_str_list(value: object, field: str, max_items: int = 20) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise AIServiceError(f"字段 {field} 必须是数组")
-    out: list[str] = []
-    for i, item in enumerate(value[:max_items]):
-        if not isinstance(item, str) or not item.strip():
-            raise AIServiceError(f"字段 {field}[{i}] 必须是非空字符串")
-        out.append(item.strip())
-    return tuple(out)
-
-
-def parse_monthly_summary(raw: object) -> MonthlySummary:
-    if not isinstance(raw, dict):
-        raise AIServiceError("月总结输出必须是 JSON 对象")
-    for field_name in ("overview", "progress", "strengths", "weaknesses",
-                       "recommendations", "next_month_focus"):
-        if field_name not in raw:
-            raise AIServiceError(f"月总结缺少字段：{field_name}")
-    return MonthlySummary(
-        overview=_require_str(raw["overview"], "overview", max_len=1500),
-        progress=_require_str(raw["progress"], "progress", max_len=1500),
-        strengths=_require_str_list(raw["strengths"], "strengths"),
-        weaknesses=_require_str_list(raw["weaknesses"], "weaknesses"),
-        recommendations=_require_str_list(raw["recommendations"], "recommendations"),
-        next_month_focus=_require_str_list(raw["next_month_focus"], "next_month_focus"),
-    )
-
-
-def parse_monthly_from_json(text: str) -> MonthlySummary:
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise AIServiceError(f"AI 月总结不是合法 JSON：{e}") from e
-    return parse_monthly_summary(data)
-
-
-# ============================================================
 # AI 验收题生成（Assessment）输出结构
 # ============================================================
 

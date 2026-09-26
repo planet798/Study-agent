@@ -79,7 +79,8 @@ class TestRoutesPage:
         qtbot.addWidget(w)
         assert w.nav_today_btn.text() == "今日"
         assert w.nav_routes_btn.text() == "学习路线"
-        assert w.nav_monthly_btn.text() == "月度回顾"
+        assert not hasattr(w, "nav_monthly_btn")
+        assert w.nav_ai_btn.text() == "设置"
         assert w.nav_routes_btn.isEnabled() is True
         w.nav_routes_btn.click()
         assert w.stack.currentIndex() == w.routes_page_index

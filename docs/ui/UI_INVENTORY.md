@@ -1,4 +1,6 @@
-# Study-Agent — UI Inventory (UI-0)
+# Study-Agent — UI Inventory (Historical UI-0 snapshot)
+
+> Historical audit, not a current module inventory. S2 retired MonthlySummaryPage and removed `app/ui/summary_pages.py`; current Sidebar pages are Today / Routes / Practice / Settings.
 
 > 基线 commit: `a36e688`
 > 审查范围: `app/ui/` 全部 20 个 Python 文件，共 **9,366 LOC**。
@@ -10,7 +12,7 @@
 
 | 类别 | 文件数 | LOC |
 |---|---|---|
-| 主窗口 / 页面 | 5 (`main_window`, `routes_page`, `practice_page`, `ai_settings_page`, `summary_pages`) | 4,696 |
+| 主窗口 / 页面 | Historical count (includes retired `summary_pages`) | 4,696 |
 | 组件 / 控件 | 1 (`task_widget`) | 352 |
 | 对话框 | 8 (`dialogs`, `manual_task_dialog`, `past_task_dialog`, `route_dialogs`, `route_builder_dialogs`, `practice_dialogs`, `career_dialogs`, `capability_dialog`, `assessment_dialog`, `topic_learning_dialog`, `ai_settings_dialogs`) | 3,613 |
 | 后台线程 | 1 (`ai_worker`) | 216 |
@@ -25,8 +27,8 @@
 |---|---|
 | 主要 class | `TodayViewState` (dataclass)、`MainWindow(QMainWindow)` |
 | 职责 | 应用外壳 + Today 页面 + 顶部导航 + 托盘 + 生命周期 + 业务编排 |
-| 依赖 service | `TaskService`、`DateService`、`TaskReviewService`、`ManualTaskService`、`StudyPlanService`、`DailyPlannerService`、`SummaryService`、`AssessmentService`、`SkillService`、`JdService`、`JdSummaryService`、`LearningRouteService`、`RoutePlanService`、`CapabilityService`、`PracticeProjectService`、`PracticeCapabilityService`、`PracticeReadinessService`、`AIConfigService`、`PromptRegistry`、`scheduler`、`ai_route_service` … |
-| 依赖 UI | `ai_worker`、`assessment_dialog`、`dialogs`、`manual_task_dialog`、`styles`、`task_widget`；延迟 import `summary_pages` / `routes_page` / `practice_page` / `ai_settings_page` / `career_dialogs` |
+| 依赖 service | `TaskService`、`DateService`、`TaskReviewService`、`ManualTaskService`、`StudyPlanService`、`DailyPlannerService`、`AssessmentService`、`SkillService`、`JdService`、`JdSummaryService`、`LearningRouteService`、`RoutePlanService`、`CapabilityService`、`PracticeProjectService`、`PracticeCapabilityService`、`PracticeReadinessService`、`AIConfigService`、`PromptRegistry`、`scheduler`、`ai_route_service` … |
+| 依赖 UI | `ai_worker`、`assessment_dialog`、`dialogs`、`manual_task_dialog`、`styles`、`task_widget`；延迟 import `routes_page` / `practice_page` / `ai_settings_page` / `career_dialogs` |
 | 局部 style/QSS | `self.scroll.setStyleSheet("background: transparent;")`（第 313 行）；全局 `APP_STYLE` 注入 |
 | 是否值得拆分 | **是，最高优先级**。包含至少 A–F 六类职责（见 §main_window 审计）。Today 页面整体混在 MainWindow 内。 |
 
@@ -83,17 +85,9 @@
 | 局部 style/QSS | 无显式 QSS；但 mono 字体未定义（Prompt 编辑器应为 monospace） |
 | 是否值得拆分 | **是**。未来 Settings 演进为 Appearance / Model & API / Prompt Manager 三个 section；当前是 2-tab。 |
 
-## 5. `app/ui/summary_pages.py` — 294 LOC
+## 5. Monthly module retired (S2)
 
-| 项 | 内容 |
-|---|---|
-| 主要 class | `MonthlySummaryPage(QWidget)`；模块函数 `_h_mm`、`_ai_section`、`_add_pair` |
-| 职责 | 月总结：月份切换 + 本地统计 + 分类排行 + 路线维度 + 项目能力证据计数 + AI 解读 |
-| 依赖 service | `summary_service`、`practice_capability_service` |
-| 依赖 UI | 无（仅 utils.date_utils） |
-| 依赖 utils | `month_range`、`today` |
-| 局部 style/QSS | 无；`_add_pair` 使用 `setFixedWidth(120)`（DPI 风险） |
-| 是否值得拆分 | 中等。`_ai_section` / `_add_pair` 应成为 Design System 的 section/value 组件。 |
+`app/ui/summary_pages.py` was removed. Monthly UI and its SummaryService / StatsService production chain are not current product modules. Historical weekly/monthly summary rows remain only for schema and migration compatibility.
 
 ## 6. `app/ui/task_widget.py` — 352 LOC
 

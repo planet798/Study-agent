@@ -1,4 +1,4 @@
-"""UI-4 targeted tests: Practice / Monthly / Settings redesign."""
+"""UI-4 targeted tests: Practice / Settings redesign."""
 
 from __future__ import annotations
 
@@ -84,100 +84,6 @@ def test_prompt_editor_monospace_and_state_tag(qapp, prompt_registry):
     assert panel.editor.accessibleName() == "Prompt 编辑器"
     panel.refresh()
     assert panel.status_tag is not None
-
-
-# ============================================================
-# Monthly
-# ============================================================
-
-class _StubSummary:
-    def __init__(self, stats=None, ai=None):
-        self._stats = stats or {}
-        self._ai = ai
-
-    def get_monthly_summary(self, year, month):
-        default = {
-            "total_tasks": 4, "completed_tasks": 3, "completion_rate": 75.0,
-            "postponed_tasks": 1, "estimated_minutes": 200,
-            "completed_minutes": 150, "study_days": 3, "streak_days": 2,
-            "category_ranking": [
-                {"category": "学习", "completed": 3, "total": 4,
-                 "completion_rate": 75.0, "estimated_minutes": 200},
-            ],
-            "best_category": {"category": "学习", "completion_rate": 75.0},
-            "worst_category": None, "most_invested_category": None,
-            "most_postponed_topic": None, "route_stats": [],
-        }
-        default.update(self._stats)
-        return {
-            "start": "2026-01-01", "end": "2026-01-31",
-            "stats": default, "ai_summary": self._ai,
-        }
-
-
-def test_monthly_core_stat_cards(qapp):
-    from app.ui.summary_pages import MonthlySummaryPage
-
-    page = MonthlySummaryPage(_StubSummary(), today_provider=lambda: "2026-01-05")
-    assert page.completed_card.value() == "3"
-    assert page.rate_card.value() == "75.0%"
-    assert page.minutes_card.value() == "2 小时 30 分"
-    assert page.days_card.value() == "3"
-
-
-def test_monthly_nav_uses_icon_buttons(qapp):
-    from app.ui.summary_pages import MonthlySummaryPage
-
-    page = MonthlySummaryPage(_StubSummary(), today_provider=lambda: "2026-01-05")
-    assert page.prev_btn.text() == ""
-    assert page.prev_btn.accessibleName() == "上一月"
-    assert page.next_btn.accessibleName() == "下一月"
-
-
-def test_monthly_no_weekly_labels(qapp):
-    from PySide6.QtWidgets import QLabel
-
-    from app.ui.summary_pages import MonthlySummaryPage
-
-    ai = '{"overview": "o", "problems": ["p"], "next_week_focus": ["f"]}'
-    page = MonthlySummaryPage(
-        _StubSummary(ai=ai), today_provider=lambda: "2026-01-05"
-    )
-    texts = [l.text() for l in page.findChildren(QLabel)]
-    joined = "\n".join(texts)
-    assert "本周主要问题" not in joined
-    assert "下周重点" not in joined
-    assert "主要问题" in joined
-    assert "后续重点" in joined
-
-
-def test_monthly_ai_unavailable_banner(qapp):
-    from PySide6.QtWidgets import QLabel
-
-    from app.ui.summary_pages import MonthlySummaryPage
-
-    page = MonthlySummaryPage(_StubSummary(), today_provider=lambda: "2026-01-05")
-    joined = "\n".join(l.text() for l in page.findChildren(QLabel))
-    assert "AI 解读暂不可用" in joined
-
-
-def test_monthly_empty_month_banner(qapp):
-    from app.ui.summary_pages import MonthlySummaryPage
-
-    empty = MonthlySummaryPage(
-        _StubSummary(stats={
-            "total_tasks": 0, "completed_tasks": 0,
-            "category_ranking": [],
-        }),
-        today_provider=lambda: "2026-01-05",
-    )
-    assert empty.empty_banner.title() == "本月暂无学习记录"
-    assert empty.empty_banner.isHidden() is False
-
-    populated = MonthlySummaryPage(
-        _StubSummary(), today_provider=lambda: "2026-01-05"
-    )
-    assert populated.empty_banner.isHidden() is True
 
 
 # ============================================================

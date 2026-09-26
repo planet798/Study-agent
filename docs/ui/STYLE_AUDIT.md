@@ -120,7 +120,7 @@ Daily Review / Review Scheduler / Daily Retention 已退出生产 UI。TaskWidge
 ### 4.3 Padding / spacing
 - QSS: `padding: 6px 14px`（按钮）、`padding: 6px`（输入）、`padding: 30px`（空状态）、`padding-top: 8px`（区块标题）。
 - 布局代码内的 magic number（不统一）：
-  - 页面 root: `setContentsMargins(12,8,12,8)`（main）、`(4,4,4,4)`（routes/practice/monthly）、`(4,0,4,0)`（settings）
+  - Historical audit referenced Monthly root margins; the Monthly page was retired in S2. Current page roots are Today / Routes / Practice / Settings.
   - 卡片: `setContentsMargins(14,10,14,10)`（TaskWidget / route card / project card，重复 3 处）
   - 间距: `root.setSpacing(8)` / `(10)` / `(6)` / `(3)` / `(4)` / `(2)` 混用
 - 这些值散落在每个 `_build_ui()`，没有共享常量 → 全页面间距节奏不一致。
@@ -137,7 +137,7 @@ Daily Review / Review Scheduler / Daily Retention 已退出生产 UI。TaskWidge
 | `main_window._tray_icon()` | `QPainter` 手绘圆角蓝底“学”字 | 唯一“图标”，硬编码 `#2c6fbb` / radius 14 / 64px |
 | `TaskWidget` | `setProperty("done"/"postponing")` + `unpolish/polish` | 用 Qt property selector 做状态色，机制正确但只此一处 |
 | `ai_settings_dialogs.py:35` | `toggle.setFixedWidth(40)` | 眼睛按钮固定宽 |
-| `summary_pages.py:79` | `k.setFixedWidth(120)` | 统计 key 列固定宽 |
+| `summary_pages.py:79` | Historical-only | Monthly UI file removed in S2 |
 | `topic_learning_dialog.py` | `setMinimumWidth(80)` / `setFixedWidth(30)` | 排序按钮固定宽 |
 | 多个 dialog | `desc_edit.setFixedHeight(70)` 等 | 固定高度，DPI 敏感 |
 

@@ -24,7 +24,6 @@ from ..ai.prompts import (
     build_assessment_generate_vars,
     build_assessment_judge_vars,
     build_jd_parse_vars,
-    build_monthly_summary_vars,
     build_planner_system_vars,
     build_planner_user_vars,
     build_resume_material_vars,
@@ -126,7 +125,6 @@ class PromptPreviewService:
         daily_planner_service=None,
         scheduler=None,
         route_repo=None,
-        summary_service=None,
         assessment_repo=None,
         outcome_service=None,
         task_repo=None,
@@ -137,7 +135,6 @@ class PromptPreviewService:
         self.daily_planner_service = daily_planner_service
         self.scheduler = scheduler
         self.route_repo = route_repo
-        self.summary_service = summary_service
         self.assessment_repo = assessment_repo
         self.outcome_service = outcome_service
         self.task_repo = task_repo
@@ -299,23 +296,6 @@ class PromptPreviewService:
             except Exception:  # noqa: BLE001
                 pass
         return build_assessment_judge_vars(questions, answers)
-
-    # ---------- Summary ----------
-
-    def _context_summary(self, key: str, route_id) -> dict:
-        if key == "summary.monthly.system":
-            return {}
-        today = self.today_provider()
-        year, month = int(today[:4]), int(today[5:7])
-        stats: dict = {}
-        if self.summary_service is not None:
-            try:
-                stats = self.summary_service.get_monthly_summary(year, month)["stats"]
-            except Exception:  # noqa: BLE001
-                stats = {}
-        if not stats:
-            stats = {"month": f"{year}-{month:02d}", "note": SAMPLE_MARK}
-        return build_monthly_summary_vars(stats)
 
     # ---------- Route builder / suggestion ----------
 

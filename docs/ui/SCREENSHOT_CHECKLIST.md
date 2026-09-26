@@ -41,12 +41,11 @@
 | 3 | Route detail | 路线卡片「查看路线」 | 进度/Mastery/Capability/Phase/Topic/Skill/Gap/Project |
 | 4 | Practice overview | 导航「实践项目」 | 项目卡片列表 + 状态筛选 |
 | 5 | Practice detail | 项目卡片「查看」 | Milestone/Output/Readiness/Evidence 各 section |
-| 6 | Monthly | 导航「月总结」 | 统计 + 分类排行 + 路线维度 + 项目能力证据 + AI 解读 |
 | 7 | AI Settings — Profiles | 导航「AI 设置」→ 模型/API | Profile 列表 + 详情 + 连接测试区 |
 | 8 | Prompt Manager | 导航「AI 设置」→ Prompt 管理 | 树 + 编辑器 + 变量 + 预览 + 路线选择 |
 | 9 | Add Task dialog | Today「＋ 添加学习任务」 | 普通 To-do / 正式知识任务切换 |
 | 10 | Assessment dialog | 任务卡「开始验收」 | 问答区 + 提交 + loading/error |
-| 11 | Empty state | 各页面无数据时 | Today 无任务 / Practice 无项目 / Monthly 无数据 |
+| 11 | Empty state | 各页面无数据时 | Today 无任务 / Practice 无项目 |
 | 12 | Populated state | 各页面有数据时 | 与 #1–#6 对应，可复用 |
 
 ### 建议补充（P1 polish 基线）
@@ -105,11 +104,10 @@ docs/ui/screenshots/
 - Route detail 是否不再是纯文本堆叠；knowledge row 是否 Mastery/Capability 分离。
 - 学习活动是否以文本状态展示（无 ✓ ○ ◇ 符号）。
 
-## 5b. UI-4 后人工重点检查（Practice / Monthly / Settings）
+## 5b. UI-4 后人工重点检查（Practice / Settings）
 
 **Practice**：四类进度是否分开（Readiness / Milestone / Output / Evidence）；状态徽标；empty state；
 detail 是否不再是 `【】` 文本堆叠；readiness 不是能力百分比；L5 只来自 active confirmed evidence。
-**Monthly**：4 个核心指标；时间是否小时/分；分类行；无 weekly 文案；AI 不可用 banner；空月份。
 **Settings**：无 AI service 仍可切换主题；profile 无 ●○；Key 不回显；editor monospace；Light/Dark。
 
 ---

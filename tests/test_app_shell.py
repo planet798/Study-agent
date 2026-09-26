@@ -58,9 +58,12 @@ def test_set_page_header_with_subtitle_override(shell):
     assert shell.page_header.subtitle() == "2026-01-05"
 
 
-def test_set_item_available(shell):
-    shell.set_item_available(PageKey.MONTHLY, False)
-    assert shell.sidebar.item(PageKey.MONTHLY).isEnabled() is False
+def test_shell_has_only_current_product_pages(shell):
+    assert [spec.key.value for spec in PAGE_SPECS] == [
+        "today", "routes", "practice", "settings"
+    ]
+    assert not hasattr(PageKey, "MONTHLY")
+    assert shell.sidebar.item(PageKey.SETTINGS).text() == "设置"
 
 
 def test_select_page(shell):

@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS planner_decisions (
 );
 CREATE INDEX IF NOT EXISTS idx_planner_decisions_date ON planner_decisions(date);
 
--- 周/月总结缓存：统计经本地计算，AI 总结可缓存复用
+-- LEGACY HISTORY: weekly_summaries / monthly_summaries remain for migration and history preservation only.
 CREATE TABLE IF NOT EXISTS weekly_summaries (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     period_start  TEXT NOT NULL,

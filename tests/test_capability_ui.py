@@ -225,11 +225,6 @@ class TestHardBoundaries:
         res = sched.generate("2026-01-05")
         assert len(res["created_ids"]) <= 3
 
-    def test_monthly_summary_prompt_says_activity_not_capability(self):
-        from app.ai.prompt_defaults import SUMMARY_MONTHLY_USER
-
-        assert "activity_completed" in SUMMARY_MONTHLY_USER
-        assert "能力等级" in SUMMARY_MONTHLY_USER
 
     def test_assessment_mastery_weights_unchanged(self):
         from app.services import assessment_service as a

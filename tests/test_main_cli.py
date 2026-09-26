@@ -223,19 +223,6 @@ class TestWholeAppUsesInjectedDate:
             date_utils.reset_today_provider()
             assert date_utils.today() == original
 
-    def test_stats_uses_09_05(self, repo):
-        from app.services.stats_service import StatsService
-
-        svc = StatsService(repo)
-        original = date_utils.today()
-        try:
-            date_utils.set_today_provider(D9_05)
-            trend = svc.get_learning_trend(days=3)
-            assert trend["points"][-1]["date"] == D9_05
-        finally:
-            date_utils.reset_today_provider()
-            assert date_utils.today() == original
-
     def test_date_service_uses_09_05(self, repo):
         from app.services.date_service import DateService
 

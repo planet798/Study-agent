@@ -15,7 +15,6 @@ from app.ai.prompts import (
     build_assessment_generate_vars,
     build_assessment_judge_vars,
     build_jd_parse_vars,
-    build_monthly_summary_vars,
     build_planner_system_vars,
     build_planner_user_vars,
     build_resume_material_vars,
@@ -28,7 +27,6 @@ from app.ai.schemas import (
     ASSESSMENT_RESULT_LEVELS,
     ASSESSMENT_VERDICTS,
 )
-from app.ai.summary import AISummaryGenerator
 from app.database.repository import Task
 from app.services.ai_route_service import AIRouteBuilderService
 from app.services.assessment_service import AssessmentService
@@ -80,11 +78,6 @@ JUDGMENT_JSON = json.dumps({
                    "reason": "ok"}],
     "weak_points": [], "result_level": ASSESSMENT_RESULT_LEVELS[0],
     "mastery_estimate": 0.7,
-})
-MONTHLY_JSON = json.dumps({
-    "overview": "o", "progress": "p", "strengths": ["s"],
-    "weaknesses": ["w"], "recommendations": ["r"],
-    "next_month_focus": ["n"],
 })
 ROUTE_DRAFT_JSON = json.dumps({
     "route_name": "RL", "plan_name": "RL 计划", "summary": "s",
@@ -176,20 +169,6 @@ class TestAssessmentUsesOverride:
         assert system == "SENTINEL_J_SYS"
         assert "SENTINEL_J_USER" in user
 
-
-class TestSummaryUsesOverride:
-    def test_monthly(self, prompt_registry):
-        prompt_registry.set_override("summary.monthly.system", "SENTINEL_S_SYS")
-        prompt_registry.set_override(
-            "summary.monthly.user", "SENTINEL_S_USER {{stats_json}}"
-        )
-        client = CapturingClient(MONTHLY_JSON)
-        AISummaryGenerator(client, prompt_registry=prompt_registry).generate_monthly(
-            {"total": 1}
-        )
-        system, user = client.calls[0]
-        assert system == "SENTINEL_S_SYS"
-        assert "SENTINEL_S_USER" in user
 
 
 class TestRouteBuilderUsesOverride:

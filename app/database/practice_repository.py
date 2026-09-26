@@ -620,14 +620,6 @@ class PracticeTopicEvidenceRepository:
         ).fetchone()
         return int(row[0])
 
-    def list_active_created(self) -> list[dict]:
-        """active evidence 的 (topic_id, created_at) 轻量列表（月总结用）。"""
-        rows = self.conn.execute(
-            "SELECT topic_id, created_at FROM practice_topic_evidence "
-            "WHERE is_active = 1 ORDER BY id ASC"
-        ).fetchall()
-        return [{"topic_id": int(r[0]), "created_at": r[1]} for r in rows]
-
     # ---------- evidence ↔ outputs ----------
 
     def add_output(

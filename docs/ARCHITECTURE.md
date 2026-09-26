@@ -48,7 +48,8 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
 - **JD / Market / Skill**：`jd_service` / `jd_summary_service` / `market_signal` /
   `skill_service`。
 - **AI Settings / Prompt**：`ai/config_service` + `ai/secrets` + `ai/prompt_registry`
-  + `ai/prompt_defaults`；override 存 DB。
+  + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
+- **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
 ## 3. 关键不变式（CRITICAL INVARIANTS）
 

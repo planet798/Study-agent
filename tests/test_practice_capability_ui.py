@@ -208,40 +208,6 @@ class TestGenericEvidenceDialog:
         assert "撤销证据" in joined
 
 
-class TestMonthlySummary:
-    def _page(self, env, qtbot, start="2026-09-01", end="2026-09-30"):
-        from app.ui.summary_pages import MonthlySummaryPage
-
-        class _Svc:
-            def get_monthly_summary(self, y, m):
-                return {
-                    "start": start, "end": end,
-                    "stats": {"route_stats": [], "category_ranking": []},
-                    "ai_summary": None,
-                }
-
-        page = MonthlySummaryPage(
-            _Svc(), today_provider=lambda: "2026-09-15",
-            practice_capability_service=env.pc,
-        )
-        qtbot.addWidget(page)
-        return page
-
-    def test_monthly_counts_not_average(self, practice_capability_env, qtbot):
-        env = practice_capability_env
-        r = ready_lora(env)
-        page = self._page(env, qtbot)
-        joined = "\n".join(_labels(page))
-        assert "本月新增项目能力证据：PROJECT：0" in joined
-        create_evidence(env, r.project, r.lora, [r.repo["id"]])
-        page.refresh()
-        joined = "\n".join(_labels(page))
-        assert "本月新增项目能力证据：PROJECT：1" in joined
-        assert r.lora.name in joined
-        # 不得出现平均 Capability 评分
-        assert "平均" not in joined
-
-
 class TestNegativeRegressions:
     def test_planner_does_not_reference_practice(self):
         # Phase 6：Scheduler / StudyPlanService 不读 Practice；

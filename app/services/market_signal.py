@@ -25,8 +25,8 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
 class MarketSignal:
     """调用 JdSummaryService 的近 30 天趋势，产出技能市场信号。"""
 
-    def __init__(self, summary_service=None):
-        self.summary_service = summary_service
+    def __init__(self, jd_summary_service=None):
+        self.jd_summary_service = jd_summary_service
 
     def compute(
         self, end_date: str, target_type: str = DEFAULT_TARGET
@@ -39,10 +39,10 @@ class MarketSignal:
             "sample_count_30d": 0,
             "skills": {},
         }
-        if self.summary_service is None:
+        if self.jd_summary_service is None:
             return out
         try:
-            t30 = self.summary_service.compute_skill_trends(
+            t30 = self.jd_summary_service.compute_skill_trends(
                 end_date, DEFAULT_WINDOW_DAYS, target_type
             )
         except Exception:  # noqa: BLE001 - 市场数据异常不影响主流程

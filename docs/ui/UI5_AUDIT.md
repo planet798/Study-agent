@@ -11,7 +11,7 @@
 ## P1（已处理）
 - Readiness 状态此前用 `✓/⚠` → 改为文字“已满足 / 能力缺口”。
 - Evidence 此前只用 `✓ 已在真实项目中使用` → 改为“已确认项目使用证据”。
-- Monthly 此前 8 行文本 → 4 核心 `SAStatCard` + secondary；时间用小时/分。
+- Historical note: Monthly was redesigned with `SAStatCard`, then retired in S2; not a current page.
 - Settings 无 AI service 时整个页面不可用 → 改为始终可进入，仅对应 panel unavailable。
 - Practice 旧文案“项目不参与能力等级判定”与 Phase 5/6 不符 → 已替换。
 

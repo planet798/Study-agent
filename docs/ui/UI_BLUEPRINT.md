@@ -53,7 +53,7 @@ Workspace
 
 ### 2.2 导航替换
 
-当前顶部横排按钮：`今日 / 学习路线 / 实践项目 / 月总结 / AI 设置`
+Current navigation: Today / Learning Routes / Practice; Settings stays in the footer.
 → 目标左导航 **Sidebar**：
 
 ```
@@ -61,7 +61,6 @@ Study Agent            ← 品牌区
 Today                  ← 一级导航
 Learning Routes
 Practice
-Monthly
 ──────────────
 Settings               ← 底部独立放置
 ```
@@ -82,10 +81,10 @@ Settings               ← 底部独立放置
 ### 2.4 页面兼容现有导航 API 的约束
 
 当前 `MainWindow` 暴露 `nav_today_btn` / `nav_routes_btn` / `nav_practice_btn` /
-`nav_monthly_btn` / `nav_ai_btn` 与 `_switch_page` / `_switch_to_routes` /
+`nav_ai_btn` 与 `_switch_to_today` / `_switch_to_routes` /
 `_switch_to_practice` / `_switch_to_ai_settings`。UI-2 引入 Sidebar 时：
-- 保留这些方法签名与“不可用则 statusBar 提示”的行为（页面可选注入的降级逻辑）；
-- `QStackedWidget` 索引语义（0=Today, 1=Monthly, 其它追加）在 UI-2 可重构，
+- 保留现存导航的兼容语义；
+- `QStackedWidget` 只包含当前启用的 Today / Routes / Practice / Settings 页面，
   但需同步更新依赖 `stack` 的测试（如有）。
 
 ---
@@ -97,7 +96,7 @@ Settings               ← 底部独立放置
 ### 1) 当前窗口整体结构
 `QMainWindow` → central `QWidget` → `QVBoxLayout`：
 `[顶部导航 QHBoxLayout]` + `[QStackedWidget]`；`QStackedWidget` 依序追加：
-Today(0) → Monthly(可选) → Routes(可选) → Practice(可选) → AI Settings(可选)。
+Today(0) → Routes(可选) → Practice(可选) → Settings。
 外加 `QStatusBar` 与 `QSystemTrayIcon`。
 
 ### 2) 当前 navigation 实现
@@ -139,7 +138,7 @@ Today(0) → Monthly(可选) → Routes(可选) → Practice(可选) → AI Sett
 replan、验收、JD、设置等反馈。UI-5 可替换为统一 `SAToast`，但消息文案与时限语义不变。
 
 ### 7) page switching
-`_switch_page(index)` 保留“0=Today / 1=Monthly”的旧索引语义，越界/不可用时
+Today 使用 `_switch_to_today()`；Routes / Practice 可选，Settings 始终可用。
 `statusBar` 提示。`_switch_to_routes/practice/ai_settings` 在切换前调用对应 `page.refresh()`。
 Sidebar 化时必须保留“不可用则提示且不切换”“切换前 refresh”的行为。
 
@@ -286,43 +285,9 @@ Project / Practice Portfolio Workspace（真实成果组合）。
 
 ---
 
-## 6. Monthly Blueprint
+## 6. Monthly blueprint retired (S2)
 
-### 6.1 定位
-轻量复盘，**不做 BI 大屏**。
-
-### 6.2 目标区块
-1. Route activity（per-route：完成任务 / 课程覆盖 / 验收 / 掌握 / 复习 / 薄弱）
-2. Learning time / tasks（总任务、完成、完成率、延期、预计/实际分钟、学习天数、连续）
-3. Mastery progression
-4. Capability progression
-5. Practice progress（本月新增 PROJECT 证据计数 + Topic 名）
-6. AI monthly insight（`ai_summary` JSON；不可用则显示本地统计）
-
-### 6.3 数据可得性（现有 Service vs NOT AVAILABLE YET）
-
-| 指标 | 现状 | 来源 |
-|---|---|---|
-| 总任务 / 完成 / 完成率 / 延期 | ✅ 已有 | `stats_service` |
-| 预计 / 实际分钟 / 学习天数 / 连续 | ✅ 已有 | `stats_service` |
-| 分类排行榜 / best / worst / most invested / most postponed | ✅ 已有 | `stats_service` |
-| Route 维度（done/covered/assessment/mastered/review/weak） | ✅ 已有 | `stats_service` route_stats |
-| 本月项目能力证据计数 | ✅ 已有 | `practice_capability_service.list_active_created` |
-| AI 解读 | ✅ 已有（可缺） | `summary_service.ai_summary` |
-| **Mastery 月度“变化量/趋势”** | ❌ **NOT AVAILABLE YET** | 现有无月度快照/差分 API |
-| **Capability 月度“等级提升趋势”** | ❌ **NOT AVAILABLE YET** | 现有只有当前等级，无历史序列 |
-| **Practice milestone 月度趋势** | ❌ **NOT AVAILABLE YET** | 无时间序列 API |
-| **跨月对比 / 环比** | ❌ **NOT AVAILABLE YET** | 无对比 API |
-
-> 规则：**UI-0 不新增任何业务 API**。上表标记 NOT AVAILABLE YET 的指标，UI-4
-> 只能显示占位（`SAEmptyState` / “暂不可用”），不得在 UI 层自行计算业务值。
-
-### 6.4 当前审计
-- **Problems**：统计以 8 行纯文本 `TaskMeta` 呈现，无卡片/无视觉层级；AI 解读需滚到最底部；`_add_pair` 用 `setFixedWidth(120)`。
-- **Candidate Components**：`SAPageHeader`（月份选择）、`SAStatCard`、`SASectionHeader`、`SAProgressBar`、`SAEmptyState`、`SATag`。
-- **Must NOT Change Semantically**：统计口径、AI 总结 JSON 字段、只计数不平均 Capability。
-
----
+Monthly is not a current page or feature. The legacy Monthly blueprint is intentionally omitted from the active design specification.
 
 ## 7. Settings Blueprint
 
@@ -435,10 +400,10 @@ small (≈4–6) · medium (≈8) · large (≈12)
 | `SAButton` | 统一按钮（含 palette 兜底） | primary / secondary / danger / ghost | 全部 |
 | `SAIconButton` | 图标按钮 | normal / subtle | Today、Sidebar、Settings |
 | `SACard` | 卡片容器（圆角/边框/hover） | default / interactive | Today、Routes、Practice |
-| `SAStatCard` | 指标卡（label + value + 可选 delta） | default / compact | Today、Monthly |
+| `SAStatCard` | 指标卡（label + value + 可选 delta） | default / compact | Today |
 | `SATag` | 标签（route/activity/source/status） | neutral / accent / success / warning / danger | Today、Routes、Practice |
 | `SAProgressBar` | 进度条（单一指标） | default / success / warning | Routes、Practice |
-| `SAProgressRing` | 环形进度（掌握率等） | small / medium | Routes、Monthly |
+| `SAProgressRing` | 环形进度（掌握率等） | small / medium | Routes |
 | `SASectionHeader` | 区块标题 + 可选 action | default | 全部 |
 | `SAEmptyState` | 空状态（icon + title + hint + action） | default / compact | 全部 |
 | `SAInfoBanner` | 行内提示 | info / warning / danger / success | Settings、Today |
@@ -468,7 +433,6 @@ small (≈4–6) · medium (≈8) · large (≈12)
 | `◇` | `routes_page` activity chip | 可选活动 | `Circle` / `Diamond` |
 | `↑` / `↓` | `topic_learning_dialog` | 排序 | `ArrowUp` / `ArrowDown` |
 | 手绘“学” | `main_window._tray_icon` | 托盘/窗口图标 | 品牌 SVG（自有） |
-| `< 上一月` / `下一月 >` | `summary_pages` | 月份导航 | `ChevronLeft` / `ChevronRight` |
 | `＋` 前缀 | 多处按钮文本 | 新建 | `Add` |
 | `⋯`（规划中） | Today blueprint | 溢出菜单 | `MoreHorizontal` |
 | Unicode 全角空格 `　` | 多处文本排版 | 伪列对齐 | 布局对齐（不用字符间距） |
@@ -488,14 +452,14 @@ Filled 只用于表达状态（选中/完成/激活），不用于装饰；同�
 
 ### 12.1 需要的状态
 Loading / Empty / Error / Disabled / Success / Warning / API unavailable /
-No route / No task / No project / No AI profile / No assessment / No monthly data。
+No route / No task / No project / No AI profile / No assessment。
 
 ### 12.2 当前支持 vs 缺失
 
 | 状态 | 当前覆盖 | 缺失 |
 |---|---|---|
 | Loading | 验收有 statusBar “正在生成验收题”、AI 复核 dialog 有 loading_label、连接测试有 worker | 列表级 skeleton 无 |
-| Empty | Today `EmptyHint`、Routes “暂无已归档”、Practice “暂无实践项目”、Monthly “暂无…数据” | 无 icon/action 的统一空状态 |
+| Empty | Today `EmptyHint`、Routes “暂无已归档”、Practice “暂无实践项目” | 无 icon/action 的统一空状态 |
 | Error | `QErrorMessage`/红字、多数 service 异常被 `except` 吞成空 | 无统一 error banner；无 retry |
 | Disabled | `setEnabled(False)`（页不可用/按钮） | 无 disabled 视觉规范 |
 | Success | statusBar 文案 | 无成功 banner/toast 组件 |
@@ -503,7 +467,6 @@ No route / No task / No project / No AI profile / No assessment / No monthly dat
 | API unavailable | Today “AI 不可用”、验收“AI 未配置” | 分散在文本 |
 | No route / No task / No project / No AI profile | 有零散提示 | 不统一 |
 | No assessment | “暂无验收数据” | 文本 |
-| No monthly data | “暂无…数据” | 文本 |
 
 ### 12.3 未来组件
 `SAEmptyState`、`SAInfoBanner`、`SASkeleton`（可选）、`SALoadingOverlay`（可选）、`SAToast`（UI-5）。
@@ -594,7 +557,7 @@ UI-1  Design Tokens / ThemeManager / Icon system / Foundation Components  ← do
 UI-2  App Shell / Sidebar / Page Header / Light-Dark-System  ← done (21b4092, 详见 APP_SHELL.md)
 UI-3  Today / Learning Routes  ← done (TODAY_DESIGN.md / ROUTES_DESIGN.md)
 UI-3.1 Route capability & detail semantics  ← done (e4ac592)
-UI-4  Practice / Monthly / Settings  ← done (PRACTICE_DESIGN.md / MONTHLY_DESIGN.md / SETTINGS_DESIGN.md)
+UI-4  Practice / Settings  ← done (PRACTICE_DESIGN.md / SETTINGS_DESIGN.md)；Monthly 已由 S2 退役
 UI-5  States / Micro-interactions / DPI / Accessibility / Polish  ← done (UI5_AUDIT.md / FINAL_UI_ACCEPTANCE.md)
 ```
 
@@ -633,7 +596,7 @@ UI-5  States / Micro-interactions / DPI / Accessibility / Polish  ← done (UI5_
 16. accessibility：accessibleName / focus indicator / setBuddy / tab order。
 17. 统一 toast 替代散落 statusBar（UI-5）。
 18. monospace 仅用于 Prompt editor / JSON preview。
-19. Monthly 缺失指标的 NOT AVAILABLE YET 占位设计。
+19. （历史规划项）Monthly 指标占位设计，S2 后不实施。
 20. 微交互与动效收敛（含 scroll restore 重试次数）。
 
 ---

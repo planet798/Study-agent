@@ -111,6 +111,10 @@ full 失败                 → 只重跑失败测试，修复
 - 测试：`tests/test_ai_client.py`、`test_prompt_registry.py`、`test_ai_profiles.py`、
   `test_ai_settings_ui.py`
 
+### Monthly Summary retired (S2)
+- Monthly Dashboard / SummaryService / StatsService / Monthly AI prompt 与 cache writer 已退出生产产品；历史 `weekly_summaries` / `monthly_summaries` 表及用户 prompt override 仅保留兼容，SCHEMA_VERSION 继续为 20。
+- Route Detail / Practice 页面不依赖 Monthly；JD 30-day trend 使用独立的 `JdSummaryService`，必须保留。
+
 ### JD / Skill / Market
 - production：`app/services/jd_service.py`、`jd_summary_service.py`、`market_signal.py`、
   `skill_service.py`

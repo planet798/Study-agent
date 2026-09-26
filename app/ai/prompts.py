@@ -33,8 +33,6 @@ from .prompt_defaults import (
     ROUTE_BUILDER_USER,
     ROUTE_SUGGEST_SYSTEM,
     ROUTE_SUGGEST_USER,
-    SUMMARY_MONTHLY_USER,
-    SUMMARY_SYSTEM,
     TASK_REVIEW_OUTPUT_FORMAT,
     TASK_REVIEW_SYSTEM,
     TASK_REVIEW_USER,
@@ -53,8 +51,6 @@ SYSTEM_PROMPT = TASK_REVIEW_SYSTEM
 PLANNER_SYSTEM_PROMPT_TEMPLATE = PLANNER_SYSTEM
 ASSESSMENT_SYSTEM_PROMPT = ASSESSMENT_SYSTEM
 ASSESSMENT_JUDGE_SYSTEM_PROMPT = ASSESSMENT_JUDGE_SYSTEM
-SUMMARY_SYSTEM_PROMPT = SUMMARY_SYSTEM
-MONTHLY_SUMMARY_INSTRUCTION = SUMMARY_MONTHLY_USER
 ROUTE_BUILDER_SYSTEM_PROMPT = ROUTE_BUILDER_SYSTEM
 ROUTE_SUGGEST_SYSTEM_PROMPT = ROUTE_SUGGEST_SYSTEM
 JD_AI_SYSTEM = JD_PARSE_SYSTEM
@@ -493,23 +489,6 @@ def build_assessment_judge_prompt(
         "assessment.judge.user",
         build_assessment_judge_vars(questions, answers),
         registry,
-    )
-
-
-# ============================================================
-# AI 学习总结（月）
-# ============================================================
-
-
-def build_monthly_summary_vars(stats: dict) -> dict:
-    return {"stats_json": json.dumps(stats, ensure_ascii=False, indent=2)}
-
-
-def build_monthly_summary_prompt(
-    stats: dict, registry: PromptRegistry | None = None
-) -> str:
-    return render_prompt(
-        "summary.monthly.user", build_monthly_summary_vars(stats), registry
     )
 
 

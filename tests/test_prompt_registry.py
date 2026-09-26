@@ -34,7 +34,6 @@ class TestRegistryMetadata:
             "planner.system", "planner.user",
             "assessment.generate.system", "assessment.generate.user",
             "assessment.judge.system", "assessment.judge.user",
-            "summary.monthly.system", "summary.monthly.user",
             "route_builder.system", "route_builder.user",
             "route_suggestion.system", "route_suggestion.user",
             "jd_parse.system", "jd_parse.user",
@@ -123,19 +122,6 @@ class TestOverrideLifecycle:
         prompt_registry.set_override(key, "CUSTOM-INSTRUCTION")
         assert prompt_registry.is_customized(key) is True
         assert prompt_registry.effective_template(key) == "CUSTOM-INSTRUCTION"
-
-    def test_save_then_render_uses_override(self, prompt_registry):
-        key = "summary.monthly.system"
-        prompt_registry.set_override(key, "自定义总结系统提示")
-        assert prompt_registry.render(key, {}) == "自定义总结系统提示"
-
-    def test_reset_restores_default(self, prompt_registry):
-        key = "summary.monthly.system"
-        default = prompt_registry.default_template(key)
-        prompt_registry.set_override(key, "临时覆盖")
-        assert prompt_registry.reset(key) is True
-        assert prompt_registry.is_customized(key) is False
-        assert prompt_registry.effective_template(key) == default
 
     def test_invalid_override_rejected(self, prompt_registry):
         key = "planner.user"

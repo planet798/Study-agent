@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 CATEGORY_TASK_REVIEW = "任务复核"
 CATEGORY_PLANNER = "Planner"
 CATEGORY_ASSESSMENT = "Assessment"
-CATEGORY_SUMMARY = "Summary"
 CATEGORY_ROUTE = "Route Builder"
 CATEGORY_JD = "JD"
 CATEGORY_RESUME = "其它 AI"
@@ -289,42 +288,6 @@ ASSESSMENT_JUDGE_USER = """请根据以下题目与用户作答进行判断。
 
 
 # ============================================================
-# 月总结
-# ============================================================
-
-SUMMARY_SYSTEM = """你是学习数据解读助手。
-
-你的职责是解释用户的学习统计，找出问题、总结趋势、给出建议。
-你不需要、也不应该重新计算任何统计数字——所有数值都以输入数据为准。
-不要批评用户，保持客观、建设性、简洁。"""
-
-SUMMARY_MONTHLY_USER = """请解读以下本月学习统计：
-
-{{stats_json}}
-
-请根据以上本月学习统计（JSON）输出严格 JSON 总结：
-{
-  "overview": "一句话概述本月学习总体情况",
-  "progress": "对比月初到月末的进展描述",
-  "strengths": ["优势1", "优势2"],
-  "weaknesses": ["不足1", "不足2"],
-  "recommendations": ["建议1", "建议2"],
-  "next_month_focus": ["下月重点1", "下月重点2"]
-}
-
-要求：
-- overview 与 progress 各不超过 100 字
-- 每个数组 1~3 项，每项不超过 80 字
-- 所有数字以输入统计为准，不要自己推算
-- route_stats 为各学习路线的真实统计；若提及路线/知识点/薄弱项，
-  必须来自 route_stats，不得虚构数据中不存在的知识点
-- 不要给出一个“整体 mastery 百分比”（不同路线不可简单平均）
-- route_stats 中的 activity_completed / activity_required 只表示“学习活动”完成度，
-  不是能力等级、也不是掌握度；不得把它解释成 capability
-- 只输出 JSON，不要输出其他文字"""
-
-
-# ============================================================
 # AI 路线草稿（Route Builder）
 # ============================================================
 
@@ -535,23 +498,6 @@ DEFAULT_PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
         default_template=ASSESSMENT_JUDGE_USER,
         required_variables=("questions_json", "answers_json", "output_instruction"),
         optional_variables=("verdicts", "levels"),
-    ),
-    PromptDefinition(
-        key="summary.monthly.system",
-        display_name="月总结 · 系统提示",
-        category=CATEGORY_SUMMARY,
-        description="约束 AI 只解释统计、不重算数字、不批评用户。",
-        role="system",
-        default_template=SUMMARY_SYSTEM,
-    ),
-    PromptDefinition(
-        key="summary.monthly.user",
-        display_name="月总结 · 用户提示",
-        category=CATEGORY_SUMMARY,
-        description="携带本月真实统计 JSON，请求 AI 生成结构化月总结。",
-        role="user",
-        default_template=SUMMARY_MONTHLY_USER,
-        required_variables=("stats_json",),
     ),
     PromptDefinition(
         key="route_builder.system",

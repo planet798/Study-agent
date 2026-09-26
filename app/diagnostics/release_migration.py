@@ -31,6 +31,7 @@ HISTORY_TABLES = (
     "assessment_attempts",
     "review_schedule",
     "learning_outcomes",
+    "weekly_summaries",
     "monthly_summaries",
     "planner_decisions",
 )
@@ -105,7 +106,8 @@ def inventory(conn: sqlite3.Connection) -> dict:
             "learning_routes", "study_plans", "study_phases", "study_topics",
             "tasks", "knowledge_points", "assessment_attempts",
             "review_schedule", "planner_decisions", "skills", "route_skills",
-            "learning_outcomes", "monthly_summaries", "capability_evidence",
+            "learning_outcomes", "weekly_summaries", "monthly_summaries",
+            "capability_evidence",
             "practice_projects", "practice_topic_evidence",
             "practice_topic_requirements",
         )},
@@ -196,6 +198,7 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
         "status",
     ),
     "learning_outcomes": ("id", "kind", "title", "linked_kp_id"),
+    "weekly_summaries": ("id", "period_start", "period_end", "source"),
     "monthly_summaries": ("id", "period_start", "period_end", "source"),
     "planner_decisions": ("id", "date", "current_phase_id", "source"),
 }
@@ -211,7 +214,7 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
 # v3：每表额外保存 per-row（id -> immutable fields hash），支持“历史子集”校验：
 #     迁移前已有行必须保留且不可被非法修改，迁移后允许正常新增新行。
 # v1/v2 旧 snapshot 仍可读（缺 per-row hashes 时走 legacy 分支）。
-FINGERPRINT_VERSION = 3
+FINGERPRINT_VERSION = 4
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
