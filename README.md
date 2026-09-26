@@ -59,6 +59,19 @@ Historical review rows/schema are retained for migration and history preservatio
 Review-like recall will be handled by future Agent contextual learning,
 not by scheduled review tasks. Assessment 仍是 Mastery 正式更新路径。
 
+## 手动学习（S5）
+
+Study-Agent does not provide a generic Todo manager. 手动学习仅有两类：
+
+```text
+Manual Learning
+├── Learning Activity（学习活动）：一次性学习行为，无知识点、不进入 Assessment/Mastery
+└── Knowledge Learning（知识学习）：关联已有 Topic 或 route-scoped 临时知识点，可进入 Assessment → Mastery
+```
+
+有 active 学习路线时，新建 UI 要求选择路线；无可用路线时安全允许未分类。
+历史 `source='manual', task_type='manual', route_id=NULL` 行继续展示并按原状态机处理，不补写路线。数据库 schema 继续为 v20。
+
 ## Monthly 已退役（S2）
 
 Monthly Dashboard、Monthly AI Summary 与 summary cache production path 已移除。

@@ -76,3 +76,7 @@ Review-like recall will be handled by future Agent contextual learning, not by s
 ## S3 — Today simplification
 
 只有日期、两项 Summary、路线筛选/当前阶段、Planner 状态与说明、今日学习任务及手动添加入口。无任务时即使存在 JD/Skill 数据也显示学习空状态。`task_type=new` 历史语义不变。
+
+## S5 — Manual Learning
+
+Today 的“今日学习”统一展示 Agent 规划任务、手动学习活动与知识学习；按钮仍为“添加学习任务”。对话框默认“知识学习”（关联 Topic/KP，可验收）；“学习活动”是一次性学习行为，不进入 Assessment。存在 active 学习路线时新任务要求选择路线；历史未分类 manual 行继续显示/操作。Study-Agent does not provide a generic Todo manager.

@@ -4,7 +4,7 @@
 - 迁移后默认路线存在、默认 plan 绑定；
 - 历史 phase/topic/task/kp ID 不变、任务不删除；
 - generated / topic-linked manual / review task 回填 route；
-- 普通 manual todo 保持 NULL；
+- 历史未分类手动学习活动保持 NULL；
 - topic-linked kp 回填、manual kp 保持 NULL；
 - planner_decisions 回填；
 - route_skills 由 skills.linked_topics 推导；
@@ -160,7 +160,7 @@ class TestMigrationV12:
             }
             assert rows[1] == default      # generated/new
             assert rows[2] == default      # manual linked topic
-            assert rows[3] is None         # ordinary manual todo
+            assert rows[3] is None         # historical unclassified manual learning activity
             assert rows[4] is None         # manual temp kp
             assert rows[5] == default      # review (kp route)
         finally:

@@ -115,7 +115,7 @@
 | 文件 | LOC | 主要 class | 职责 | 局部 QSS | 可拆分 |
 |---|---|---|---|---|---|
 | `dialogs.py` | 238 | `NotDoneDialog`、`AIReviewDialog`、`show_warning` | 未完成原因、AI 复核结果 | `error_label` 局部红字 ×2 | 中 |
-| `manual_task_dialog.py` | 290 | `AddLearningTaskDialog`、`KIND_TODO` | 添加普通 To-do / 正式知识任务 | 局部红字；`setFixedHeight(70)` | 中 |
+| `manual_task_dialog.py` | 290 | `AddLearningTaskDialog`、`KIND_ACTIVITY` | 添加学习活动 / 知识学习 | 局部红字；`setFixedHeight(70)` | 中 |
 | `past_task_dialog.py` | 177 | `PastTaskConfirmationDialog` | 跨日未确认任务逐条确认 | 局部红字 | 低 |
 | `route_dialogs.py` | 332 | `CreateLearningRouteDialog`、`EditLearningRouteDialog`、`AddPhaseDialog`、`AddTopicDialog` | 路线/阶段/主题 CRUD | 局部红字 ×4 | 中 |
 | `route_builder_dialogs.py` | 435 | `AIRouteBuilderDialog`、`RouteDraftPreviewDialog`、`SkillPickerDialog` | AI 路线草稿生成与预览 | 局部无 `setStyleSheet`（用 `setFixedHeight`） | 中 |

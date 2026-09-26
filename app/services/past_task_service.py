@@ -1,11 +1,11 @@
 """跨日未确认正式任务（昨日任务补确认）业务层。
 
 背景：用户当天实际完成了学习任务却忘记点【完成】，系统会把该 task 当作
-未处理，从而影响 phase / coverage / Planner / Review。为在“自动归档为
+未处理，从而影响 phase / coverage / Planner。为在“自动归档为
 not_done”与“生成今日计划”之前拦截，这里提供：
 
 - find_unresolved(today)：找出今天以前仍未明确处理（status=active）且用户可执行
-  的任务（Agent new / manual todo / manual knowledge / extra），按日期从旧到新排序；
+  的任务（Agent new / manual learning activity / manual knowledge / legacy extra），按日期从旧到新排序；
 cancelled（用户主动移除）不在 active 之内，天然不会被询问。
 - apply_decisions(decisions)：把用户在补确认窗口的选择，**复用现有
   TaskService 业务逻辑**落库（完成=complete_task，未完成=mark_not_done）。
@@ -27,7 +27,7 @@ PAST_NOT_DONE_REASON = "跨日补确认：用户选择未完成"
 DECISION_DONE = "done"
 DECISION_NOT_DONE = "not_done"
 
-# 需要（且允许）补确认的用户可执行任务：Agent new / manual todo /
+# 需要（且允许）补确认的用户可执行任务：Agent new / manual learning activity /
 # manual knowledge。正式 review 与系统任务不在其中。
 # 注：legacy extra 已移除功能，不再阻塞启动（由 legacy cleanup 置 cancelled）。
 _EXECUTABLE_TASK_TYPES = {"new", "manual"}
@@ -49,7 +49,7 @@ class PastTaskConfirmationService:
         条件：scheduled_date < today AND status=active，且
         task_type ∈ {new, manual}、source ∈ {generated, manual}。
         不返回 done / not_done / cancelled（已明确或已移除），
-        也不返回正式 review（保持现有复习逻辑）与 legacy extra。
+        也不返回历史 review 或 legacy extra。
         """
         date = today or _today()
         tasks = [

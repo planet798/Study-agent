@@ -169,13 +169,13 @@ class TaskWidget(QFrame):
 
     @staticmethod
     def _source_tag(task: Task) -> str:
-        """轻量来源标签：Agent 规划 / 自定义 / 自定义知识。"""
+        """轻量来源标签：Agent 规划 / 手动学习 / 知识学习。"""
         if task.source == "generated":
             return "Agent 规划"
         if task.source == "manual":
             if task.knowledge_point_id is not None or task.topic_id is not None:
-                return "自定义知识"
-            return "自定义"
+                return "知识学习"
+            return "手动学习"
         return ""
 
     def _add_remove_button(self) -> None:

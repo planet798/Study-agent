@@ -81,6 +81,10 @@ full 失败                 → 只重跑失败测试，修复
 - 测试：`tests/test_multi_route_scheduler.py`、`test_phase6_regression.py`
 - 不变式：budget ≤3 task & ≤180 min；fairness；**完全不读 Practice / Capability**。
 
+### Manual Learning (S5)
+- Study-Agent does not provide a generic Todo manager. 新建 UI：学习活动（一次性，无 KP/验收）与知识学习（Topic/KP，可验收）；有 active route 时要求选择 route，无路线时安全降级。
+- 生产用 `ManualTaskService.create_learning_activity()`；`create_todo()` 仅为 legacy compatibility alias。历史 `task_type=manual, route_id=NULL` 不删除、不补路线，状态机与 PastTaskConfirmation 保持不变。测试：`tests/test_manual_learning_semantics.py`。
+
 ### Assessment / Mastery（Daily Review retired）
 - production：`app/services/assessment_service.py`、`skill_service.py`、
   `knowledge_evidence.py`、`app/database/assessment_repository.py`

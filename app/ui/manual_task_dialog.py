@@ -1,12 +1,12 @@
 """手动添加今日学习任务对话框（Phase A / C）。
 
-两种任务：
-- 普通学习任务（manual todo）：不关联知识点，不进入验收链路；可选所属路线；
-- 正式知识学习任务（manual knowledge）：
+两种手动学习：
+- 学习活动：一次性学习行为，不关联知识点或验收；
+- 知识学习：
     A. 关联已有 study_topic（Topic 下拉严格按所选路线过滤）；
     B. 新建临时知识点（knowledge_point 按 name+route 幂等）。
 
-Phase C 增加“所属路线”选择；没有多路线 Scheduler，路线只用于组织 / 筛选 / 统计。
+有 active 学习路线时新建必须选择路线；历史未分类任务仍由 Today 正常处理。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from .styles import apply_secondary_button_text
 
-KIND_TODO = "todo"
+KIND_ACTIVITY = "activity"
 KIND_KNOWLEDGE = "knowledge"
 SOURCE_EXISTING_TOPIC = "existing_topic"
 SOURCE_TEMP_KNOWLEDGE = "temp_knowledge"
@@ -71,18 +71,20 @@ class AddLearningTaskDialog(QDialog):
         type_title = QLabel("任务类型")
         type_title.setObjectName("SectionTitle")
         root.addWidget(type_title)
-        self.todo_radio = QRadioButton("普通学习任务")
-        self.knowledge_radio = QRadioButton("正式知识学习任务")
-        self.todo_radio.setChecked(True)
-        root.addWidget(self.todo_radio)
+        self.knowledge_radio = QRadioButton("知识学习")
+        self.activity_radio = QRadioButton("学习活动")
+        self.knowledge_radio.setChecked(True)
         root.addWidget(self.knowledge_radio)
-        self.todo_radio.toggled.connect(self._on_type_changed)
+        root.addWidget(QLabel("学习某个 Topic / 知识点，完成后可进行验收。"))
+        root.addWidget(self.activity_radio)
+        root.addWidget(QLabel("一次性的学习行为，不进入知识掌握度验收。"))
+        self.knowledge_radio.toggled.connect(self._on_type_changed)
 
         # 所属路线
         route_row = QHBoxLayout()
         route_row.addWidget(QLabel("所属路线"))
         self.route_combo = QComboBox()
-        self.route_combo.addItem(UNCLASSIFIED_LABEL, None)
+        self.route_combo.addItem("请选择学习路线" if self._routes else UNCLASSIFIED_LABEL, None)
         for r in self._routes:
             self.route_combo.addItem(r.get("name") or f"路线{r.get('id')}", r.get("id"))
         self.route_combo.currentIndexChanged.connect(self._on_route_changed)
@@ -184,6 +186,7 @@ class AddLearningTaskDialog(QDialog):
         root.addLayout(btns)
 
         self._reload_topics()
+        self._on_type_changed()
 
     # ---------- 状态 ----------
 
@@ -258,6 +261,10 @@ class AddLearningTaskDialog(QDialog):
             self.error_label.setText("标题不能为空。")
             self.error_label.setVisible(True)
             return
+        if self._routes and self._selected_route_id() is None:
+            self.error_label.setText("请选择所属学习路线。")
+            self.error_label.setVisible(True)
+            return
         if self.knowledge_radio.isChecked() and self.topic_radio.isChecked():
             if self.topic_combo.currentData() is None:
                 self.error_label.setText("请选择一个已有 Topic，或改为新建临时知识点。")
@@ -268,7 +275,7 @@ class AddLearningTaskDialog(QDialog):
     def result_payload(self) -> dict:
         is_knowledge = self.knowledge_radio.isChecked()
         payload = {
-            "kind": KIND_KNOWLEDGE if is_knowledge else KIND_TODO,
+            "kind": KIND_KNOWLEDGE if is_knowledge else KIND_ACTIVITY,
             "title": self._title(),
             "description": self.desc_edit.toPlainText().strip(),
             "estimated_minutes": int(self.minutes_spin.value()),

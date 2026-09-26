@@ -126,7 +126,7 @@ class CapabilityService:
         if task.knowledge_point_id is None:
             return None
         if task.task_type != _FORMAL_TASK_TYPE:
-            return None  # review / manual todo 不产生
+            return None  # 历史 review / 手动学习活动不产生
         if task.source not in _FORMAL_SOURCES:
             return None
         return self.repo.create_or_update_by_key(

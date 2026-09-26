@@ -3,7 +3,7 @@
 覆盖需求 37 的 27~40：
 - 新 Agent task 自动 route（规则 + AI）；
 - Review / Extra 继承 route；
-- 新 manual todo NULL / manual linked-topic 自动 route；
+- 新 legacy manual learning activity NULL / manual linked-topic 自动 route；
 - 第二条 route 不影响默认 Planner / get_current_phase；
 - Route A phase/topic 不出现在 Route B；
 - cancelled / 昨日确认 / Assessment / Review 不回归。
@@ -112,7 +112,7 @@ class TestAgentTaskRoute:
 
 class TestManualRoute:
     def test_new_manual_todo_stays_null(self, env):
-        t = env["manual"].create_todo("刷 LeetCode", scheduled_date=TODAY)
+        t = env["manual"].create_learning_activity("刷 LeetCode", scheduled_date=TODAY)
         assert t.route_id is None
 
     def test_new_manual_linked_topic_gets_route(self, env):
@@ -237,7 +237,7 @@ class TestNoRegression:
             == env["default_route"].id
 
     def test_cancelled_not_regressed(self, env):
-        t = env["manual"].create_todo("leecode", scheduled_date=TODAY)
+        t = env["manual"].create_learning_activity("leecode", scheduled_date=TODAY)
         env["ts"].cancel_task(t.id)
         stats = env["ts"].get_daily_stats(TODAY)
         assert stats["total"] == 0 or all(
@@ -247,6 +247,6 @@ class TestNoRegression:
         assert env["repo"].get(t.id).status == "cancelled"
 
     def test_past_confirmation_not_regressed(self, env):
-        env["manual"].create_todo("昨天", scheduled_date=YESTERDAY)
+        env["manual"].create_learning_activity("昨天", scheduled_date=YESTERDAY)
         svc = PastTaskConfirmationService(env["repo"], env["ts"])
         assert len(svc.find_unresolved(TODAY)) == 1

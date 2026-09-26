@@ -32,6 +32,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
 - **Route → Phase → Topic → Activity → Task**：`canonical_route_service` 保证
   R1–R6 + JOB_PREP 存在；`study_plan_service` 管 phase/topic；`topic_learning_profile_service`
   管 topic 的 activity component；`task_service` / `daily_planner_service` 产 task。
+- **Manual Learning (S5)**：产品不是通用 Todo Manager。Learning Activity（`source=manual, task_type=manual`）是一次性学习行为，不形成 Assessment/Mastery；Knowledge Learning（`task_type=new`）关联 Topic 或临时知识点，可验收。新建 UI 有 active route 时要求路线；历史 NULL-route manual 行保持可用，不做 schema migration。
 - **Assessment / Mastery**：`assessment_service` → `knowledge_evidence` /
   `skill_service`。JD 30-day / market / skill priority 是 Planner 后台信号，不占据 Today UI。
 - **Today (S3)**：execution-focused learning surface；只呈现日期、当前阶段、Planner、路线筛选、两项 Summary、今日学习任务与添加入口。正式 Mastery 只由 Assessment 更新；弱点与最近验收证据仍可供 Planner 使用。

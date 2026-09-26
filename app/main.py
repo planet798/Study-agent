@@ -1532,7 +1532,7 @@ def main() -> int:
             prompt_registry=prompt_registry,
             capability_service=fresh_capability,
         )
-    # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
+    # Phase A：手动添加今日学习任务（学习活动 / 知识学习）
     from app.services.manual_task_service import ManualTaskService
 
     manual_task_service = ManualTaskService(

@@ -66,7 +66,7 @@ class TestCancelledSemantics:
 
     def test_manual_task_can_cancel(self, conn):
         env = _env(conn)
-        t = env["manual"].create_todo("刷 LeetCode", scheduled_date=TODAY)
+        t = env["manual"].create_learning_activity("刷 LeetCode", scheduled_date=TODAY)
         out = env["ts"].cancel_task(t.id)
         assert out.status == STATUS_CANCELLED
 
@@ -133,9 +133,9 @@ class TestPastConfirmation:
         svc = PastTaskConfirmationService(env["repo"], env["ts"])
         assert [x.id for x in svc.find_unresolved(TODAY)] == [t.id]
 
-    def test_manual_todo_confirmed_done(self, conn):
+    def test_manual_activity_confirmed_done(self, conn):
         env = _env(conn)
-        t = env["manual"].create_todo("刷题", scheduled_date=YESTERDAY)
+        t = env["manual"].create_learning_activity("刷题", scheduled_date=YESTERDAY)
         svc = PastTaskConfirmationService(env["repo"], env["ts"])
         svc.apply_decisions({t.id: DECISION_DONE})
         assert env["ts"].get_status(t.id) == STATUS_DONE
@@ -214,7 +214,7 @@ class TestPlannerExclusion:
 
     def test_not_done_still_postponable(self, conn):
         env = _env(conn)
-        t = env["manual"].create_todo("刷题", scheduled_date=TODAY)
+        t = env["manual"].create_learning_activity("刷题", scheduled_date=TODAY)
         env["ts"].mark_not_done(t.id, "没时间")
         out = env["ts"].postpone_task(t.id)
         assert out.status == STATUS_ACTIVE
@@ -231,8 +231,8 @@ class TestCompletionRate:
         c = _agent_task(env, "C")
         env["ts"].cancel_task(a.id)
         env["ts"].cancel_task(b.id)
-        d = env["manual"].create_todo("D", scheduled_date=TODAY)
-        e = env["manual"].create_todo("E", scheduled_date=TODAY)
+        d = env["manual"].create_learning_activity("D", scheduled_date=TODAY)
+        e = env["manual"].create_learning_activity("E", scheduled_date=TODAY)
         env["ts"].complete_task(d.id)
         env["ts"].complete_task(e.id)
         stats = env["ts"].get_daily_stats(TODAY)
@@ -245,8 +245,8 @@ class TestCompletionRate:
         for name in ("A", "B", "C"):
             t = _agent_task(env, name)
             env["ts"].cancel_task(t.id)
-        d = env["manual"].create_todo("D", scheduled_date=TODAY)
-        e = env["manual"].create_todo("E", scheduled_date=TODAY)
+        d = env["manual"].create_learning_activity("D", scheduled_date=TODAY)
+        e = env["manual"].create_learning_activity("E", scheduled_date=TODAY)
         env["ts"].complete_task(d.id)
         env["ts"].complete_task(e.id)
         stats = env["ts"].get_daily_stats(TODAY)

@@ -7,7 +7,7 @@
 
 绝不猜：
 - manual kp（topic_id=NULL）的 route；
-- ordinary manual todo（无 topic / 无 kp）。
+- historical unclassified manual learning activity（无 topic / 无 kp）。
 
 返回修复条数，供启动日志。
 """

@@ -65,8 +65,8 @@ class TestFindUnresolved:
         _mk(repo, "E", YESTERDAY, task_type="extra", source="extra")
         assert _svc(repo, task_service).find_unresolved(TODAY) == []
 
-    def test_manual_todo_found(self, repo, task_service):
-        # Phase A：手动普通 To-do（task_type=manual）需要补确认。
+    def test_manual_activity_found(self, repo, task_service):
+        # Phase A：手动手动学习活动（task_type=manual）需要补确认。
         t = _mk(repo, "M", YESTERDAY, task_type="manual", source="manual")
         found = _svc(repo, task_service).find_unresolved(TODAY)
         assert [x.id for x in found] == [t.id]

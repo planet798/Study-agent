@@ -1,8 +1,8 @@
-"""Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）。
+"""Phase A：手动添加今日学习任务（学习活动 / 知识学习）。
 
 覆盖需求 26 的 1~9、25、26：
-- 创建普通 manual todo / manual knowledge；
-- manual todo 不创建 kp、不可 Assessment；
+- 创建普通 manual learning activity / manual knowledge；
+- manual learning activity 不创建 kp、不可 Assessment；
 - manual knowledge 可关联已有 topic / 新建临时 kp / 可 Assessment；
 - done ≠ mastered；
 - 重复 manual kp 不重复创建（规范化名称幂等）；
@@ -16,7 +16,7 @@ from app.database.study_plan_repository import StudyPlanRepository
 from app.services.manual_task_service import ManualTaskService
 from app.services.study_plan_service import StudyPlanService
 from app.services.task_service import TaskService
-from app.ui.manual_task_dialog import KIND_KNOWLEDGE, KIND_TODO, AddLearningTaskDialog
+from app.ui.manual_task_dialog import KIND_KNOWLEDGE, KIND_ACTIVITY, AddLearningTaskDialog
 from app.ui.task_widget import TaskWidget
 
 TODAY = "2026-09-15"
@@ -53,9 +53,9 @@ def _repo(conn):
 # ================= 1~2：创建 =================
 
 class TestCreate:
-    def test_create_manual_todo(self, conn):
+    def test_create_manual_activity(self, conn):
         env = _env(conn)
-        t = env["svc"].create_todo(
+        t = env["svc"].create_learning_activity(
             "刷 LeetCode 3 道", description="数组 + 哈希", estimated_minutes=45,
             scheduled_date=TODAY,
         )
@@ -95,18 +95,18 @@ class TestCreate:
         assert kp["name"] == "Transformer"
 
 
-# ================= 3~4：manual todo 隔离 =================
+# ================= 3~4：manual learning activity 隔离 =================
 
-class TestTodoIsolation:
-    def test_manual_todo_has_no_kp(self, conn):
+class TestActivityIsolation:
+    def test_manual_activity_has_no_kp(self, conn):
         env = _env(conn)
-        t = env["svc"].create_todo("看 PPO 面试视频", scheduled_date=TODAY)
+        t = env["svc"].create_learning_activity("看 PPO 面试视频", scheduled_date=TODAY)
         assert t.knowledge_point_id is None
         assert env["arepo"].list_knowledge_points() == []
 
-    def test_manual_todo_cannot_assess(self, conn, qtbot):
+    def test_manual_activity_cannot_assess(self, conn, qtbot):
         env = _env(conn)
-        t = env["svc"].create_todo("整理 RL 面试题", scheduled_date=TODAY)
+        t = env["svc"].create_learning_activity("整理 RL 面试题", scheduled_date=TODAY)
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
         assert hasattr(w, "assessment_btn") is False
@@ -160,19 +160,19 @@ class TestManualKpIdempotent:
 # ================= 25~26：来源标签 =================
 
 class TestSourceTags:
-    def test_todo_tag(self, conn, qtbot):
+    def test_activity_tag(self, conn, qtbot):
         env = _env(conn)
-        t = env["svc"].create_todo("刷题", scheduled_date=TODAY)
+        t = env["svc"].create_learning_activity("刷题", scheduled_date=TODAY)
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
-        assert w.source_tag_label.text() == "自定义"
+        assert w.source_tag_label.text() == "手动学习"
 
     def test_manual_knowledge_tag(self, conn, qtbot):
         env = _env(conn)
         t = env["svc"].create_knowledge_task("强化学习基础", scheduled_date=TODAY)
         w = TaskWidget(env["repo"].get(t.id))
         qtbot.addWidget(w)
-        assert w.source_tag_label.text() == "自定义知识"
+        assert w.source_tag_label.text() == "知识学习"
 
     def test_agent_generated_tag(self, conn, qtbot):
         env = _env(conn)
@@ -186,14 +186,15 @@ class TestSourceTags:
 # ================= 对话框数据 =================
 
 class TestAddDialog:
-    def test_todo_payload(self, qtbot):
+    def test_activity_payload(self, qtbot):
         dlg = AddLearningTaskDialog(topics=[{"id": 1, "name": "T"}],
                                     default_date=TODAY)
         qtbot.addWidget(dlg)
+        dlg.activity_radio.setChecked(True)
         dlg.title_edit.setText("刷 LeetCode 3 道")
         dlg.minutes_spin.setValue(45)
         payload = dlg.result_payload()
-        assert payload["kind"] == KIND_TODO
+        assert payload["kind"] == KIND_ACTIVITY
         assert payload["title"] == "刷 LeetCode 3 道"
         assert payload["estimated_minutes"] == 45
         assert payload["scheduled_date"] == TODAY
@@ -244,10 +245,10 @@ class TestAddFlowUI:
         _, w = self._window(qtbot, conn)
         assert w.add_task_btn.text() == "＋ 添加学习任务"
 
-    def test_add_todo_via_window(self, qtbot, conn, monkeypatch):
+    def test_add_activity_via_window(self, qtbot, conn, monkeypatch):
         env, w = self._window(qtbot, conn)
         from app.ui import main_window as mw
-        from app.ui.manual_task_dialog import KIND_TODO
+        from app.ui.manual_task_dialog import KIND_ACTIVITY
 
         class FakeDialog:
             def __init__(self, *a, **k):
@@ -260,16 +261,16 @@ class TestAddFlowUI:
 
             def result_payload(self):
                 return {
-                    "kind": KIND_TODO, "title": "刷 LeetCode 3 道",
+                    "kind": KIND_ACTIVITY, "title": "刷 LeetCode 3 道",
                     "description": "", "estimated_minutes": 45,
                     "scheduled_date": TODAY, "topic_id": None,
                 }
 
         monkeypatch.setattr(mw, "AddLearningTaskDialog", FakeDialog)
         w._on_add_learning_task()
-        todos = [t for t in env["repo"].list_by_date(TODAY)
+        activitys = [t for t in env["repo"].list_by_date(TODAY)
                  if t.task_type == "manual"]
-        assert [t.title for t in todos] == ["刷 LeetCode 3 道"]
+        assert [t.title for t in activitys] == ["刷 LeetCode 3 道"]
 
     def test_add_knowledge_via_window(self, qtbot, conn, monkeypatch):
         env, w = self._window(qtbot, conn)

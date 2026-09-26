@@ -53,7 +53,7 @@ from .app_shell import PAGE_SPECS_BY_KEY, AppShell, PageKey
 from .components.navigation import key_value
 from .assessment_dialog import AssessmentDialog
 from .dialogs import AIReviewDialog, NotDoneDialog
-from .manual_task_dialog import KIND_TODO, AddLearningTaskDialog
+from .manual_task_dialog import KIND_ACTIVITY, KIND_KNOWLEDGE, AddLearningTaskDialog
 from .task_widget import TaskWidget
 from .today_page import TodayPage
 
@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
         self.practice_capability_service = practice_capability_service
         # Phase 6：Practice Planner Feedback / Readiness（可选）
         self.practice_readiness_service = practice_readiness_service
-        # Phase A：手动添加今日学习任务（普通 To-do / 正式知识任务）
+        # Phase A：手动添加今日学习任务（学习活动 / 知识学习）
         self.manual_task_service = manual_task_service or ManualTaskService(
             task_service.repo,
             assessment_repo=assessment_repo,
@@ -677,7 +677,7 @@ class MainWindow(QMainWindow):
         return out
 
     def _on_add_learning_task(self) -> None:
-        """打开添加学习任务对话框（普通 To-do / 正式知识学习任务）。"""
+        """打开添加学习任务对话框（学习活动 / 知识学习）。"""
         from .dialogs import show_warning
 
         routes = [
@@ -694,17 +694,22 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         payload = dlg.result_payload()
+        if (routes and payload.get("route_id") is None
+                and (payload.get("kind") == KIND_ACTIVITY
+                     or payload.get("topic_id") is None)):
+            show_warning(self, "请选择所属学习路线。")
+            return
         try:
-            if payload["kind"] == KIND_TODO:
-                self.manual_task_service.create_todo(
+            if payload["kind"] == KIND_ACTIVITY:
+                self.manual_task_service.create_learning_activity(
                     title=payload["title"],
                     description=payload["description"],
                     estimated_minutes=payload["estimated_minutes"],
                     scheduled_date=payload["scheduled_date"],
                     route_id=payload.get("route_id"),
                 )
-                msg = "已添加普通学习任务"
-            else:
+                msg = "已添加学习活动"
+            elif payload["kind"] == KIND_KNOWLEDGE:
                 self.manual_task_service.create_knowledge_task(
                     title=payload["title"],
                     description=payload["description"],
@@ -715,7 +720,9 @@ class MainWindow(QMainWindow):
                     component_id=payload.get("component_id"),
                     learning_activity_kind=payload.get("learning_activity_kind"),
                 )
-                msg = "已添加正式知识学习任务"
+                msg = "已添加知识学习任务"
+            else:
+                raise ValueError("未知学习任务类型")
         except Exception as e:  # noqa: BLE001 - 添加失败不崩溃
             show_warning(self, f"添加任务失败：{e}")
             return

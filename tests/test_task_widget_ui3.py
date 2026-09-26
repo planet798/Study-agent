@@ -51,13 +51,13 @@ def test_source_tags(qtbot, repo):
     m = repo.create("m", scheduled_date=TODAY, source="manual")
     w2 = TaskWidget(repo.get(m.id))
     qtbot.addWidget(w2)
-    assert w2.source_tag_label.text() == "自定义"
+    assert w2.source_tag_label.text() == "手动学习"
 
     k = repo.create("k", scheduled_date=TODAY, source="manual",
                     knowledge_point_id=1)
     w3 = TaskWidget(repo.get(k.id))
     qtbot.addWidget(w3)
-    assert w3.source_tag_label.text() == "自定义知识"
+    assert w3.source_tag_label.text() == "知识学习"
 
 
 def test_activity_tag(qtbot, repo):

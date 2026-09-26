@@ -2,25 +2,25 @@
 
 解决“今日学习任务不能只依赖 Agent 自动规划”：用户可以在当天主动添加：
 
-1. 普通学习任务（manual todo）
+1. 学习活动（manual learning activity）
    - source='manual'、task_type='manual'；
    - 不关联 topic / knowledge_point；
-   - 不进入 Assessment / mastery / Review 链路。
+   - 不进入 Assessment / Mastery / Capability evidence。
 
-2. 正式知识学习任务（manual knowledge）
+2. 知识学习（manual knowledge）
    - source='manual'、task_type='new'（复用现有“新知识”语义）；
    - 可关联已有 study_topic（复用 topic -> knowledge_point 的安全幂等实现）；
    - 或新建“临时知识点”（knowledge_points，topic_id=NULL，不污染 study_phases）；
    - 完成后仍必须 Assessment 才形成掌握证据（done ≠ mastered）。
 
-本阶段不引入 learning_routes / 多路线模型。
+新建 UI 路径在有 active route 时要求选择路线；服务仍可读写历史 route_id=NULL 记录。
 """
 
 from __future__ import annotations
 
 from ..database.repository import Task, TaskRepository
 
-MANUAL_TODO = "manual"
+MANUAL_ACTIVITY = "manual"
 MANUAL_KNOWLEDGE = "new"
 
 
@@ -85,9 +85,9 @@ class ManualTaskService:
                 return comp["id"], comp["activity_kind"]
         return None, None
 
-    # ================= 普通 To-do =================
+    # ================= 学习活动 =================
 
-    def create_todo(
+    def create_learning_activity(
         self,
         title: str,
         description: str = "",
@@ -97,9 +97,10 @@ class ManualTaskService:
         priority: int = 1,
         route_id: int | None = None,
     ) -> Task:
-        """创建普通学习任务：不创建 knowledge_point，不进入验收链路。
+        """创建一次性手动学习活动，不创建知识点，不进入验收或掌握度链路。
 
-        route_id 仅用于组织 / 筛选 / 统计（可为 NULL = 未分类 / 指定任意 active route）。
+        route_id 由新建 UI 在有 active route 时保证选中；None 仅供无可用路线
+        或历史兼容调用使用，不对历史任务补写路线。
         """
         return self.repo.create(
             title=title,
@@ -109,11 +110,15 @@ class ManualTaskService:
             estimated_minutes=estimated_minutes,
             priority=priority,
             source="manual",
-            task_type=MANUAL_TODO,
+            task_type=MANUAL_ACTIVITY,
             route_id=route_id,
         )
 
-    # ================= 正式知识学习任务 =================
+    def create_todo(self, *args, **kwargs) -> Task:
+        """Legacy compatibility alias; production uses create_learning_activity."""
+        return self.create_learning_activity(*args, **kwargs)
+
+    # ================= 知识学习 =================
 
     def create_knowledge_task(
         self,
@@ -128,7 +133,7 @@ class ManualTaskService:
         component_id: int | None = None,
         learning_activity_kind: str | None = None,
     ) -> Task:
-        """创建正式知识学习任务（manual knowledge）。
+        """创建知识学习任务（manual knowledge）。
 
         - 传入 topic_id：关联已有 study_topic，task.route_id 强制等于该 topic 的
           route（不接受调用方覆盖）；复用 link_task_knowledge_point。

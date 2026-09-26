@@ -43,7 +43,7 @@
 | 5 | Practice detail | 项目卡片「查看」 | Milestone/Output/Readiness/Evidence 各 section |
 | 7 | AI Settings — Profiles | 导航「AI 设置」→ 模型/API | Profile 列表 + 详情 + 连接测试区 |
 | 8 | Prompt Manager | 导航「AI 设置」→ Prompt 管理 | 树 + 编辑器 + 变量 + 预览 + 路线选择 |
-| 9 | Add Task dialog | Today「＋ 添加学习任务」 | 普通 To-do / 正式知识任务切换 |
+| 9 | Add Task dialog | Today「＋ 添加学习任务」 | 默认知识学习 / 切换学习活动；有 active route 时必须选择路线 |
 | 10 | Assessment dialog | 任务卡「开始验收」 | 问答区 + 提交 + loading/error |
 | 11 | Empty state | 各页面无数据时 | Today 无任务 / Practice 无项目 |
 | 12 | Populated state | 各页面有数据时 | 与 #1–#6 对应，可复用 |

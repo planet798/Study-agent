@@ -100,10 +100,10 @@ class TestStandaloneManual:
             )
 
 
-class TestOrdinaryTodo:
-    def test_todo_has_no_activity(self, activity_env):
+class TestOrdinaryActivity:
+    def test_activity_has_no_activity(self, activity_env):
         env = activity_env
-        task = _svc(env).create_todo(
+        task = _svc(env).create_learning_activity(
             "刷邮件", scheduled_date="2026-01-05",
         )
         assert task.component_id is None

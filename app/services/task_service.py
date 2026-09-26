@@ -153,7 +153,7 @@ class TaskService:
     def is_cancellable(self, task: Task) -> bool:
         """该任务是否允许“移除今日任务”。
 
-        允许：active 的 generated/new、manual todo、manual knowledge、
+        允许：active 的 generated/new、manual learning activity、knowledge learning、
         LEGACY extra（仅历史行，无创建入口）。
         不允许：done / not_done / cancelled。
         说明：pending Assessment 由 UI 层结合 assessment_repo 额外拦截。

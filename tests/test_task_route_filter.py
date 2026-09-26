@@ -93,9 +93,9 @@ class TestTodayRouteFilter:
         rl, plan, phase, topic = _second_route(env)
         a = env["repo"].create("Agent 任务", scheduled_date=TODAY,
                                source="generated", route_id=env["default"].id)
-        b = env["manual"].create_todo("RL 任务", scheduled_date=TODAY,
+        b = env["manual"].create_learning_activity("RL 任务", scheduled_date=TODAY,
                                       route_id=rl.id)
-        c = env["manual"].create_todo("未分类任务", scheduled_date=TODAY)
+        c = env["manual"].create_learning_activity("未分类任务", scheduled_date=TODAY)
         w = self._window(qtbot, env)
 
         # 默认全部
@@ -117,16 +117,16 @@ class TestTodayRouteFilter:
         assert env["repo"].get(b.id) is not None
 
     def test_filter_does_not_change_status(self, qtbot, env):
-        t = env["manual"].create_todo("x", scheduled_date=TODAY)
+        t = env["manual"].create_learning_activity("x", scheduled_date=TODAY)
         w = self._window(qtbot, env)
         w.route_filter_combo.setCurrentIndex(w.route_filter_combo.findData("none"))
         assert env["ts"].get_status(t.id) == "active"
 
     def test_route_stats_completion(self, qtbot, env):
         rl, *_ = _second_route(env)
-        a = env["manual"].create_todo("a", scheduled_date=TODAY, route_id=rl.id)
-        b = env["manual"].create_todo("b", scheduled_date=TODAY, route_id=rl.id)
-        c = env["manual"].create_todo("c", scheduled_date=TODAY, route_id=rl.id)
+        a = env["manual"].create_learning_activity("a", scheduled_date=TODAY, route_id=rl.id)
+        b = env["manual"].create_learning_activity("b", scheduled_date=TODAY, route_id=rl.id)
+        c = env["manual"].create_learning_activity("c", scheduled_date=TODAY, route_id=rl.id)
         env["ts"].complete_task(a.id)
         env["ts"].complete_task(b.id)
         w = self._window(qtbot, env)
@@ -135,8 +135,8 @@ class TestTodayRouteFilter:
 
     def test_cancelled_not_in_filter_stats(self, qtbot, env):
         rl, *_ = _second_route(env)
-        a = env["manual"].create_todo("a", scheduled_date=TODAY, route_id=rl.id)
-        b = env["manual"].create_todo("b", scheduled_date=TODAY, route_id=rl.id)
+        a = env["manual"].create_learning_activity("a", scheduled_date=TODAY, route_id=rl.id)
+        b = env["manual"].create_learning_activity("b", scheduled_date=TODAY, route_id=rl.id)
         env["ts"].complete_task(a.id)
         env["ts"].cancel_task(b.id)
         w = self._window(qtbot, env)
@@ -189,9 +189,9 @@ class TestAddDialogRoutes:
 # ================= 23~27：manual 任务路线 =================
 
 class TestManualRoute:
-    def test_todo_with_route_no_kp(self, env):
+    def test_activity_with_route_no_kp(self, env):
         rl, *_ = _second_route(env)
-        t = env["manual"].create_todo("看 STL", scheduled_date=TODAY,
+        t = env["manual"].create_learning_activity("看 STL", scheduled_date=TODAY,
                                       route_id=rl.id)
         assert t.route_id == rl.id
         assert t.knowledge_point_id is None
@@ -239,9 +239,9 @@ class TestManualRoute:
 class TestPastDialogRoute:
     def test_past_dialog_shows_route_labels(self, env, qtbot):
         rl, *_ = _second_route(env)
-        t1 = env["manual"].create_todo("RL 任务", scheduled_date=YESTERDAY,
+        t1 = env["manual"].create_learning_activity("RL 任务", scheduled_date=YESTERDAY,
                                        route_id=rl.id)
-        t2 = env["manual"].create_todo("未分类任务", scheduled_date=YESTERDAY)
+        t2 = env["manual"].create_learning_activity("未分类任务", scheduled_date=YESTERDAY)
         dialog = PastTaskConfirmationDialog(
             [env["repo"].get(t1.id), env["repo"].get(t2.id)],
             route_names={rl.id: rl.name},
@@ -266,7 +266,7 @@ class TestPausePlanning:
 
     def test_pause_still_allows_manual(self, env):
         env["route_service"].pause_planning(env["default"].id)
-        t = env["manual"].create_todo("刷题", scheduled_date=TODAY)
+        t = env["manual"].create_learning_activity("刷题", scheduled_date=TODAY)
         assert t.status == "active"
 
     def test_resume_does_not_generate_immediately(self, env):
