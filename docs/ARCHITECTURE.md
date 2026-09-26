@@ -54,11 +54,24 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
-## Agentization frozen boundary (NOT IMPLEMENTED YET)
+## Agent core (Agent-1 implemented)
 
-Planner 决定学什么；未来 Agent Runtime 负责陪用户把任务学完。Agent Tool 不得直接操作 Repository 或 raw SQLite：必须经 `Agent Tool → existing Service → Repository → SQLite`。Agent 不能直接 set Mastery 或 Capability；只有 `Assessment → Mastery` 和真实 `Evidence → Capability`。
+Planner 决定学什么；Agent Runtime 负责陪用户把任务学完。
 
-现有 `SkillService` / `skills` 表属于职业/技术技能域。未来 Agent Skills 必须使用独立命名（`AgentSkill`、`AgentSkillRegistry`、`agent/skills/`），不能复用或重解释现有技能表。本节仅冻结架构约束，不实现 Agent。
+```text
+Task → agent_sessions (task-bound, one active per task)
+     → agent_messages (multi-turn, immutable)
+     → AgentRuntime → AgentModelClient → OpenAI-compatible chat completion
+```
+
+- production：`app/agent/session.py`（`AgentSessionService`）、`app/agent/runtime.py`（`AgentRuntime`）、`app/database/agent_repository.py`、`app/ai/agent_protocol.py`、`app/ai/agent_client.py`。
+- legacy `AIClient`（`app/ai/interface.py`）保持不变，继续服务 Planner / Assessment / JD / TaskReview / Route Builder；Agent 使用独立的 `AgentModelClient.complete(ModelRequest)`。
+- Agent Runtime 不直接访问 SQLite / Repository；不发送 tools、不执行 tool_calls；不写 Mastery / Capability / Evidence，也不完成 Task（关闭 session ≠ 完成学习任务）。
+- Agent Tool 不得直接操作 Repository 或 raw SQLite：必须经 `Agent Tool → existing Service → Repository → SQLite`。Agent 不能直接 set Mastery 或 Capability；只有 `Assessment → Mastery` 和真实 `Evidence → Capability`。
+
+尚未实现：native tools / Tool Registry、TaskContext Builder、Agent Workspace UI、Agent Skills、MCP、Sandbox、memory compaction、trace/eval。
+
+现有 `SkillService` / `skills` 表属于职业/技术技能域。未来 Agent Skills 必须使用独立命名（`AgentSkill`、`AgentSkillRegistry`、`agent/skills/`），不能复用或重解释现有技能表。详见 `docs/AGENT_ARCHITECTURE.md`。
 
 ## 3. 关键不变式（CRITICAL INVARIANTS）
 
@@ -81,16 +94,17 @@ Planner 决定学什么；未来 Agent Runtime 负责陪用户把任务学完。
 10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
 
-## 4. DB schema 版本（v20）
+## 4. DB schema 版本（v21）
 
-- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 20`（`app/database/schema.py`）。
-- `_MIGRATIONS`: v2..v20 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
-- 空库真实路径：`create_schema()`（基础表） + v2..v20 逐级执行。
+- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 21`（`app/database/schema.py`）。
+- `_MIGRATIONS`: v2..v21 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
+- 空库真实路径：`create_schema()`（基础表） + v2..v21 逐级执行。
 - **测试快路径**：`initialize_fresh_database(conn)` → 运行时从真实迁移反推当前完整
-  DDL + 种子，一次性建好并写 `user_version=20`，**不重放**历史迁移。
+  DDL + 种子，一次性建好并写 `user_version=21`，**不重放**历史迁移。
   与真实路径在空库上的结果逐字一致（含 `learning_routes` 种子）。
 - 关键历史节点：v12 canonical routes seed / v13 KP route 唯一 / v15 单 active plan /
-  v16 legacy theory backfill / v18 capability / v19 practice evidence / v20 requirements。
+  v16 legacy theory backfill / v18 capability / v19 practice evidence / v20 requirements /
+  v21 agent_sessions + agent_messages（Agent-1）。
 
 ## 5. 依赖边界（不要越界）
 

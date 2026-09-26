@@ -75,7 +75,7 @@ def test_monthly_prompt_not_active_but_historical_override_survives(conn):
 def test_monthly_history_schema_and_rows_survive_application_startup(
     conn, make_window,
 ):
-    assert SCHEMA_VERSION == 20
+    assert SCHEMA_VERSION == 21
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='monthly_summaries'"
     ).fetchone()

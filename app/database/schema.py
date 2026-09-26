@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1349,6 +1349,61 @@ def _migrate_v20(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[20] = _migrate_v20
+
+
+# ============================================================
+# v21：Agent Session / Message（Agent-1 核心运行时）
+# ============================================================
+#
+# Agent Study Session 必须 task-bound（禁止 task_id=NULL 的 generic chat）：
+# 一个 Task 同时最多一个 active session；closed 后可再次创建新 session。
+#
+# agent_messages 的 tool* 字段只为 Agent-2 表达 tool 协议预留；
+# Agent-1 生产路径只写 user / assistant 文本消息，不伪造 tool messages。
+#
+# 不修改 tasks / mastery / capability / review / scheduler。
+
+_V21_SQL = """
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     INTEGER NOT NULL REFERENCES tasks(id),
+    title       TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'closed')),
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    closed_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_task
+    ON agent_sessions(task_id);
+-- 一个 Task 同时最多一个 active Agent Study Session
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_one_active_per_task
+    ON agent_sessions(task_id) WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      INTEGER NOT NULL REFERENCES agent_sessions(id),
+    role            TEXT NOT NULL
+                    CHECK(role IN ('system','user','assistant','tool')),
+    content         TEXT NOT NULL DEFAULT '',
+    tool_call_id    TEXT NOT NULL DEFAULT '',
+    tool_name       TEXT NOT NULL DEFAULT '',
+    tool_calls_json TEXT NOT NULL DEFAULT '',
+    metadata_json   TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_session
+    ON agent_messages(session_id, id);
+"""
+
+
+def _migrate_v21(conn: sqlite3.Connection) -> None:
+    """v21：agent_sessions + agent_messages（幂等，仅新增表/索引）。"""
+    conn.executescript(_V21_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[21] = _migrate_v21
 
 
 def get_schema_version(conn) -> int:

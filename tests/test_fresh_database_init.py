@@ -199,7 +199,8 @@ def test_legacy_v14_to_v20_still_runs_every_step(tmp_path):
 
 
 def test_migration_registry_covers_every_version():
-    assert SCHEMA_VERSION == 20
+    # v21：Agent-1 新增 agent_sessions / agent_messages 正式数据模型
+    assert SCHEMA_VERSION >= 21
     assert sorted(schema_mod._MIGRATIONS) == list(range(2, SCHEMA_VERSION + 1))
 
 

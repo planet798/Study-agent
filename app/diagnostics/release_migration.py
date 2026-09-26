@@ -47,6 +47,9 @@ GROWTH_TABLES = (
     "practice_projects",
     "practice_topic_evidence",
     "practice_topic_requirements",
+    # v21 Agent-1：新的正式数据模型，v20 前不存在（属于 growth，不是 history）
+    "agent_sessions",
+    "agent_messages",
 )
 
 

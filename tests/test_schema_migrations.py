@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from app.database import schema as schema_module
 from app.database.connection import get_connection
 from app.database.schema import (
@@ -560,5 +562,182 @@ def test_v13_db_upgrades_to_v14_without_data_loss(tmp_path):
         # 幂等
         assert migrate(conn) == SCHEMA_VERSION
         assert migrate(conn) == SCHEMA_VERSION
+    finally:
+        conn.close()
+
+
+# ============================================================
+# v21：Agent Session / Message（Agent-1）
+# ============================================================
+
+
+def _make_v20_db(path):
+    """建一个完整的 v20 库（真实迁移路径），并写入可核对的历史数据。"""
+    conn = get_connection(path)
+    conn.execute(
+        "INSERT INTO tasks (title, description, category, estimated_minutes, "
+        "priority, status, scheduled_date, postpone_count, created_at, "
+        "updated_at, source) VALUES ('v20 历史任务','','学习',1,1,'active',"
+        "'2026-09-06',0,'2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
+    )
+    conn.execute(
+        "INSERT INTO knowledge_points (name, description, mastery_estimate, "
+        "review_count, interval_days, created_at, updated_at) "
+        "VALUES ('kp.v20','',0.5,2,3,'2026-09-06T10:00:00','2026-09-06T10:00:00')"
+    )
+    conn.execute(
+        "INSERT INTO review_schedule (knowledge_point_id, scheduled_date,"
+        " interval_days, status, task_id, created_at, completed_at)"
+        " VALUES (1, '2026-09-07', 3, 'pending', 1,"
+        "'2026-09-06T10:00:00', NULL)"
+    )
+    conn.execute(
+        "INSERT INTO monthly_summaries (period_start, period_end, stats_json,"
+        " ai_summary_json, source, created_at) VALUES ('2026-08-01','2026-08-31',"
+        "'{}','{}','ai','2026-09-01T10:00:00')"
+    )
+    conn.commit()
+    conn.execute("PRAGMA user_version = 20")
+    conn.commit()
+    conn.close()
+
+
+def test_v20_db_migrates_stepwise_to_v21(tmp_path):
+    path = tmp_path / "v20.db"
+    _make_v20_db(path)
+
+    conn = get_connection(path)
+    try:
+        assert get_schema_version(conn) == SCHEMA_VERSION == 21
+
+        # 新表 + 索引存在
+        tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert {"agent_sessions", "agent_messages"} <= tables
+        indexes = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            )
+        }
+        assert {
+            "idx_agent_sessions_task",
+            "idx_agent_sessions_one_active_per_task",
+            "idx_agent_messages_session",
+        } <= indexes
+
+        # 历史数据不受影响
+        assert conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE title='v20 历史任务'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM knowledge_points WHERE name='kp.v20'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM review_schedule"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM monthly_summaries"
+        ).fetchone()[0] == 1
+
+        # 迁移幂等
+        assert migrate(conn) == 21
+        assert migrate(conn) == 21
+    finally:
+        conn.close()
+
+
+def test_v21_agent_tables_columns(tmp_path):
+    conn = get_connection(tmp_path / "v21cols.db")
+    try:
+        session_cols = [r[1] for r in conn.execute("PRAGMA table_info(agent_sessions)")]
+        assert session_cols == [
+            "id", "task_id", "title", "status", "created_at", "updated_at",
+            "closed_at",
+        ]
+        message_cols = [r[1] for r in conn.execute("PRAGMA table_info(agent_messages)")]
+        assert message_cols == [
+            "id", "session_id", "role", "content", "tool_call_id", "tool_name",
+            "tool_calls_json", "metadata_json", "created_at",
+        ]
+    finally:
+        conn.close()
+
+
+def test_fresh_db_has_agent_tables(tmp_path):
+    conn = get_connection(tmp_path / "fresh21.db")
+    try:
+        tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert {"agent_sessions", "agent_messages"} <= tables
+    finally:
+        conn.close()
+
+
+def test_agent_sessions_one_active_per_task_constraint(tmp_path):
+    import sqlite3 as _sqlite3
+
+    conn = get_connection(tmp_path / "constraint.db")
+    try:
+        conn.execute(
+            "INSERT INTO tasks (title, description, category, estimated_minutes,"
+            " priority, status, scheduled_date, postpone_count, created_at,"
+            " updated_at, source) VALUES ('t','','学习',1,1,'active','2026-09-06',0,"
+            "'2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
+        )
+        conn.execute(
+            "INSERT INTO agent_sessions (task_id, title, status, created_at,"
+            " updated_at) VALUES (1,'s1','active','2026-09-06T10:00:00',"
+            "'2026-09-06T10:00:00')"
+        )
+        conn.commit()
+        with pytest.raises(_sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO agent_sessions (task_id, title, status, created_at,"
+                " updated_at) VALUES (1,'s2','active','2026-09-06T10:00:00',"
+                "'2026-09-06T10:00:00')"
+            )
+        conn.rollback()
+        # closed 后可再建
+        conn.execute("UPDATE agent_sessions SET status='closed' WHERE id=1")
+        conn.execute(
+            "INSERT INTO agent_sessions (task_id, title, status, created_at,"
+            " updated_at) VALUES (1,'s3','active','2026-09-06T10:00:00',"
+            "'2026-09-06T10:00:00')"
+        )
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM agent_sessions").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_agent_message_role_check(tmp_path):
+    import sqlite3 as _sqlite3
+
+    conn = get_connection(tmp_path / "rolecheck.db")
+    try:
+        conn.execute(
+            "INSERT INTO tasks (title, description, category, estimated_minutes,"
+            " priority, status, scheduled_date, postpone_count, created_at,"
+            " updated_at, source) VALUES ('t','','学习',1,1,'active','2026-09-06',0,"
+            "'2026-09-06T10:00:00','2026-09-06T10:00:00','manual')"
+        )
+        conn.execute(
+            "INSERT INTO agent_sessions (task_id, title, status, created_at,"
+            " updated_at) VALUES (1,'s','active','2026-09-06T10:00:00',"
+            "'2026-09-06T10:00:00')"
+        )
+        conn.commit()
+        with pytest.raises(_sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO agent_messages (session_id, role, content, created_at)"
+                " VALUES (1,'robot','x','2026-09-06T10:00:00')"
+            )
+        conn.rollback()
     finally:
         conn.close()

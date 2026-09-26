@@ -71,7 +71,7 @@ Manual Learning
 ```
 
 有 active 学习路线时，新建 UI 要求选择路线；无可用路线时安全允许未分类。
-历史 `source='manual', task_type='manual', route_id=NULL` 行继续展示并按原状态机处理，不补写路线。数据库 schema 继续为 v20。
+历史 `source='manual', task_type='manual', route_id=NULL` 行继续展示并按原状态机处理，不补写路线。
 
 ## Monthly 已退役（S2）
 
@@ -403,7 +403,7 @@ python -m app.main db-release backup --db "D:\\Projects\\study-agent\\data\\stud
 # 2) 迁移前只读盘点（mode=ro + query_only，不会迁移 schema）
 python -m app.main db-release inventory --db "...\\study_agent.db" --save before.json
 
-# 3) 逐级迁移 v14→v20 + canonical seed（可选 capability backfill）
+# 3) 逐级迁移 legacy→当前版本 + canonical seed（可选 capability backfill）
 python -m app.main db-release migrate --db "...\\study_agent.db" --before before.json --apply-capability
 
 # 4) 完整性校验（route / evidence / 指纹 / integrity_check / foreign_key_check）

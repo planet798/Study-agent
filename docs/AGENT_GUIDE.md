@@ -91,6 +91,12 @@ full 失败                 → 只重跑失败测试，修复
 - Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除；历史表和字段只用于迁移与历史保全。未来 recall 是 Agent contextual learning 方向，不是已实现功能。
 - 测试：`tests/test_assessment_*.py`、`test_review_retirement.py`、`test_skill_service.py`
 
+### Agent core (Agent-1)
+- production：`app/agent/session.py`（`AgentSessionService`）、`app/agent/runtime.py`（`AgentRuntime`）、`app/database/agent_repository.py`、`app/ai/agent_protocol.py`、`app/ai/agent_client.py`
+- 测试：`tests/test_agent_model_client.py`、`test_agent_session.py`、`test_agent_runtime.py`、`test_agent_architecture.py`
+- 不变式：Agent Session 必须 task-bound；一个 Task 同时最多一个 active session；message 追加后不可编辑/删除；Runtime 不直接访问 SQLite/Repository，不发送/执行 tools，不写 Mastery/Capability/Evidence，也不完成 Task（`关闭 session ≠ 完成学习任务`）。
+- legacy `AIClient.chat()` 保持零改动；Agent 使用独立的 `AgentModelClient.complete(ModelRequest)`，不新建第二套 API 设置。
+
 ### Migration / Schema（**高危，必须真实路径**）
 - production：`app/database/schema.py`、`app/database/connection.py`、
   `app/services/route_migration_service.py`、`app/diagnostics/release_migration.py`
@@ -116,7 +122,7 @@ full 失败                 → 只重跑失败测试，修复
   `test_ai_settings_ui.py`
 
 ### Monthly Summary retired (S2)
-- Monthly Dashboard / SummaryService / StatsService / Monthly AI prompt 与 cache writer 已退出生产产品；历史 `weekly_summaries` / `monthly_summaries` 表及用户 prompt override 仅保留兼容，SCHEMA_VERSION 继续为 20。
+- Monthly Dashboard / SummaryService / StatsService / Monthly AI prompt 与 cache writer 已退出生产产品；历史 `weekly_summaries` / `monthly_summaries` 表及用户 prompt override 仅保留兼容；Agent-1 已把 SCHEMA_VERSION 提升到 21（仅新增 agent 表）。
 - Route Detail / Practice 页面不依赖 Monthly；JD 30-day trend 使用独立的 `JdSummaryService`，必须保留。
 
 ### Today (S3)
@@ -130,8 +136,8 @@ full 失败                 → 只重跑失败测试，修复
 
 ## 3. 测试基础设施（本轮新增）
 
-- `tests/conftest.py::conn` → `get_fresh_connection()`：直接建当前 v20 schema，
-  **不重放 v2..v20**（约 280ms → 个位数 ms）。与真实迁移在空库上的 schema 逐字一致。
+- `tests/conftest.py::conn` → `get_fresh_connection()`：直接建当前 v21 schema，
+  **不重放 v2..v21**（约 280ms → 个位数 ms）。与真实迁移在空库上的 schema 逐字一致。
 - `app/database/connection.py::get_connection()`：**production 真实路径**，仍走
   `migrate()`。改动它要非常谨慎。
 - markers：`slow` / `migration` / `ui` / `integration`，见 `pytest.ini`。

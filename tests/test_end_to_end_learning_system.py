@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app.database.schema import SCHEMA_VERSION
 from app.services.capability import EXPLAIN, IMPLEMENT, PROJECT, UNLEARNED
 from app.services.practice_readiness import (
     REASON_ACTIONABLE,
@@ -100,12 +101,12 @@ class TestSyntheticV14ToV20Migration:
         assert before["tasks_done"] == 2
         assert before["legacy_route"] == "搜广推 + LLM"
 
-        # 3) migrate（逐级 15..20 + canonical seed + capability backfill）
+        # 3) migrate（逐级 15..SCHEMA_VERSION + canonical seed + capability backfill）
         conn = get_raw_connection(str(db))
         stats = _run_release_migrate(conn, apply_capability=True)
         assert stats["schema_version_before"] == 14
-        assert stats["schema_version_after"] == 20
-        assert stats["steps"] == [15, 16, 17, 18, 19, 20]
+        assert stats["schema_version_after"] == SCHEMA_VERSION
+        assert stats["steps"] == list(range(15, SCHEMA_VERSION + 1))
         assert stats["migration"]["summary"]["conflicts"] == 0
         # capability：历史 done 正式任务 → AWARE（不来自 mastery）
         assert stats["capability_backfill"]["aware_from_tasks"] >= 1

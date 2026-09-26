@@ -32,15 +32,33 @@ Daily Review / Review Scheduler / Daily Retention / generated review tasks; Mont
 
 ## Legacy DB and migration compatibility
 
-`SCHEMA_VERSION = 20`; `FINGERPRINT_VERSION = 4`. Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
+`SCHEMA_VERSION = 21`; `FINGERPRINT_VERSION = 4`. Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
 
-## Agent boundary — NOT IMPLEMENTED YET
+## Agent core — Agent-1 implemented
 
-Planner decides **WHAT** to learn. A future Agent Runtime may help the user actually learn it:
+Planner decides **WHAT** to learn. Agent Runtime helps the user actually learn that task:
 
 ```text
-Task → Agent Study Session → Model + Agent Skills + Tools + MCP + Sandbox
-     → Learning Interaction → Assessment / Artifact / Evidence
+Task → Agent Study Session → persistent multi-turn messages
+     → AgentRuntime → AgentModelClient → OpenAI-compatible chat completion
 ```
 
-Future Agent Tools must call **existing Service → Repository → SQLite**, never Repository or raw SQLite directly. Agent may neither set Mastery nor Capability directly: **Assessment → Mastery** and **Evidence → Capability**. Future Agent Skills must use distinct names (`AgentSkill`, `AgentSkillRegistry`, `agent/skills/`); current `SkillService` and `skills` table describe career/technical skills and must not be repurposed. None of Agent Runtime, session, Tools, Agent Skills, MCP or Sandbox is implemented at this baseline.
+Agent-1 core implemented:
+
+- **task-bound session persistence**（`agent_sessions`，一个 Task 同时最多一个 `active` session；closed 后可重新开始）；
+- **multi-turn message persistence**（`agent_messages`，按 id 顺序完整回放，创建后不可编辑 / 删除）；
+- **`AgentModelClient`**（`app/ai/agent_protocol.py` + `agent_client.py`，与 legacy `AIClient` 独立，共享现有 Profile/API 设置）；
+- **basic no-tool runtime**（`app/agent/runtime.py`，不发送 tools、不执行 tool_calls，模型意外返回 tool_calls 时 fail safe）。
+
+NOT IMPLEMENTED:
+
+- native tools / Tool Registry
+- TaskContext Builder
+- Agent Workspace UI（Sidebar 仍为 Today / Learning Routes / Practice / Settings）
+- Agent Skills
+- MCP
+- Sandbox
+- memory / context compaction
+- trace / evaluation
+
+Future Agent Tools must call **existing Service → Repository → SQLite**, never Repository or raw SQLite directly. Agent may neither set Mastery nor Capability directly: **Assessment → Mastery** and **Evidence → Capability**. Future Agent Skills must use distinct names (`AgentSkill`, `AgentSkillRegistry`, `agent/skills/`); current `SkillService` and `skills` table describe career/technical skills and must not be repurposed. See `docs/AGENT_ARCHITECTURE.md`.

@@ -139,7 +139,7 @@ def test_notes_have_no_review_section_and_weak_points_require_assessment_evidenc
 def test_route_progress_model_has_no_review_schedule_fields():
     from app.database.schema import SCHEMA_VERSION
     from app.services.route_progress_service import KnowledgeStatus, RouteProgress
-    assert SCHEMA_VERSION == 20
+    assert SCHEMA_VERSION >= 20
     assert "next_review_date" not in KnowledgeStatus.__dataclass_fields__
     assert "due_review_count" not in RouteProgress.__dataclass_fields__
     assert "upcoming_review_count" not in RouteProgress.__dataclass_fields__

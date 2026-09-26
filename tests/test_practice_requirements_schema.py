@@ -1,4 +1,4 @@
-"""Phase 6：v20 schema + PracticeTopicRequirement 基础测试。"""
+"""Phase 6：v20 schema + PracticeTopicRequirement 基础测试（v20 在 v21 之后仍必须保留）。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from tests.practice_capability_helpers import (
 
 class TestSchemaV20:
     def test_version_and_table(self, conn):
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 20
+        assert conn.execute("PRAGMA user_version").fetchone()[0] >= 20
         names = {
             r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -37,11 +37,11 @@ class TestSchemaV20:
 
     def test_migration_idempotent(self, tmp_path):
         from app.database.connection import get_connection
-        from app.database.schema import migrate
+        from app.database.schema import SCHEMA_VERSION, migrate
 
         c = get_connection(str(tmp_path / "idem.db"))
-        assert migrate(c) == 20
-        assert migrate(c) == 20
+        assert migrate(c) == SCHEMA_VERSION
+        assert migrate(c) == SCHEMA_VERSION
         c.close()
 
     def test_v19_to_v20_sequential_no_auto_requirement(self, tmp_path):
@@ -62,7 +62,7 @@ class TestSchemaV20:
         CanonicalRouteService(
             c, LearningRouteRepository(c), plan_repo, SkillRepository(c)
         ).ensure_all()
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 20
+        assert c.execute("PRAGMA user_version").fetchone()[0] >= 20
         assert c.execute(
             "SELECT COUNT(*) FROM practice_topic_requirements"
         ).fetchone()[0] == 0

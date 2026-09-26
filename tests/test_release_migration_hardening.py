@@ -170,6 +170,7 @@ class TestPreflightConflict:
         )
 
     def test_clean_db_passes_preflight(self, tmp_path):
+        from app.database.schema import SCHEMA_VERSION
         from app.diagnostics import release_migration as rm
 
         db = tmp_path / "clean.db"
@@ -177,7 +178,7 @@ class TestPreflightConflict:
         pre = rm.dry_run_on_copy(str(db))
         assert pre["ok"] is True
         assert pre["conflicts"] == 0
-        assert pre["schema_version_after"] == 20
+        assert pre["schema_version_after"] == SCHEMA_VERSION
 
 
 # ============================================================

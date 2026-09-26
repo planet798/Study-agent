@@ -138,6 +138,10 @@ class TestEndToEndMain:
             monkeypatch.setattr(
                 main_module, "get_connection", lambda: _get_connection(tmp_db)
             )
+            # migration gate 也必须指向临时库：测试不依赖开发者本地 data/ 目录版本
+            monkeypatch.setattr(
+                main_module, "resolve_db_path", lambda *a, **k: tmp_db
+            )
             monkeypatch.setattr(
                 _sys, "argv", ["app/main.py", "--date", D9_05]
             )
