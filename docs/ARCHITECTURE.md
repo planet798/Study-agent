@@ -89,8 +89,9 @@ Task → agent_sessions (task-bound, one active per task)
    必须走 `db-release backup/inventory/migrate/verify`。
 8. **release / legacy 迁移只走真实 `migrate_stepwise()` 路径**，不得使用
    `initialize_fresh_database()`（后者仅用于全新空库）。
-9. **Verifier 历史保留是子集语义**（fingerprint v4）：before IDs 必须仍是 after 的
-   子集且 immutable 字段不变；after 新增业务行合法。不能要求正式库迁移后冻结不增长。
+9. **Verifier 历史保留是子集语义**（fingerprint v5；Agent Session/Message immutable history 亦受保护）：
+   before IDs 必须仍是 after 的子集且 immutable 字段不变；after 新增业务行合法。
+   不能要求正式库迁移后冻结不增长。
 10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
 

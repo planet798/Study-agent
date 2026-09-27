@@ -34,6 +34,9 @@ HISTORY_TABLES = (
     "weekly_summaries",
     "monthly_summaries",
     "planner_decisions",
+    # v21+ Agent conversation 是正式用户历史数据，必须保留且不可篡改。
+    "agent_sessions",
+    "agent_messages",
 )
 
 # 允许增加的 canonical / 派生表
@@ -47,9 +50,6 @@ GROWTH_TABLES = (
     "practice_projects",
     "practice_topic_evidence",
     "practice_topic_requirements",
-    # v21 Agent-1：新的正式数据模型，v20 前不存在（属于 growth，不是 history）
-    "agent_sessions",
-    "agent_messages",
 )
 
 
@@ -76,7 +76,7 @@ def backup_database(db_path: str, out_dir: Optional[str] = None) -> str:
     target_dir = Path(out_dir) if out_dir else src_path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dst = target_dir / f"{src_path.stem}_before_learning_system_v20_{stamp}.db"
+    dst = target_dir / f"{src_path.stem}_before_migration_{stamp}.db"
     if dst.exists():
         raise FileExistsError(f"备份已存在，拒绝覆盖: {dst}")
     _sqlite_backup(db_path, str(dst))
@@ -112,7 +112,7 @@ def inventory(conn: sqlite3.Connection) -> dict:
             "learning_outcomes", "weekly_summaries", "monthly_summaries",
             "capability_evidence",
             "practice_projects", "practice_topic_evidence",
-            "practice_topic_requirements",
+            "practice_topic_requirements", "agent_sessions", "agent_messages",
         )},
     }
     data["tasks_done"] = _scalar(
@@ -204,6 +204,14 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
     "weekly_summaries": ("id", "period_start", "period_end", "source"),
     "monthly_summaries": ("id", "period_start", "period_end", "source"),
     "planner_decisions": ("id", "date", "current_phase_id", "source"),
+    # Session lifecycle fields (status / updated_at / closed_at) intentionally
+    # excluded: they change during normal use. Identity/title are immutable.
+    "agent_sessions": ("id", "task_id", "title", "created_at"),
+    # Messages are append-only audit history, including reserved tool fields.
+    "agent_messages": (
+        "id", "session_id", "role", "content", "tool_call_id", "tool_name",
+        "tool_calls_json", "metadata_json", "created_at",
+    ),
 }
 # 说明：以下 **migration-owned** 字段有意不入 tasks fingerprint：
 #   - route_id：v15 canonical MOVE 会合法更新 topic 所属 route；
@@ -216,8 +224,10 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
 # 每次修改 FINGERPRINT_COLUMNS 都要 +1。
 # v3：每表额外保存 per-row（id -> immutable fields hash），支持“历史子集”校验：
 #     迁移前已有行必须保留且不可被非法修改，迁移后允许正常新增新行。
-# v1/v2 旧 snapshot 仍可读（缺 per-row hashes 时走 legacy 分支）。
-FINGERPRINT_VERSION = 4
+# v5：protect immutable Agent Session/Message history；Session lifecycle 可变字段不入指纹。
+# v1–v4 旧 snapshot 仍可读；旧 snapshot 缺少新表/字段时只比较其已有 fingerprints，
+#     不要求 fingerprint_version_match=True 才成功。
+FINGERPRINT_VERSION = 5
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:

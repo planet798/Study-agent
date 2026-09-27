@@ -80,8 +80,8 @@ def test_sidebar_has_no_agent_page():
     assert not any("agent" in str(k).lower() for k in keys)
 
 
-def test_agent_tables_are_growth_not_history():
-    """v21 新增表属于 growth（新正式数据模型），不是 pre-v20 历史表。"""
+def test_agent_tables_are_protected_history_not_growth():
+    """v21 Agent 表是正式历史数据，参与 verifier fingerprint。"""
     from app.diagnostics.release_migration import (
         FINGERPRINT_COLUMNS,
         FINGERPRINT_VERSION,
@@ -90,11 +90,10 @@ def test_agent_tables_are_growth_not_history():
     )
 
     for table in ("agent_sessions", "agent_messages"):
-        assert table in GROWTH_TABLES
-        assert table not in HISTORY_TABLES
-        assert table not in FINGERPRINT_COLUMNS
-    # 未修改历史指纹定义
-    assert FINGERPRINT_VERSION == 4
+        assert table in HISTORY_TABLES
+        assert table not in GROWTH_TABLES
+        assert table in FINGERPRINT_COLUMNS
+    assert FINGERPRINT_VERSION == 5
 
 
 def test_agent_package_has_no_forbidden_modules():
