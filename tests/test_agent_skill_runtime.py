@@ -112,8 +112,9 @@ def test_code_reading_skill_says_no_local_filesystem_or_fake_reads(session_env):
     prompt = model.requests[0].messages[0].content
     assert result.skill_key == "code-reading"
     assert "没有提供代码内容" in prompt
-    assert "不得声称已读取本地仓库或文件" in prompt
-    assert "没有本地文件系统、终端或代码执行能力" in prompt
+    assert "本轮没有 sandbox_read_file" in prompt
+    assert "不能读取宿主仓库" in prompt
+    assert "本轮未提供 Sandbox 工具" in prompt
 
 
 def test_skill_is_selected_once_and_stays_stable_across_tool_rounds(session_env):

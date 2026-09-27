@@ -12,9 +12,10 @@ from ...services.learning_activity import (
 from .base import AgentSkill
 from .registry import AgentSkillRegistry
 
-_NO_EXECUTION = (
-    "你没有本地文件系统、终端或代码执行能力；除非用户在对话中提供内容，"
-    "否则不要声称看到了本地文件、运行了代码/命令或观察到执行结果。"
+_SANDBOX_CONDITIONAL = (
+    "只有当本轮明确提供对应的 sandbox_* 工具时，才可以使用绑定当前 Task 的隔离 workspace；"
+    "没有 sandbox_read_file 时，不得声称看到本地/宿主代码；没有 sandbox_run 时，"
+    "不得声称运行了代码/命令或观察到执行结果。即使工具可用，也不能访问宿主机任意文件。"
 )
 _NO_STATE_MUTATION = (
     "你只能提供对话帮助和读取当前学习信息；不要声称已完成 Task、更新 Mastery / "
@@ -33,7 +34,7 @@ def build_default_agent_skill_registry() -> AgentSkillRegistry:
             "围绕当前 Task 推进学习；先理解用户此刻的目标，再用清晰的小步骤解释、"
             "练习或排查问题。必要时使用只读工具查看真实学习状态。"
             "不要假设用户已经掌握，也不要把一次口头确认当成正式验收。"
-            + _NO_EXECUTION + _NO_STATE_MUTATION
+            + _SANDBOX_CONDITIONAL + _NO_STATE_MUTATION
         ),
         activity_kinds=(),
         priority=-100,
@@ -58,8 +59,9 @@ def build_default_agent_skill_registry() -> AgentSkillRegistry:
         instruction=(
             "先确认要理解的代码目标，再根据用户实际粘贴/提供的内容解释输入输出、"
             "控制流或数据流、关键实现，并区分框架样板与核心逻辑。"
-            "没有提供代码内容时，明确请用户粘贴相关代码；不得声称已读取本地仓库或文件。"
-            + _NO_EXECUTION + _NO_STATE_MUTATION
+            "没有提供代码内容且本轮没有 sandbox_read_file 时，请用户粘贴代码；"
+            "若 sandbox_read_file 存在，也只能读取当前 Task workspace，不能读取宿主仓库。"
+            + _SANDBOX_CONDITIONAL + _NO_STATE_MUTATION
         ),
         activity_kinds=(ACTIVITY_CODE_READING,),
         priority=10,
@@ -70,9 +72,10 @@ def build_default_agent_skill_registry() -> AgentSkillRegistry:
         description="帮助用户设计最小实验并分析用户提供的观察结果。",
         instruction=(
             "按需要引导 Hypothesis → Minimal Experiment → Expected Observation → "
-            "Actual Observation → Interpretation → Next Step。可以设计实验并分析用户提供的运行结果；"
-            "但没有 Sandbox，不能声称自己执行了代码、命令或实验，也不要伪造观察结果。"
-            + _NO_EXECUTION + _NO_STATE_MUTATION
+            "Actual Observation → Interpretation → Next Step。没有 sandbox_run 时只能设计实验、"
+            "分析用户提供的运行结果；存在 sandbox_run 时可在绑定 Task workspace 中运行并分析实际结果。"
+            "不得伪造观察结果。"
+            + _SANDBOX_CONDITIONAL + _NO_STATE_MUTATION
         ),
         activity_kinds=(ACTIVITY_EXPERIMENT,),
         priority=10,
@@ -97,8 +100,9 @@ def build_default_agent_skill_registry() -> AgentSkillRegistry:
         instruction=(
             "先明确实践目标，再参考当前 Task 提供的 deliverable、acceptance criteria、"
             "expected artifact 拆解最小可交付步骤；了解当前阻塞并提出可执行的下一步。"
-            "你没有 Sandbox；不得声称文件已创建、项目已运行或实验已完成。"
-            + _NO_EXECUTION + _NO_STATE_MUTATION
+            "只有本轮提供 sandbox_* tools 时才可在当前 Task workspace 创建文件/运行项目；"
+            "Sandbox artifact 不代表 Practice Evidence，也不代表 Task 已完成。"
+            + _SANDBOX_CONDITIONAL + _NO_STATE_MUTATION
         ),
         activity_kinds=(ACTIVITY_PRACTICE,),
         priority=10,

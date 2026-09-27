@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "enabled": true,
+  "file_tools": true,
+  "max_file_chars": 200000,
+  "max_output_chars": 20000,
+  "execution": {
+    "enabled": false,
+    "backend": "docker",
+    "image": "python:3.12-slim",
+    "timeout_seconds": 30,
+    "memory_mb": 512,
+    "cpus": 1.0,
+    "pids_limit": 64
+  }
+}

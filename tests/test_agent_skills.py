@@ -117,13 +117,14 @@ def test_builtin_skill_instructions_cover_their_learning_behaviors():
 
     code = by_key["code-reading"].instruction
     assert "没有提供代码内容" in code
-    assert "不得声称已读取本地仓库或文件" in code
+    assert "只能读取当前 Task workspace" in code
+    assert "不能读取宿主仓库" in code
 
     experiment = by_key["experiment-coach"].instruction
     for concept in ("Hypothesis", "Minimal Experiment", "Expected Observation",
                     "Actual Observation", "Interpretation", "Next Step"):
         assert concept in experiment
-    assert "不能声称自己执行了代码" in experiment
+    assert "没有 sandbox_run 时只能设计实验" in experiment
 
     interview = by_key["interview-drill"].instruction
     assert "一个主要问题" in interview
@@ -133,7 +134,7 @@ def test_builtin_skill_instructions_cover_their_learning_behaviors():
     practice = by_key["practice-coach"].instruction
     for concept in ("deliverable", "acceptance criteria", "expected artifact"):
         assert concept in practice
-    assert "不得声称文件已创建" in practice
+    assert "Sandbox artifact 不代表 Practice Evidence" in practice
 
     general = by_key["general-study"].instruction
     assert "当前 Task" in general

@@ -26,7 +26,13 @@ class AgentToolRegistry:
     exceptions are intentionally hidden behind a generic execution error.
     """
 
-    def __init__(self):
+    def __init__(self, allowed_mutation_scopes: tuple[str, ...] = ()):
+        scopes = tuple(allowed_mutation_scopes)
+        if any(scope != "sandbox" for scope in scopes):
+            raise ValueError("only the sandbox mutation scope is supported")
+        if len(set(scopes)) != len(scopes):
+            raise ValueError("duplicate mutation scope")
+        self._allowed_mutation_scopes = frozenset(scopes)
         self._tools: dict[str, AgentTool] = {}
 
     def register(self, tool: AgentTool) -> None:
@@ -37,8 +43,14 @@ class AgentToolRegistry:
             raise TypeError("tool.spec must be AgentToolSpec")
         if not _TOOL_NAME_RE.fullmatch(spec.name or ""):
             raise ValueError("invalid tool name")
-        if not spec.read_only:
-            raise ValueError("Agent-2 only permits read-only tools")
+        if not isinstance(spec.read_only, bool):
+            raise ValueError("tool read_only must be boolean")
+        if spec.read_only:
+            if spec.mutation_scope:
+                raise ValueError("read-only tools cannot declare a mutation scope")
+        elif (not spec.mutation_scope
+              or spec.mutation_scope not in self._allowed_mutation_scopes):
+            raise ValueError("tool mutation scope is not authorized")
         if spec.name in self._tools:
             raise ValueError(f"duplicate Agent tool name: {spec.name}")
         self._tools[spec.name] = tool
@@ -55,6 +67,11 @@ class AgentToolRegistry:
     def registered_tools(self) -> tuple[AgentTool, ...]:
         """Return immutable registration order for safe Registry composition."""
         return tuple(self._tools.values())
+
+    @property
+    def allowed_mutation_scopes(self) -> tuple[str, ...]:
+        """Public read-only view of this Registry's explicitly authorized scopes."""
+        return tuple(sorted(self._allowed_mutation_scopes))
 
     def model_tools(self) -> tuple[dict, ...]:
         """Return OpenAI-compatible declarations, detached from internal specs."""

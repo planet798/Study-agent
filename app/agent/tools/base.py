@@ -27,6 +27,7 @@ class AgentToolSpec:
     description: str
     parameters: dict[str, Any]
     read_only: bool = True
+    mutation_scope: str = ""
 
 
 class AgentToolError(Exception):

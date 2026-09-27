@@ -65,7 +65,7 @@ def test_duplicate_registration_is_rejected_without_overwrite():
 
 def test_registry_rejects_non_read_only_tool():
     registry = AgentToolRegistry()
-    with pytest.raises(ValueError, match="read-only"):
+    with pytest.raises(ValueError, match="mutation scope"):
         registry.register(EchoTool(read_only=False))
 
 

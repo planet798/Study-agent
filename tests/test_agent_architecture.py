@@ -115,9 +115,8 @@ def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules
     assert AgentSkillRegistry is not SkillService
     assert AgentSkill is not SkillService
     assert AgentSkillSelector is not SkillService
-    for module in (
-        "app.agent.sandbox", "app.agent.memory", "app.agent.trace",
-    ):
+    assert find_spec("app.agent.sandbox") is not None
+    for module in ("app.agent.memory", "app.agent.trace"):
         assert find_spec(module) is None, module
 
     package_path = Path(skills_package.__file__).parent
@@ -132,6 +131,17 @@ def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules
     mcp_sources = "\\n".join(p.read_text(encoding="utf-8") for p in mcp_path.glob("*.py"))
     for forbidden in ("SkillService", "SkillRepository", "sqlite3", "SELECT ", "UPDATE "):
         assert forbidden.lower() not in mcp_sources.lower()
+
+    import app.agent.sandbox as sandbox_package
+    sandbox_path = Path(sandbox_package.__file__).parent
+    sandbox_sources = "\\n".join(
+        p.read_text(encoding="utf-8") for p in sandbox_path.glob("*.py")
+    )
+    for forbidden in (
+        "TaskRepository", "AssessmentRepository", "CapabilityEvidenceRepository",
+        "TaskService", "AssessmentService", "CapabilityService", "sqlite3",
+    ):
+        assert forbidden.lower() not in sandbox_sources.lower()
 
 
 def test_native_registry_contains_only_read_only_tools():

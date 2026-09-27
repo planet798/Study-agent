@@ -234,8 +234,11 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
 
     config_path = tmp_path / "mcp-disabled.json"
     config_path.write_text('{"version":1,"servers":[]}', encoding="utf-8")
+    sandbox_path = tmp_path / "sandbox-disabled.json"
+    sandbox_path.write_text('{"version":1,"enabled":false}', encoding="utf-8")
     runtime = build_agent_runtime(
-        conn, db_path=_db_path(conn), mcp_config_path=config_path
+        conn, db_path=_db_path(conn), mcp_config_path=config_path,
+        sandbox_config_path=sandbox_path,
     )
     from app.agent.skills import AgentSkillSelector
 
@@ -243,6 +246,7 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
     assert isinstance(runtime.model_client, AdaptiveAgentModelClient)
     assert isinstance(runtime.skill_selector, AgentSkillSelector)
     assert runtime.mcp_provider is None  # explicit empty config keeps Agent-4 behavior
+    assert runtime.sandbox_provider is None
     assert runtime.session_service.repo.conn is conn
     registry = runtime.tool_registry
     assert registry.get("get_task_context").task_service.repo.conn is conn
@@ -270,12 +274,15 @@ def test_full_workspace_worker_context_tool_loop_and_verifier_growth(
     factory_db_path = _db_path(conn)
     mcp_config_path = tmp_path / "mcp-disabled.json"
     mcp_config_path.write_text('{"version":1,"servers":[]}', encoding="utf-8")
+    sandbox_config_path = tmp_path / "sandbox-disabled.json"
+    sandbox_config_path.write_text('{"version":1,"enabled":false}', encoding="utf-8")
 
     def runtime_factory(fresh_conn):
         try:
             runtime = build_agent_runtime(
                 fresh_conn, db_path=factory_db_path,
                 mcp_config_path=mcp_config_path,
+                sandbox_config_path=sandbox_config_path,
             )
         except Exception as exc:
             factory_errors.append(repr(exc))

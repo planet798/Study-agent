@@ -1145,7 +1145,9 @@ def _verify_text(result: dict) -> str:
     return "\n".join(lines)
 
 
-def build_agent_runtime(fresh_conn, db_path=None, mcp_config_path=None):
+def build_agent_runtime(
+    fresh_conn, db_path=None, mcp_config_path=None, sandbox_config_path=None
+):
     """Build a complete Agent Runtime using only the worker-owned connection.
 
     The function is invoked inside ``AgentTurnWorker.run``. Every SQLite-backed
@@ -1158,6 +1160,8 @@ def build_agent_runtime(fresh_conn, db_path=None, mcp_config_path=None):
     from app.agent.mcp.config import MCPConfigError, load_mcp_config
     from app.agent.mcp.provider import MCPToolProvider
     from app.agent.runtime import AgentRuntime
+    from app.agent.sandbox.config import SandboxConfigError, load_sandbox_config
+    from app.agent.sandbox.provider import SandboxProvider
     from app.agent.session import AgentSessionService
     from app.agent.skills.learning import build_default_agent_skill_registry
     from app.agent.skills.selector import AgentSkillSelector
@@ -1228,6 +1232,16 @@ def build_agent_runtime(fresh_conn, db_path=None, mcp_config_path=None):
             "MCP configuration invalid; external MCP tools are disabled for this turn."
         )
         mcp_provider = None
+    try:
+        sandbox_config = load_sandbox_config(sandbox_config_path)
+        sandbox_provider = (
+            SandboxProvider(sandbox_config) if sandbox_config.enabled else None
+        )
+    except SandboxConfigError:
+        logging.getLogger(__name__).warning(
+            "Sandbox configuration invalid; Sandbox tools are disabled for this turn."
+        )
+        sandbox_provider = None
     return AgentRuntime(
         session_service,
         agent_model_client,
@@ -1235,6 +1249,7 @@ def build_agent_runtime(fresh_conn, db_path=None, mcp_config_path=None):
         context_builder=AgentTaskContextBuilder(registry),
         skill_selector=AgentSkillSelector(skill_registry),
         mcp_provider=mcp_provider,
+        sandbox_provider=sandbox_provider,
     )
 
 

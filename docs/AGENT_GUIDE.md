@@ -91,12 +91,12 @@ full 失败                 → 只重跑失败测试，修复
 - Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除；历史表和字段只用于迁移与历史保全。未来 recall 是 Agent contextual learning 方向，不是已实现功能。
 - 测试：`tests/test_assessment_*.py`、`test_review_retirement.py`、`test_skill_service.py`
 
-### Agent core (Agent-1 / Agent-1.1 / Agent-2 / Agent-3 / Agent-4 / Agent-5)
-- production：`app/agent/context.py`、`app/agent/runtime.py`、`app/agent/skills/{base,registry,selector,learning}.py`、`app/agent/tools/{base,registry,learning}.py`、`app/agent/mcp/{config,client,tools,provider}.py`、`app/ui/agent_workspace_page.py`、`app/ui/ai_worker.py::AgentTurnWorker`、`app/main.py::build_agent_runtime`。
-- tests：Agent-4 skills/runtime tests、Agent-5 MCP config/client/discovery/tools/runtime tests、Agent-3 context/workspace/worker/integration tests，以及 Agent-1/2 verifier/tool/runtime regressions。
+### Agent core (Agent-1 through Agent-6)
+- production：`app/agent/context.py`、`app/agent/runtime.py`、`app/agent/skills/{base,registry,selector,learning}.py`、`app/agent/tools/{base,registry,learning}.py`、`app/agent/mcp/{config,client,tools,provider}.py`、`app/agent/sandbox/{config,workspace,backend,tools,provider}.py`、`app/ui/agent_workspace_page.py`、`app/ui/ai_worker.py::AgentTurnWorker`、`app/main.py::build_agent_runtime`。
+- tests：Agent-4 skills/runtime、Agent-5 MCP config/client/discovery/tools/runtime、Agent-6 Sandbox config/workspace/permissions/tools/backend/runtime，以及 Agent-3 Workspace 与 Agent-1/2 regressions。
 - 不变式：每 user turn 同一 context snapshot、Skill 确定性选择一次、MCP scope 只在 worker turn 存活；Skill selector 只读 snapshot，不调模型/DB/不授予权限；MCP 需本地精确 allowlist + `readOnlyHint=True` 双 gate。
 - Workspace 是 stack 内部页，不是 Sidebar/PageSpec；Worker 仅接收 db_path/runtime_factory/session_id/user_text，在线程内构造 fresh connection/runtime；离开 Workspace 不关闭 Session。Session task-bound；Native Tools 仍只读/Service-only；MCP 故障不禁用 Native Tools；legacy `AIClient.chat()` 与 Agent-1 no-tool 路径保持。
-- Agent Skills 是 `app/agent/skills/` 下的静态学习策略；严禁与职业/技术域的 `SkillService` / `SkillRepository` / `skills` 表混用。Agent-5 MCP 精确本地 allowlist + server `readOnlyHint=True` 双 gate；不做 MCP UI/Auth/Resources/write tools、Sandbox、MCP cache 或 schema migration。配置/信任边界见 `docs/MCP.md`。
+- Agent Skills 是 `app/agent/skills/` 下的静态学习策略；严禁与 Career `SkillService` / `SkillRepository` / `skills` 表混用。Agent-5 MCP 是本地 exact allowlist + server `readOnlyHint=True` 双 gate，只读、不访问 SQLite。Agent-6 仅通过 `sandbox` mutation scope 改写 task workspace；默认 Registry 仍只读，无 host-shell fallback、无 Application/DB mutation scope。配置/信任边界见 `docs/MCP.md` 与 `docs/SANDBOX.md`。
 
 ### Migration / Schema（**高危，必须真实路径**）
 - production：`app/database/schema.py`、`app/database/connection.py`、

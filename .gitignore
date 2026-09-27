@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 data/*.db
 data/mcp_servers.json
+data/sandbox.json
+data/agent_workspaces/
 .pytest_cache/
 data/logs/
 data/*.png

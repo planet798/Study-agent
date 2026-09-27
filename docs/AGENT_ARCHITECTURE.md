@@ -111,7 +111,7 @@ Task Context.task.activity_kind
 - `app/agent/skills/{base,registry,selector,learning}.py` contains six immutable built-ins: `general-study`, `teach-concept`, `code-reading`, `experiment-coach`, `interview-drill`, `practice-coach`.
 - These are static application behavior configuration, not database entities, Tools, Career Skills, user-managed prompts, or permissions. Selection uses only the current turn's Task Context snapshot and happens once per user turn; one tool loop reuses the selected Skill.
 - Prompt order is base safety/read-only policy → trusted Agent Skill instruction (`BEGIN_AGENT_SKILL`) → untrusted Task Context JSON (`BEGIN_TASK_CONTEXT_JSON`) → user message. Skill does not add tools or grant permissions; selected key is returned in `AgentTurnResult` but not persisted.
-- Code/experiment/practice instructions explicitly prohibit claiming local file, terminal, or execution access before Sandbox exists.
+- Code/experiment/practice instructions conditionally allow only currently exposed `sandbox_*` capabilities; they never claim host repository/filesystem access.
 
 ## Agent-5 — Optional read-only MCP Tools
 
@@ -130,10 +130,25 @@ per-user-turn MCP scope (AgentTurnWorker thread)
 - MCP Resources/Prompts/etc. are ignored. Results are provenance-tagged, JSON-safe and bounded; image/audio/binary content is described, not base64-forwarded. Server failures degrade to Native tools for that turn.
 - Task Context remains Native-only and authoritative; Agent Skill remains selected once from that same Task Context and grants no permission. MCP never changes the Skill or Native read-only policy.
 
+## Agent-6 — Task-scoped Sandbox
+
+```text
+AgentToolRegistry(default: read-only)
+→ explicit allowed_mutation_scopes=("sandbox",)
+→ SandboxProvider(task_id from AgentToolContext)
+→ data/agent_workspaces/task_<id>/
+→ optional Docker-only sandbox_run
+```
+
+- `AgentToolSpec` adds `mutation_scope`; read-only tools must leave it empty. The default Registry remains read-only. Only the Sandbox composition Registry may authorize the sole supported mutation scope, `sandbox`; application/database/task/mastery/capability scopes are not supported.
+- `app/agent/sandbox/{config,workspace,backend,tools,provider}.py` uses a local operator config (`data/sandbox.json`, `STUDY_AGENT_SANDBOX_CONFIG`). Missing/invalid config disables Sandbox without affecting Native/MCP tools. Workspace roots derive only from integer `task_id`, persist across Sessions, and are created lazily on an actual Sandbox tool call.
+- Fixed tools: `sandbox_list_files`, `sandbox_read_file`, `sandbox_write_file`, `sandbox_make_directory`, optional `sandbox_run`. Paths are relative, traversal and symlink/junction escape are rejected, text/results are bounded, writes are atomic, and there is no delete tool.
+- `sandbox_run` is exposed only when Docker is configured, reachable, and its image already exists locally. It uses a fixed argv-list Docker CLI, `shell=False`, `--network none`, only the current Task workspace bind mount, dropped capabilities, no-new-privileges, read-only container root, resource limits, timeout, bounded output, and container cleanup. Docker failure has no host subprocess fallback.
+- Sandbox never imports application Services/Repositories/SQLite and cannot update Task, Mastery, Capability, Assessment, Practice, or Evidence. Task Context stays Native-only and Skill selection stays once-per-turn.
+
 ## Still not implemented
 
 - write tools, approvals, mutation policy
-- Sandbox
 - memory / context compaction
 - trace / evaluation
 
@@ -141,8 +156,9 @@ per-user-turn MCP scope (AgentTurnWorker thread)
 
 | Stage | Scope |
 |---|---|
-| Agent-6 | Sandbox |
-| Later / separately designed | write tools + approval policy; Memory; Trace / Evaluation |
+| Agent-7 | Memory / context compaction |
+| Agent-8 | Trace / evaluation |
+| Later / separately designed | write tools + approval policy |
 
 ## Tests
 
@@ -153,4 +169,5 @@ per-user-turn MCP scope (AgentTurnWorker thread)
 - `tests/test_agent_workspace_ui.py` / `test_agent_ui_worker.py`: plain-text UI visibility, busy/config state, Sidebar boundary, and worker connection ownership.
 - `tests/test_agent_skills.py` / `test_agent_skill_runtime.py`: static strategies, deterministic mapping/fallback, prompt boundary, one selection per turn, and no extra model call.
 - `tests/test_agent_mcp_config.py`, `test_agent_mcp_client.py`, `test_agent_mcp_discovery.py`, `test_agent_mcp_tools.py`, `test_agent_mcp_runtime.py`: offline config, official SDK bridge lifecycle, dual authorization gate, bounded results, and Runtime composition.
+- `tests/test_agent_sandbox_config.py`, `test_agent_sandbox_workspace.py`, `test_agent_sandbox_permissions.py`, `test_agent_sandbox_tools.py`, `test_agent_sandbox_backend.py`, `test_agent_sandbox_runtime.py`: config, isolation/path protections, scope authorization, Docker command constraints, and end-to-end tool history.
 - Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.
