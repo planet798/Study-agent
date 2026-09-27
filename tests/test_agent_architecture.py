@@ -101,13 +101,30 @@ def test_agent_tables_are_protected_history_not_growth():
     assert FINGERPRINT_VERSION == 5
 
 
-def test_agent_package_has_no_future_stage_modules():
+def test_agent_skills_are_separate_from_career_skills_and_future_modules_absent():
     from importlib.util import find_spec
+    from pathlib import Path
+
+    from app.agent.skills import AgentSkill, AgentSkillRegistry, AgentSkillSelector
+    from app.services.skill_service import SkillService
+    import app.agent.skills as skills_package
+
+    assert find_spec("app.agent.skills") is not None
+    assert AgentSkillRegistry is not SkillService
+    assert AgentSkill is not SkillService
+    assert AgentSkillSelector is not SkillService
     for module in (
-        "app.agent.skills", "app.agent.mcp", "app.agent.sandbox",
-        "app.agent.memory", "app.agent.trace",
+        "app.agent.mcp", "app.agent.sandbox", "app.agent.memory", "app.agent.trace",
     ):
         assert find_spec(module) is None, module
+
+    package_path = Path(skills_package.__file__).parent
+    sources = "\\n".join(p.read_text(encoding="utf-8") for p in package_path.glob("*.py"))
+    for forbidden in (
+        "SkillService", "SkillRepository", "skill_repository", "sqlite3",
+        "AgentToolRegistry",
+    ):
+        assert forbidden not in sources
 
 
 def test_native_registry_contains_only_read_only_tools():

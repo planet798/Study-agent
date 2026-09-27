@@ -1155,6 +1155,8 @@ def build_agent_runtime(fresh_conn, db_path=None):
     from app.agent.context import AgentTaskContextBuilder
     from app.agent.runtime import AgentRuntime
     from app.agent.session import AgentSessionService
+    from app.agent.skills.learning import build_default_agent_skill_registry
+    from app.agent.skills.selector import AgentSkillSelector
     from app.agent.tools.learning import build_learning_tool_registry
     from app.ai.agent_client import AdaptiveAgentModelClient
     from app.ai.client import AdaptiveAIClient
@@ -1211,11 +1213,13 @@ def build_agent_runtime(fresh_conn, db_path=None):
         assessment_service,
         capability_service,
     )
+    skill_registry = build_default_agent_skill_registry()
     return AgentRuntime(
         session_service,
         agent_model_client,
         tool_registry=registry,
         context_builder=AgentTaskContextBuilder(registry),
+        skill_selector=AgentSkillSelector(skill_registry),
     )
 
 

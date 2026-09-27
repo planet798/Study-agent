@@ -233,8 +233,11 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn)
     from app.main import build_agent_runtime
 
     runtime = build_agent_runtime(conn, db_path=_db_path(conn))
+    from app.agent.skills import AgentSkillSelector
+
     assert isinstance(runtime.context_builder, AgentTaskContextBuilder)
     assert isinstance(runtime.model_client, AdaptiveAgentModelClient)
+    assert isinstance(runtime.skill_selector, AgentSkillSelector)
     assert runtime.session_service.repo.conn is conn
     registry = runtime.tool_registry
     assert registry.get("get_task_context").task_service.repo.conn is conn

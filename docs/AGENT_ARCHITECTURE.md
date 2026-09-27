@@ -99,10 +99,23 @@ Today active Task → [开始学习]/[继续学习]
 - Workspace is an internal stack page appended after formal pages, not a `PageKey`, `PageSpec`, or Sidebar item. Returning to Today does not close the Session.
 - `AgentTurnWorker` receives only database path, runtime factory, session id, and user text; factory builds all SQLite-backed dependencies from a fresh connection inside `run()`. Worker outcome reloads persisted history; failure preserves the committed user message. Stale completions never render into another Session.
 
+## Agent-4 — Static learning behavior strategies
+
+```text
+Task Context.task.activity_kind
+→ AgentSkillSelector (deterministic, no DB/model call)
+→ AgentSkillRegistry → trusted AgentSkill instruction
+→ AgentRuntime system message
+```
+
+- `app/agent/skills/{base,registry,selector,learning}.py` contains six immutable built-ins: `general-study`, `teach-concept`, `code-reading`, `experiment-coach`, `interview-drill`, `practice-coach`.
+- These are static application behavior configuration, not database entities, Tools, Career Skills, user-managed prompts, or permissions. Selection uses only the current turn's Task Context snapshot and happens once per user turn; one tool loop reuses the selected Skill.
+- Prompt order is base safety/read-only policy → trusted Agent Skill instruction (`BEGIN_AGENT_SKILL`) → untrusted Task Context JSON (`BEGIN_TASK_CONTEXT_JSON`) → user message. Skill does not add tools or grant permissions; selected key is returned in `AgentTurnResult` but not persisted.
+- Code/experiment/practice instructions explicitly prohibit claiming local file, terminal, or execution access before Sandbox exists.
+
 ## Still not implemented
 
 - write tools, approvals, mutation policy
-- Agent Skills (separate from career `SkillService` / `skills` table)
 - MCP
 - Sandbox
 - memory / context compaction
@@ -112,7 +125,6 @@ Today active Task → [开始学习]/[继续学习]
 
 | Stage | Scope |
 |---|---|
-| Agent-4 | Agent Skills |
 | Agent-5 | MCP |
 | Agent-6 | Sandbox |
 | Later / separately designed | write tools + approval policy; Memory; Trace / Evaluation |
@@ -124,4 +136,5 @@ Today active Task → [开始学习]/[继续学习]
 - `tests/test_agent_tool_runtime.py`: ordered tool loops, error paths, round cap, session isolation, persistence/reconstruction after Runtime recreation, verifier growth.
 - `tests/test_agent_task_context.py` / `test_agent_workspace_integration.py`: one context snapshot per turn, no context tool-history writes, task-to-session flow, failure reload, and stale worker isolation.
 - `tests/test_agent_workspace_ui.py` / `test_agent_ui_worker.py`: plain-text UI visibility, busy/config state, Sidebar boundary, and worker connection ownership.
+- `tests/test_agent_skills.py` / `test_agent_skill_runtime.py`: static strategies, deterministic mapping/fallback, prompt boundary, one selection per turn, and no extra model call.
 - Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.
