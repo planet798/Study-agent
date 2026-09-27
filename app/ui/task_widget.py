@@ -65,6 +65,7 @@ class TaskWidget(QFrame):
     postpone_requested = Signal(int)
     remove_requested = Signal(int)  # 移除今日任务（Phase A）
     assessment_requested = Signal(int)  # 开始验收（Phase 7）
+    start_study_requested = Signal(int)  # 进入 task-bound Agent Workspace（Agent-3）
 
     def __init__(
         self,
@@ -72,12 +73,16 @@ class TaskWidget(QFrame):
         parent: QWidget | None = None,
         assessment_label: str = "开始验收",
         route_name: str | None = None,
+        agent_enabled: bool = False,
+        agent_label: str = "开始学习",
     ):
         super().__init__(parent)
         self.setObjectName("TaskCard")
         self._task = task
         self._assessment_label = assessment_label
         self._route_name = route_name
+        self._agent_enabled = bool(agent_enabled)
+        self._agent_label = agent_label
 
         self._build_ui()
         self.render(task)
@@ -187,8 +192,19 @@ class TaskWidget(QFrame):
         self.action_row.addWidget(self.remove_btn)
 
     def _add_action_buttons(self) -> None:
-        """active 状态：[完成] [开始验收] [未完成] [移除]。"""
-        self.complete_btn = SAButton("完成", variant="primary", size="small")
+        """active 状态；Agent 可用时优先开始任务型学习。"""
+        if self._agent_enabled:
+            self.start_study_btn = SAButton(
+                self._agent_label, variant="primary", size="small"
+            )
+            self.start_study_btn.clicked.connect(
+                lambda: self.start_study_requested.emit(self._task.id)
+            )
+            self.action_row.addWidget(self.start_study_btn)
+            self.complete_btn = SAButton("完成", variant="secondary", size="small")
+        else:
+            # No Agent dependencies (e.g. legacy tests/fallback): preserve old priority.
+            self.complete_btn = SAButton("完成", variant="primary", size="small")
         self.complete_btn.clicked.connect(
             lambda: self.complete_requested.emit(self._task.id)
         )
@@ -309,7 +325,8 @@ class TaskWidget(QFrame):
                 w.setParent(None)
                 w.deleteLater()
         for name in ("assessment_btn", "complete_btn", "not_done_btn", "remove_btn",
-                     "postpone_btn", "done_label", "cancelled_label"):
+                     "postpone_btn", "done_label", "cancelled_label",
+                     "start_study_btn"):
             if hasattr(self, name):
                 delattr(self, name)
 

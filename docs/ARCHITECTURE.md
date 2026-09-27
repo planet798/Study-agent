@@ -54,7 +54,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
-## Agent core (Agent-1 / Agent-1.1 / Agent-2 implemented)
+## Agent core (Agent-1 / Agent-1.1 / Agent-2 / Agent-3 implemented)
 
 Planner 决定学什么；Agent Runtime 围绕当前 Session 绑定的 Task 提供只读学习上下文。
 
@@ -69,7 +69,9 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - Agent Runtime 通过 Service → Repository → SQLite 读取；Tool/Runtime 不直接访问 SQLite 或 Repository。工具只能读取，不能写 Task、Assessment、Mastery、Capability、Evidence 或 Practice。
 - tool-call / tool-result 经 `AgentSessionService` 持久化；Runtime 从存储重建 `ModelMessage`，最多执行 4 个 tool rounds。无 Registry 时保持 Agent-1 no-tool 行为。
 - legacy `AIClient`（`app/ai/interface.py`）保持不变，继续服务 Planner / Assessment / JD / TaskReview / Route Builder；Agent 使用独立的 `AgentModelClient.complete(ModelRequest)`。
-- 仍未实现：TaskContext auto injection、Agent Workspace UI、write tools / approvals、Agent Skills、MCP、Sandbox、memory compaction、trace/eval。
+- Agent-3：Today active Task → [开始学习]/[继续学习] → task-bound Session → internal Agent Workspace。`AgentTaskContextBuilder` 每 user turn 复用六个 read-only tools 构建一次 compact snapshot；`AgentTurnWorker` 在 worker thread 用 fresh SQLite connection 构建 Runtime 并执行，失败后从持久化 history reload。
+- Agent Workspace 只是最后追加的 internal stack page，不在 `PageKey` / `PAGE_SPECS` / Sidebar 中；离开 Workspace 不关闭 Session；普通 UI 只显示 user 与最终 assistant 文本。
+- 仍未实现：write tools / approvals、Agent Skills、MCP、Sandbox、memory compaction、trace/eval。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。未来 Agent Skills 必须使用独立命名（`AgentSkill`、`AgentSkillRegistry`、`agent/skills/`），不能复用或重解释现有技能表。详见 `docs/AGENT_ARCHITECTURE.md`。
 

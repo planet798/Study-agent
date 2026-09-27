@@ -1145,6 +1145,80 @@ def _verify_text(result: dict) -> str:
     return "\n".join(lines)
 
 
+def build_agent_runtime(fresh_conn, db_path=None):
+    """Build a complete Agent Runtime using only the worker-owned connection.
+
+    The function is invoked inside ``AgentTurnWorker.run``. Every SQLite-backed
+    Repository/Service is constructed from ``fresh_conn``; AIConfigService gets
+    only a path and opens its own short-lived connection per config lookup.
+    """
+    from app.agent.context import AgentTaskContextBuilder
+    from app.agent.runtime import AgentRuntime
+    from app.agent.session import AgentSessionService
+    from app.agent.tools.learning import build_learning_tool_registry
+    from app.ai.agent_client import AdaptiveAgentModelClient
+    from app.ai.client import AdaptiveAIClient
+    from app.ai.config_service import AIConfigService
+    from app.database.agent_repository import AgentRepository
+    from app.database.assessment_repository import AssessmentRepository
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.database.learning_route_repository import LearningRouteRepository
+    from app.database.repository import TaskRepository
+    from app.database.study_plan_repository import StudyPlanRepository
+    from app.database.topic_learning_repository import TopicLearningComponentRepository
+    from app.services.assessment_service import AssessmentService
+    from app.services.capability_service import CapabilityService
+    from app.services.learning_route_service import LearningRouteService
+    from app.services.study_plan_service import StudyPlanService
+    from app.services.task_service import TaskService
+    from app.services.topic_learning_profile_service import TopicLearningProfileService
+
+    task_repo = TaskRepository(fresh_conn)
+    task_service = TaskService(task_repo)
+    session_service = AgentSessionService(
+        AgentRepository(fresh_conn), task_service
+    )
+    route_service = LearningRouteService(LearningRouteRepository(fresh_conn))
+    plan_service = StudyPlanService(
+        task_repo, StudyPlanRepository(fresh_conn)
+    )
+    topic_service = TopicLearningProfileService(
+        fresh_conn, TopicLearningComponentRepository(fresh_conn)
+    )
+    assessment_repo = AssessmentRepository(fresh_conn)
+    capability_service = CapabilityService(
+        fresh_conn,
+        CapabilityEvidenceRepository(fresh_conn),
+        task_repo=task_repo,
+        assessment_repo=assessment_repo,
+    )
+
+    # Profile/secret configuration is shared with the existing Settings system;
+    # only db_path crosses threads, never its main-thread connection or repository.
+    config_service = AIConfigService(db_path=str(db_path or resolve_db_path()))
+    config_provider = config_service.get_runtime_config
+    agent_model_client = AdaptiveAgentModelClient(config_provider)
+    assessment_service = AssessmentService(
+        AdaptiveAIClient(config_provider),
+        assessment_repo=assessment_repo,
+        capability_service=capability_service,
+    )
+    registry = build_learning_tool_registry(
+        task_service,
+        route_service,
+        plan_service,
+        topic_service,
+        assessment_service,
+        capability_service,
+    )
+    return AgentRuntime(
+        session_service,
+        agent_model_client,
+        tool_registry=registry,
+        context_builder=AgentTaskContextBuilder(registry),
+    )
+
+
 def main() -> int:
     # 0) 子命令：不进 GUI
     if "add-jd-summary" in sys.argv[1:]:
@@ -1216,6 +1290,18 @@ def main() -> int:
         repo, outcome_service=outcome_service,
         capability_service=capability_service,
     )
+    # Main-thread Session service is only for start/resume and history reads;
+    # model turns receive a separate worker-owned Runtime/connection.
+    from app.agent.session import AgentSessionService
+    from app.database.agent_repository import AgentRepository
+
+    agent_session_service = AgentSessionService(
+        AgentRepository(conn), task_service
+    )
+    agent_db_path = str(resolve_db_path())
+
+    def agent_runtime_factory(fresh_conn):
+        return build_agent_runtime(fresh_conn, db_path=agent_db_path)
 
     # 学习计划：确保默认研一计划已创建，供每日任务生成与阶段显示；
     # 注入 assessment_repo（Phase 8）让规则生成能读取掌握证据（薄弱优先/不重复）。
@@ -1608,6 +1694,8 @@ def main() -> int:
         prompt_preview_service=prompt_preview_service,
         topic_learning_service=topic_learning_service,
         practice_service=practice_service,
+        agent_session_service=agent_session_service,
+        agent_runtime_factory=agent_runtime_factory,
         practice_capability_service=practice_capability_service,
         practice_readiness_service=practice_readiness_service,
     )

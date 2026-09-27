@@ -84,19 +84,44 @@ Assistant tool calls are reconstructed from `tool_calls_json` into `ModelMessage
 
 Agent-2 tools do not mutate Task, Assessment, Mastery, Capability, Evidence, Practice, or other business state. Assessment remains the only Mastery path; qualifying Evidence remains the Capability path.
 
+## Agent-3 — Task Context and task-driven Workspace
+
+```text
+Today active Task → [开始学习]/[继续学习]
+→ AgentSessionService.start_or_resume(task_id)
+→ internal Agent Workspace (Sidebar remains Today)
+→ AgentTaskContextBuilder snapshot + persistent AgentRuntime
+→ AgentTurnWorker with fresh worker-owned SQLite connection
+```
+
+- `AgentTaskContextBuilder` reuses the six Agent-2 Registry tools to create one compact, read-only snapshot per user turn. It writes no tool-call/result history; actual model-requested tools remain persisted by the Runtime.
+- Runtime injects the JSON snapshot inside explicit delimiters and instructs the model to treat its text as application data, not system instructions. Free-text fields are truncated at 2000 characters.
+- Workspace is an internal stack page appended after formal pages, not a `PageKey`, `PageSpec`, or Sidebar item. Returning to Today does not close the Session.
+- `AgentTurnWorker` receives only database path, runtime factory, session id, and user text; factory builds all SQLite-backed dependencies from a fresh connection inside `run()`. Worker outcome reloads persisted history; failure preserves the committed user message. Stale completions never render into another Session.
+
 ## Still not implemented
 
-- TaskContext auto injection / Builder
-- Agent Workspace UI (Sidebar remains Today / Learning Routes / Practice / Settings)
 - write tools, approvals, mutation policy
 - Agent Skills (separate from career `SkillService` / `skills` table)
-- MCP, Sandbox
+- MCP
+- Sandbox
 - memory / context compaction
 - trace / evaluation
+
+## Future roadmap
+
+| Stage | Scope |
+|---|---|
+| Agent-4 | Agent Skills |
+| Agent-5 | MCP |
+| Agent-6 | Sandbox |
+| Later / separately designed | write tools + approval policy; Memory; Trace / Evaluation |
 
 ## Tests
 
 - `tests/test_agent_tool_registry.py`: registration, duplicate/read-only checks, schemas, errors, strict arguments, JSON safety.
 - `tests/test_agent_learning_tools.py`: six Service-backed tools, missing context, mastery/capability evidence, read-only regression.
 - `tests/test_agent_tool_runtime.py`: ordered tool loops, error paths, round cap, session isolation, persistence/reconstruction after Runtime recreation, verifier growth.
+- `tests/test_agent_task_context.py` / `test_agent_workspace_integration.py`: one context snapshot per turn, no context tool-history writes, task-to-session flow, failure reload, and stale worker isolation.
+- `tests/test_agent_workspace_ui.py` / `test_agent_ui_worker.py`: plain-text UI visibility, busy/config state, Sidebar boundary, and worker connection ownership.
 - Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.

@@ -79,6 +79,11 @@ def test_sidebar_has_no_agent_page():
     assert keys == [PageKey.TODAY, PageKey.ROUTES, PageKey.PRACTICE, PageKey.SETTINGS]
     assert not any("agent" in str(k).lower() for k in keys)
 
+    # Workspace exists as an internal UI component, never as navigation metadata.
+    from app.ui.agent_workspace_page import AgentWorkspacePage
+    assert AgentWorkspacePage is not None
+    assert not any("workspace" in str(k).lower() for k in keys)
+
 
 def test_agent_tables_are_protected_history_not_growth():
     """v21 Agent 表是正式历史数据，参与 verifier fingerprint。"""

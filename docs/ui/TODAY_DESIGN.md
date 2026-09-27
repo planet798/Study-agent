@@ -51,8 +51,8 @@ cancelled 永不进入任何指标。数据不可靠时宁可不显示，也不�
 
 - 标签统一 `SATag`（无 `【】`）：Route=accent/neutral、Activity=info、
   Source=neutral。
-- 操作层级（`SAButton`）：完成=primary、开始验收=secondary、
-  未完成=danger、延期=secondary、移除今日任务=subtle。
+- Agent enabled 的 active task 操作层级（`SAButton`）：开始/继续学习=primary、完成=secondary、开始验收=secondary、未完成=danger、移除今日任务=subtle。
+- Agent dependencies 未注入时保持旧 fallback：完成=primary。Done / cancelled / not_done 均不出现 Agent start。
 - Done ≠ Mastery：done 的正式任务仍显示“已完成”+ 验收入口。
 - Historical review rows 不由 Today 渲染。
 - 延期 ≥3 次保留 warning 语义（semantic warning，不只靠黄色）。
@@ -76,6 +76,10 @@ Review-like recall will be handled by future Agent contextual learning, not by s
 ## S3 — Today simplification
 
 只有日期、两项 Summary、路线筛选/当前阶段、Planner 状态与说明、今日学习任务及手动添加入口。无任务时即使存在 JD/Skill 数据也显示学习空状态。`task_type=new` 历史语义不变。
+
+## Agent-3 — Task-driven Agent Workspace
+
+Today 的 active task 卡片可以「开始学习 / 继续学习」，进入 task-bound internal Agent Workspace；它不是 Sidebar page。返回 Today 不关闭 Session。Workspace 每个 user turn 构建一次小型只读 Task Context，tool loop 继续按需读取；模型调用在 worker thread 使用独立 DB connection。普通会话 UI 只显示 user 与最终 assistant plain text，不展示 tool protocol。
 
 ## S5 — Manual Learning
 

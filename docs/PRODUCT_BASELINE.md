@@ -34,7 +34,7 @@ Daily Review / Review Scheduler / Daily Retention / generated review tasks; Mont
 
 `SCHEMA_VERSION = 21`; `FINGERPRINT_VERSION = 5` (v5 protects immutable Agent Session/Message history). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
 
-## Agent core — Agent-1 / Agent-1.1 / Agent-2 implemented
+## Agent core — Agent-1 / Agent-1.1 / Agent-2 / Agent-3 implemented
 
 Planner decides **WHAT** to learn. Agent Runtime helps the user actually learn that task:
 
@@ -48,11 +48,10 @@ Implemented:
 - **Agent-1**: task-bound session persistence, immutable multi-turn messages, independent `AgentModelClient`, and persistent Runtime.
 - **Agent-1.1**: verifier v5 protects immutable Agent Session/Message history while allowing Session lifecycle changes and legitimate new conversation rows.
 - **Agent-2**: read-only `AgentToolRegistry` and six task-scoped learning tools; Runtime persists assistant tool calls/results, reconstructs history, and limits tool rounds.
+- **Agent-3**: Today task cards open/resume the task-bound internal Workspace. Each user turn gets one compact Service-backed Task Context snapshot; model turns run in `AgentTurnWorker` with a worker-owned SQLite connection. Workspace is not a Sidebar page.
 
 NOT IMPLEMENTED:
 
-- TaskContext auto injection / Builder
-- Agent Workspace UI（Sidebar 仍为 Today / Learning Routes / Practice / Settings）
 - write tools / approvals / mutation policy
 - Agent Skills
 - MCP

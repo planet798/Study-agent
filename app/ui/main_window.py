@@ -15,7 +15,7 @@ import json
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QThread, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -47,6 +47,7 @@ from .ai_worker import (
     AIReviewWorker,
     AIRouteBuilderWorker,
     AssessmentWorker,
+    AgentTurnWorker,
     run_start_assessment,
 )
 from .app_shell import PAGE_SPECS_BY_KEY, AppShell, PageKey
@@ -56,6 +57,7 @@ from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_ACTIVITY, KIND_KNOWLEDGE, AddLearningTaskDialog
 from .task_widget import TaskWidget
 from .today_page import TodayPage
+from .agent_workspace_page import AgentWorkspacePage
 
 POSTPONE_WARNING = "该任务已经连续延期 3 次，请考虑拆分任务或调整计划。"
 
@@ -116,11 +118,15 @@ class MainWindow(QMainWindow):
         practice_capability_service=None,
         practice_readiness_service=None,
         theme_settings=None,
+        agent_session_service=None,
+        agent_runtime_factory=None,
     ):
         super().__init__()
         # 主题偏好（QSettings；测试可注入隔离实例）；UI-2 runtime，不改 DB。
         self.theme_settings = theme_settings
         self.task_service = task_service
+        self.agent_session_service = agent_session_service
+        self.agent_runtime_factory = agent_runtime_factory
         self.date_service = date_service
         self.today_provider = today_provider or _default_today
         # AI 复核服务：可选，未配置/未传时本地功能完全正常
@@ -140,7 +146,7 @@ class MainWindow(QMainWindow):
             if assessment_service_factory is not None
             else (lambda conn: self.assessment_service)
         )
-        # Phase A~E 服务：可选；未传则对应职业面板隐藏（不回归旧行为）
+        # Phase A~E 服务：可选，用于学习成果、笔记与能力相关的现有服务流程。
         self.skill_service = skill_service
         self.outcome_service = outcome_service
         self.notes_service = notes_service
@@ -177,7 +183,9 @@ class MainWindow(QMainWindow):
         self._task_widgets: list[TaskWidget] = []
         self._quit_requested = False
         self._tray: QSystemTrayIcon | None = None
-        self._ai_workers: list[AIReviewWorker] = []
+        self._ai_workers: list[QThread] = []
+        # 防止重复发送造成同一 Session 的模型回复乱序。
+        self._agent_inflight_sessions: set[int] = set()
         # 防止连续双击【开始验收】创建多个 worker / 多个 pending attempt
         self._assessment_inflight: set[int] = set()
 
@@ -251,6 +259,7 @@ class MainWindow(QMainWindow):
         self.today_page.replan_requested.connect(self._on_replan)
         self.routes_page_index = None
         self.ai_settings_page_index = None
+        self.agent_workspace_page_index = None
 
         # ----- 学习路线页（可选） -----
         if self.route_service is not None:
@@ -306,6 +315,17 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.ai_settings_page)
         self.ai_settings_page_index = self.stack.count() - 1
         self.nav_ai_btn.setEnabled(True)
+
+        # Internal task-driven Workspace: append after every formal Sidebar page.
+        # It deliberately has no PageKey/PageSpec and keeps Sidebar on Today.
+        self.agent_workspace_page = None
+        if (self.agent_session_service is not None
+                and self.agent_runtime_factory is not None):
+            self.agent_workspace_page = AgentWorkspacePage()
+            self.agent_workspace_page.back_requested.connect(self._on_agent_back)
+            self.agent_workspace_page.send_requested.connect(self._on_agent_send)
+            self.stack.addWidget(self.agent_workspace_page)
+            self.agent_workspace_page_index = self.stack.count() - 1
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("")
@@ -368,6 +388,129 @@ class MainWindow(QMainWindow):
             self.practice_page.refresh()
         self.stack.setCurrentIndex(self.practice_page_index)
         self._update_page_header(PageKey.PRACTICE)
+
+    def _agent_model_is_configured(self) -> bool:
+        """Resolve current Profile at Workspace-open time; never cache startup state."""
+        if self.ai_config_service is None:
+            return False
+        try:
+            return bool(self.ai_config_service.get_runtime_config().is_configured)
+        except Exception:  # noqa: BLE001 - history remains available without AI config
+            return False
+
+    def _route_name_for_task(self, task) -> str | None:
+        if task.route_id is None or self.route_service is None:
+            return None
+        try:
+            route = self.route_service.get(task.route_id)
+            return route.name if route is not None else None
+        except Exception:  # noqa: BLE001 - route summary is optional
+            return None
+
+    def _on_start_study(self, task_id: int) -> None:
+        """Open/resume one task-bound Session without making a model request."""
+        page = getattr(self, "agent_workspace_page", None)
+        if (page is None or self.agent_session_service is None
+                or self.agent_runtime_factory is None):
+            self.statusBar().showMessage("学习会话暂不可用", 3000)
+            return
+        try:
+            task = self.task_service.get_task(int(task_id))
+            if task.status != STATUS_ACTIVE:
+                return
+            session = self.agent_session_service.start_or_resume(task.id)
+            messages = self.agent_session_service.messages(session["id"])
+            page.load_session(
+                session=session,
+                messages=messages,
+                task=task,
+                route_name=self._route_name_for_task(task),
+                model_configured=self._agent_model_is_configured(),
+            )
+            if session["id"] in self._agent_inflight_sessions:
+                page.set_busy(True)
+            self.stack.setCurrentIndex(self.agent_workspace_page_index)
+            # Workspace is a Today sub-flow, never a selected Sidebar destination.
+            self.sidebar.set_current(PageKey.TODAY)
+            self.page_header.set_title("学习会话")
+            self.page_header.set_subtitle(task.title)
+            self.page_header.set_icon(None)
+        except Exception:  # noqa: BLE001 - a failed Session open must not break Today
+            self.statusBar().showMessage("无法打开学习会话，请稍后重试。", 4000)
+
+    def _on_agent_back(self) -> None:
+        """Return to Today; leaving the Workspace never closes the Session."""
+        self.refresh(preserve_scroll=True)
+        self._switch_to_today()
+
+    def _reload_agent_session(self, session_id: int, error: str | None = None) -> None:
+        page = getattr(self, "agent_workspace_page", None)
+        if (page is None or page.current_session_id != int(session_id)
+                or self.agent_session_service is None):
+            return
+        try:
+            session = self.agent_session_service.get(int(session_id))
+            messages = self.agent_session_service.messages(int(session_id))
+            task = self.task_service.get_task(int(session["task_id"]))
+            page.load_session(
+                session=session,
+                messages=messages,
+                task=task,
+                route_name=self._route_name_for_task(task),
+                model_configured=self._agent_model_is_configured(),
+            )
+            if int(session_id) in self._agent_inflight_sessions:
+                page.set_busy(True)
+            if error:
+                page.set_error(error)
+        except Exception:  # noqa: BLE001 - keep Workspace responsive on reload errors
+            page.set_busy(False)
+            page.set_error("无法重新加载会话记录，请返回今日后重试。")
+
+    def _on_agent_send(self, session_id: int, user_text: str) -> None:
+        """Dispatch a turn to a worker that owns a fresh thread-local connection."""
+        page = getattr(self, "agent_workspace_page", None)
+        if page is None or self.agent_runtime_factory is None:
+            if page is not None:
+                page.set_error("学习会话暂不可用。")
+            return
+        session_id = int(session_id)
+        if page.current_session_id != session_id:
+            return
+        if session_id in self._agent_inflight_sessions:
+            page.set_busy(True)
+            return
+        if not user_text.strip():
+            return
+
+        self._agent_inflight_sessions.add(session_id)
+        page.set_error("")
+        page.set_busy(True)
+        worker = AgentTurnWorker(
+            db_path=self.db_path,
+            runtime_factory=self.agent_runtime_factory,
+            session_id=session_id,
+            user_text=user_text,
+            parent=self,
+        )
+        worker.succeeded.connect(
+            lambda result, sid=session_id: self._on_agent_turn_finished(sid, None)
+        )
+        worker.failed.connect(
+            lambda message, sid=session_id: self._on_agent_turn_finished(sid, message)
+        )
+        worker.finished.connect(lambda w=worker: self._release_worker(w))
+        self._ai_workers.append(worker)
+        worker.start()
+
+    def _on_agent_turn_finished(self, session_id: int, error: str | None) -> None:
+        self._agent_inflight_sessions.discard(int(session_id))
+        # A stale Session completion persists normally but never renders into another.
+        self._reload_agent_session(int(session_id), error=error)
+        # If the user returned to Today while the worker ran, refresh the card label
+        # (begin/continue) without touching a different open Workspace.
+        if self.stack.currentWidget() is self.today_page:
+            self.refresh(preserve_scroll=True)
 
     def _build_tray(self) -> None:
         """托盘可用则创建，不可用（如部分 Linux）则跳过，不影响运行。"""
@@ -632,16 +775,34 @@ class MainWindow(QMainWindow):
                     label = "继续验收"
             except Exception:  # noqa: BLE001 - 仅影响按钮文案
                 pass
+        agent_enabled = (
+            self.agent_session_service is not None
+            and self.agent_runtime_factory is not None
+            and task.status == STATUS_ACTIVE
+        )
+        agent_label = "开始学习"
+        if agent_enabled:
+            try:
+                active = self.agent_session_service.get_active_for_task(task.id)
+                if (active is not None
+                        and self.agent_session_service.count_messages(active["id"]) > 0):
+                    agent_label = "继续学习"
+            except Exception:  # noqa: BLE001 - session label cannot break Today
+                pass
         widget = TaskWidget(
             task,
             assessment_label=label,
             route_name=(self._route_names or {}).get(task.route_id),
+            agent_enabled=agent_enabled,
+            agent_label=agent_label,
         )
         widget.complete_requested.connect(self._on_complete)
         widget.not_done_requested.connect(self._on_not_done)
         widget.postpone_requested.connect(self._on_postpone)
         widget.remove_requested.connect(self._on_remove_task)
         widget.assessment_requested.connect(self._on_start_assessment)
+        if agent_enabled:
+            widget.start_study_requested.connect(self._on_start_study)
         self.list_layout.addWidget(widget)
         self._task_widgets.append(widget)
 
@@ -1107,7 +1268,7 @@ class MainWindow(QMainWindow):
         self._assessment_inflight.discard(task_id)
         self._release_worker(worker)
 
-    def _release_worker(self, worker: AIReviewWorker) -> None:
+    def _release_worker(self, worker: QThread) -> None:
         """AI 线程结束后从列表中移除引用。"""
         if worker in self._ai_workers:
             self._ai_workers.remove(worker)

@@ -1,6 +1,6 @@
 # Study-Agent — UI Inventory (Historical UI-0 snapshot)
 
-> Historical UI-0 audit, not a current module inventory. S2 removed Monthly; S3 removed Today career dashboard and `career_dialogs.py`. Current Sidebar pages: Today / Routes / Practice / Settings.
+> Historical UI-0 audit, not a current module inventory. S2 removed Monthly; S3 removed Today career dashboard and `career_dialogs.py`. Current Sidebar pages: Today / Routes / Practice / Settings. Agent-3 adds `agent_workspace_page.py` as an internal stack subpage only (not a Sidebar/PageSpec page) and `AgentTurnWorker` to the existing AI worker module.
 
 > 基线 commit: `a36e688`
 > 审查范围: `app/ui/` 全部 20 个 Python 文件，共 **9,366 LOC**。

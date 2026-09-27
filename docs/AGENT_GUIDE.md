@@ -91,11 +91,11 @@ full 失败                 → 只重跑失败测试，修复
 - Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除；历史表和字段只用于迁移与历史保全。未来 recall 是 Agent contextual learning 方向，不是已实现功能。
 - 测试：`tests/test_assessment_*.py`、`test_review_retirement.py`、`test_skill_service.py`
 
-### Agent core (Agent-1 / Agent-1.1 / Agent-2)
-- production：`app/agent/session.py`、`app/agent/runtime.py`、`app/agent/tools/{base,registry,learning}.py`、`app/database/agent_repository.py`、`app/ai/agent_protocol.py`、`app/ai/agent_client.py`、read-only Service delegates in Assessment / StudyPlan.
-- tests：`tests/test_agent_tool_registry.py`、`test_agent_learning_tools.py`、`test_agent_tool_runtime.py`、`test_agent_history_verifier.py`，以及 Agent-1 model/session/runtime/architecture tests。
-- 不变式：Session task-bound；Tool context 的 task id 只能由 Runtime 从 Session 解析；六个工具均 read-only 且参数为空 object；Tool 不访问 SQLite/Repository，必须经 existing Services；tool calls/results append-only 持久化；Runtime 最多 4 tool rounds。
-- Agent-1 no-tool 路径（`tool_registry=None`）保持；legacy `AIClient.chat()` 保持零改动，共享现有 Profile/API 设置。Agent-2 不做 UI、write tools、approval、MCP、Sandbox、Skills 或 memory。
+### Agent core (Agent-1 / Agent-1.1 / Agent-2 / Agent-3)
+- production：`app/agent/context.py`、`app/agent/runtime.py`、`app/agent/tools/{base,registry,learning}.py`、`app/ui/agent_workspace_page.py`、`app/ui/ai_worker.py::AgentTurnWorker`、`app/main.py::build_agent_runtime`，以及 Agent-1/2 文件。
+- tests：`test_agent_task_context.py`、`test_agent_workspace_ui.py`、`test_agent_ui_worker.py`、`test_agent_workspace_integration.py`，加上 Agent-1/2 与 verifier/schema/release regressions。
+- 不变式：每 user turn 用同一个 context snapshot；Context Builder 调现有六个只读 tools 但不写 message history；Workspace 是 stack 内部页，不是 Sidebar/PageSpec；Worker 仅接收 db_path/runtime_factory/session_id/user_text，并在线程内构造 fresh connection/runtime；离开 Workspace 不关闭 Session。
+- Session task-bound；工具只从当前 Session 取得 task id、参数 schema 为空 object、read-only、Service-only；tool calls/results append-only；tool rounds ≤4。Agent-1 no-tool 路径和 legacy `AIClient.chat()` 保持。Agent-3 不做 UI write tools、approval、MCP、Sandbox、Skills 或 memory。
 
 ### Migration / Schema（**高危，必须真实路径**）
 - production：`app/database/schema.py`、`app/database/connection.py`、

@@ -164,6 +164,42 @@ def run_submit_answers(service, attempt_id, answers, today=None):
     return service.submit_answers(attempt_id, answers, today=today)
 
 
+class AgentTurnWorker(QThread):
+    """Agent turn worker; creates and owns its SQLite connection in ``run``.
+
+    Only serializable/session identifiers, a database path and a pure dependency
+    factory cross the GUI-thread boundary. Runtime, Services, Repositories and
+    SQLite connection are all constructed and used in this worker thread.
+    """
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, db_path, runtime_factory, session_id: int, user_text: str,
+                 parent=None):
+        super().__init__(parent)
+        self._db_path = db_path
+        self._runtime_factory = runtime_factory
+        self._session_id = int(session_id)
+        self._user_text = user_text
+
+    def run(self) -> None:  # noqa: D102
+        conn = None
+        try:
+            conn = get_connection(self._db_path)
+            runtime = self._runtime_factory(conn)
+            result = runtime.send_message(self._session_id, self._user_text)
+            self.succeeded.emit(result)
+        except Exception:  # noqa: BLE001 - no raw exception/secrets to the UI
+            self.failed.emit("本轮暂未完成，请检查模型配置或网络后重试。")
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001 - cleanup must not crash worker
+                    pass
+
+
 class AIRouteBuilderWorker(QThread):
     """后台生成学习路线草稿（Phase F）。
 
