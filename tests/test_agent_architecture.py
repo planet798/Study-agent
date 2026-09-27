@@ -96,13 +96,55 @@ def test_agent_tables_are_protected_history_not_growth():
     assert FINGERPRINT_VERSION == 5
 
 
-def test_agent_package_has_no_forbidden_modules():
+def test_agent_package_has_no_future_stage_modules():
     from importlib.util import find_spec
     for module in (
-        "app.agent.tools", "app.agent.skills", "app.agent.mcp",
-        "app.agent.sandbox", "app.agent.memory", "app.agent.trace",
+        "app.agent.skills", "app.agent.mcp", "app.agent.sandbox",
+        "app.agent.memory", "app.agent.trace",
     ):
         assert find_spec(module) is None, module
+
+
+def test_native_registry_contains_only_read_only_tools():
+    from app.agent.tools.learning import build_learning_tool_registry
+
+    registry = build_learning_tool_registry(*([object()] * 6))
+    assert registry.names() == (
+        "get_task_context", "get_route_context", "get_topic_context",
+        "get_learning_components", "get_mastery", "get_capability",
+    )
+    assert all(registry.get(name).spec.read_only for name in registry.names())
+    assert all(
+        spec["function"]["parameters"] == {
+            "type": "object", "properties": {}, "additionalProperties": False,
+        }
+        for spec in registry.model_tools()
+    )
+
+
+def test_learning_tool_handlers_depend_on_services_not_database():
+    from app.agent.tools.learning import (
+        GetCapabilityTool, GetLearningComponentsTool, GetMasteryTool,
+        GetRouteContextTool, GetTaskContextTool, GetTopicContextTool,
+    )
+
+    for tool_type in (
+        GetTaskContextTool, GetRouteContextTool, GetTopicContextTool,
+        GetLearningComponentsTool, GetMasteryTool, GetCapabilityTool,
+    ):
+        source = inspect.getsource(tool_type)
+        assert "sqlite3" not in source
+        assert "SELECT " not in source.upper()
+        assert "Repository" not in source
+        assert "conn" not in inspect.signature(tool_type.__init__).parameters
+
+
+def test_agent2_versions_remain_v21_and_fingerprint_v5():
+    from app.database.schema import SCHEMA_VERSION
+    from app.diagnostics.release_migration import FINGERPRINT_VERSION
+
+    assert SCHEMA_VERSION == 21
+    assert FINGERPRINT_VERSION == 5
 
 
 def test_vertical_slice_task_to_runtime(conn, repo):

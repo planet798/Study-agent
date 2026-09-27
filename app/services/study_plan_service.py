@@ -15,7 +15,12 @@ from __future__ import annotations
 
 from ..database.repository import TaskRepository
 from ..database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_DONE, STATUS_NOT_DONE
-from ..database.study_plan_repository import StudyPlan, StudyPlanRepository
+from ..database.study_plan_repository import (
+    StudyPhase,
+    StudyPlan,
+    StudyPlanRepository,
+    StudyTopic,
+)
 
 # 默认每日自主学习时间预算（分钟）
 MAX_DAILY_STUDY_MINUTES = 180
@@ -464,6 +469,14 @@ class StudyPlanService:
         if plan is None:
             return None
         return self.plan_repo.get_plan_with_phases(plan.id)
+
+    def get_topic(self, topic_id: int) -> StudyTopic | None:
+        """只读转发：按 id 获取 Topic，不改变 Planner / 计划语义。"""
+        return self.plan_repo.get_topic(int(topic_id))
+
+    def get_phase(self, phase_id: int) -> StudyPhase | None:
+        """只读转发：按 id 获取 Phase，不改变 Planner / 计划语义。"""
+        return self.plan_repo.get_phase(int(phase_id))
 
     def get_current_phase(self, date_str: str):
         """返回当前应学习的阶段；无匹配返回 None。

@@ -116,6 +116,75 @@ class AgentSessionService:
         self.repo.touch_session(int(session_id))
         return message
 
+    def append_assistant_tool_calls(
+        self,
+        session_id: int,
+        content: str,
+        tool_calls,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Persist an assistant tool-call message in canonical provider-neutral JSON.
+
+        Unlike an ordinary assistant reply, an empty content string is valid when
+        at least one well-formed tool call is present.
+        """
+        import json
+
+        self._require_open(session_id)
+        calls = []
+        for call in tool_calls or ():
+            call_id = getattr(call, "id", None)
+            name = getattr(call, "name", None)
+            arguments = getattr(call, "arguments", None)
+            if not (isinstance(call_id, str) and call_id.strip()
+                    and isinstance(name, str) and name.strip()
+                    and isinstance(arguments, str)):
+                raise AgentSessionError("Tool call protocol is invalid")
+            calls.append({"id": call_id, "name": name, "arguments": arguments})
+        if not calls:
+            raise AgentSessionError("Assistant tool call message requires tool_calls")
+        message = self.repo.add_message(
+            int(session_id),
+            "assistant",
+            content or "",
+            tool_calls_json=json.dumps(calls, ensure_ascii=False, separators=(",", ":")),
+            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+        )
+        self.repo.touch_session(int(session_id))
+        return message
+
+    def append_tool_message(
+        self,
+        session_id: int,
+        tool_call_id: str,
+        tool_name: str,
+        content: str,
+    ) -> dict:
+        """Persist one JSON tool result associated with its call ID."""
+        import json
+
+        self._require_open(session_id)
+        if not (isinstance(tool_call_id, str) and tool_call_id.strip()
+                and isinstance(tool_name, str) and tool_name.strip()):
+            raise AgentSessionError("Tool result protocol is invalid")
+        if not isinstance(content, str):
+            raise AgentSessionError("Tool result content must be JSON text")
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            raise AgentSessionError("Tool result content must be JSON text") from None
+        if not isinstance(parsed, dict):
+            raise AgentSessionError("Tool result content must be a JSON object")
+        message = self.repo.add_message(
+            int(session_id),
+            "tool",
+            content,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+        )
+        self.repo.touch_session(int(session_id))
+        return message
+
     # ---------- 关闭 ----------
 
     def close(self, session_id: int) -> dict:

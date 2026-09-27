@@ -7,8 +7,9 @@
 - ``AgentModelClient.complete(ModelRequest)`` 服务 Agent multi-turn 会话，
   接收完整 message 数组，并可表达 OpenAI-compatible tool calls。
 
-Agent-1 只建立结构、不执行工具：Runtime 不发送 tools、不执行 tool_calls。
-tool 字段现在保留，是为了 Agent-2 建设 Tool Registry 时无需推翻本 API。
+协议从 Agent-1 起提供 tool-call 结构；Agent-2 Runtime 可通过显式 Registry
+发送声明并执行受限的 read-only tool loop。Provider transport 只解析/序列化协议，
+本身不执行工具。
 """
 
 from __future__ import annotations
@@ -30,8 +31,8 @@ class ModelToolCall:
 class ModelMessage:
     """一条 provider-independent 的会话消息。
 
-    ``tool_calls`` / ``tool_call_id`` / ``name`` 仅为表达 OpenAI-compatible
-    tool 协议；Agent-1 生产路径只写 ``user`` / ``assistant`` 文本消息。
+    ``tool_calls`` / ``tool_call_id`` / ``name`` 表达 OpenAI-compatible tool
+    协议；Agent-2 持久化 assistant tool-call 与 tool result 消息。
     """
 
     role: str

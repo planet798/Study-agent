@@ -83,6 +83,14 @@ class AssessmentService:
             raise RuntimeError("AssessmentService 未注入 assessment_repo")
         return self.assessment_repo
 
+    def get_knowledge_point(self, knowledge_point_id: int) -> dict | None:
+        """只读查询一个 Knowledge Point，供学习上下文使用。
+
+        返回 Repository 的 domain dict；调用方应只暴露所需字段。
+        不更新 mastery，不读取或返回 legacy review 日程。
+        """
+        return self._require_repo().get_knowledge_point(int(knowledge_point_id))
+
     def _task_activity_kind(self, task_id: int) -> str | None:
         """读取 task 的 learning_activity_kind（仅供出题 context，不改评分）。"""
         repo = self.assessment_repo

@@ -1,20 +1,14 @@
-"""AgentRuntime（Agent-1，no-tool）。
+"""AgentRuntime with bounded, read-only native tool execution (Agent-2).
 
-    Task → Session → Messages → Model
+    Task → Session → Runtime → Tool Registry → existing Services → model
 
-职责：
-- 把会话历史（按 message id 顺序）构造成 multi-turn :class:`ModelRequest`；
-- 调用 :class:`AgentModelClient`；
-- 持久化 assistant 回复。
-
-边界（Agent-1 明确不做）：
-- 不直接访问 SQLite / AgentRepository（一切持久化经 AgentSessionService）；
-- 不发送 tools、不执行 tool_calls；
-- 不写 Mastery / Capability / Evidence，也不完成 Task。
+Tools are opt-in via a registry. Without one, Agent-1's no-tool behavior remains:
+``tools=()`` and unexpected model tool calls fail safely.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,21 +17,23 @@ from ..ai.agent_protocol import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    ModelToolCall,
 )
 from .session import AgentSessionService
+from .tools.base import AgentToolContext
+from .tools.registry import AgentToolRegistry
 
 AGENT_SYSTEM_PROMPT = (
     "你是 Study-Agent 的学习会话助手。\n"
     "你的目标是围绕当前学习任务帮助用户理解、练习和推进学习。\n"
-    "\n"
-    "你当前没有执行工具或修改应用状态的能力。"
     "不要声称已经完成任务、修改 Mastery、修改 Capability、"
     "创建 Evidence 或操作项目。"
 )
+MAX_TOOL_ROUNDS = 4
 
 
 class AgentRuntimeError(Exception):
-    """Agent runtime 领域错误（如模型在无工具会话中返回 tool_calls）。"""
+    """Agent runtime 领域错误（如无工具模式或超过 tool-round 上限）。"""
 
 
 @dataclass(frozen=True)
@@ -48,94 +44,195 @@ class AgentTurnResult:
     user_message: dict
     assistant_message: dict
     model_response: ModelResponse
+    tool_rounds: int = 0
+    tool_messages: tuple[dict, ...] = ()
 
 
 class AgentRuntime:
-    """Agent-1 核心运行时：multi-turn 会话 + 模型调用 + 消息持久化。"""
+    """Agent-2 Runtime: persistent multi-turn model calls with read-only tools."""
 
     def __init__(
         self,
         session_service: AgentSessionService,
         model_client: AgentModelClient,
         system_prompt: str = AGENT_SYSTEM_PROMPT,
+        tool_registry: AgentToolRegistry | None = None,
+        max_tool_rounds: int = MAX_TOOL_ROUNDS,
     ):
         self.session_service = session_service
         self.model_client = model_client
         self.system_prompt = system_prompt
+        self.tool_registry = tool_registry
+        if isinstance(max_tool_rounds, bool) or int(max_tool_rounds) < 1:
+            raise ValueError("max_tool_rounds must be a positive integer")
+        self.max_tool_rounds = int(max_tool_rounds)
 
-    # ---------- prompt ----------
+    # ---------- prompt / request ----------
 
     def build_system_message(self, session: dict) -> ModelMessage:
-        """基础 system prompt + 当前学习任务标题（Agent-3 再做完整 TaskContext）。"""
+        """Task title plus accurate tool availability (TaskContext comes in Agent-3)."""
         title = (session.get("title") or "").strip()
         content = self.system_prompt
         if title:
             content = f"{content}\n\n当前学习任务：{title}"
+        if self._tools_available():
+            content += (
+                "\n\n你可以使用下方提供的只读学习工具获取当前学习任务的上下文。"
+                "这些工具只能读取信息，不能修改任务、Mastery、Capability、"
+                "Assessment 或项目状态。需要了解当前任务、路线、Topic、学习组件、"
+                "掌握度或能力证据时，请优先使用工具，不要猜测。"
+            )
+        else:
+            content += "\n\n当前没有可用工具；请只依据对话内容回答，不要声称读取了应用数据。"
         return ModelMessage(role="system", content=content)
 
-    def build_request(self, session: dict) -> ModelRequest:
-        """按 message id 顺序构造完整 multi-turn 请求（含 system）。
+    def _tools_available(self) -> bool:
+        return bool(self.tool_registry and self.tool_registry.names())
 
-        Agent-1 完整加载 session history；不做 token counting / compaction
-        （属于后续 Agent Memory 阶段）。TODO(agent-memory): context compaction.
+    def build_request(self, session: dict) -> ModelRequest:
+        """Reload complete persisted history and rebuild provider messages.
+
+        No Runtime-local conversation cache is used. Each turn reconstructs tool
+        call / tool result messages from AgentSessionService persistence.
         """
         history = self.session_service.messages(int(session["id"]))
         messages = [self.build_system_message(session)]
         messages.extend(self._to_model_message(row) for row in history)
-        return ModelRequest(messages=tuple(messages))
+        tools = self.tool_registry.model_tools() if self._tools_available() else ()
+        return ModelRequest(messages=tuple(messages), tools=tuple(tools))
 
     # ---------- turn ----------
 
     def send_message(self, session_id: int, user_text: str) -> AgentTurnResult:
-        """执行一个完整 turn。
+        """Run one user turn, executing up to ``max_tool_rounds`` tool batches.
 
-        顺序：校验 session → 持久化 user message → 重载历史 → 构造请求 →
-        model.complete() → 持久化 assistant message → 返回结果。
-
-        模型调用失败时 user message 保留、assistant message 不写，
-        并向上抛 :class:`AIServiceError`（不无限重试）。
+        Persistence order starts with the user message. Each tool-call assistant
+        message and each ordered tool result is persisted before the next model
+        request. Model/service errors therefore never erase conversation history.
         """
         session = self.session_service.get(int(session_id))
         user_message = self.session_service.append_user_message(
             int(session_id), user_text
         )
+        context = AgentToolContext(
+            session_id=int(session_id), task_id=int(session["task_id"])
+        )
+        tool_rounds = 0
+        tool_messages: list[dict] = []
 
-        request = self.build_request(session)
-        response = self.model_client.complete(request)
+        while True:
+            response = self.model_client.complete(self.build_request(session))
+            if not response.tool_calls:
+                assistant_message = self.session_service.append_assistant_message(
+                    int(session_id),
+                    response.content,
+                    metadata=self._build_metadata(response),
+                )
+                return AgentTurnResult(
+                    session_id=int(session_id),
+                    user_message=user_message,
+                    assistant_message=assistant_message,
+                    model_response=response,
+                    tool_rounds=tool_rounds,
+                    tool_messages=tuple(tool_messages),
+                )
 
-        if response.tool_calls:
-            # Agent-1 不执行工具、不伪造 tool result：fail safe。
-            # user message 已持久化，assistant message 不写。
-            raise AgentRuntimeError(
-                "Agent-1 会话不支持工具调用；模型返回了 tool_calls。"
-                "请勿执行或伪造工具结果。"
+            # Preserve Agent-1 behavior when tools were not explicitly enabled.
+            if self.tool_registry is None:
+                raise AgentRuntimeError(
+                    "Agent-1 会话不支持工具调用；模型返回了 tool_calls。"
+                    "请勿执行或伪造工具结果。"
+                )
+
+            calls = self._validate_tool_calls(response.tool_calls)
+            if tool_rounds >= self.max_tool_rounds:
+                # Don't persist or execute the over-limit unpaired request.
+                raise AgentRuntimeError(
+                    f"Agent tool rounds exceeded limit ({self.max_tool_rounds})."
+                )
+
+            self.session_service.append_assistant_tool_calls(
+                int(session_id),
+                response.content,
+                calls,
+                metadata=self._build_metadata(response),
             )
+            for call in calls:
+                envelope = self.tool_registry.execute_raw(
+                    call.name, context, call.arguments
+                )
+                content = json.dumps(
+                    envelope, ensure_ascii=False, separators=(",", ":"),
+                    allow_nan=False,
+                )
+                tool_message = self.session_service.append_tool_message(
+                    int(session_id), call.id, call.name, content
+                )
+                tool_messages.append(tool_message)
+            tool_rounds += 1
 
-        assistant_message = self.session_service.append_assistant_message(
-            int(session_id),
-            response.content,
-            metadata=self._build_metadata(response),
-        )
-        return AgentTurnResult(
-            session_id=int(session_id),
-            user_message=user_message,
-            assistant_message=assistant_message,
-            model_response=response,
-        )
+    # ---------- protocol reconstruction / validation ----------
 
-    # ---------- helpers ----------
+    @staticmethod
+    def _validate_tool_calls(tool_calls) -> tuple[ModelToolCall, ...]:
+        if not isinstance(tool_calls, (tuple, list)) or not tool_calls:
+            raise AgentRuntimeError("Model returned an invalid tool call list.")
+        validated: list[ModelToolCall] = []
+        for call in tool_calls:
+            if not isinstance(call, ModelToolCall):
+                raise AgentRuntimeError("Model returned an invalid tool call.")
+            if not isinstance(call.id, str) or not call.id.strip():
+                raise AgentRuntimeError("Model tool call id is missing.")
+            if (not isinstance(call.name, str) or not call.name.strip()
+                    or call.name != call.name.strip()):
+                raise AgentRuntimeError("Model tool call name is invalid.")
+            if not isinstance(call.arguments, str):
+                raise AgentRuntimeError("Model tool call arguments must be a string.")
+            validated.append(call)
+        return tuple(validated)
 
     @staticmethod
     def _to_model_message(row: dict) -> ModelMessage:
-        return ModelMessage(role=str(row.get("role") or ""),
-                            content=str(row.get("content") or ""))
+        role = str(row.get("role") or "")
+        content = str(row.get("content") or "")
+        if role == "assistant" and row.get("tool_calls_json"):
+            try:
+                raw_calls = json.loads(row["tool_calls_json"])
+                if not isinstance(raw_calls, list) or not raw_calls:
+                    raise ValueError("tool_calls must be a non-empty list")
+                calls = tuple(
+                    ModelToolCall(
+                        id=item["id"],
+                        name=item["name"],
+                        arguments=item["arguments"],
+                    )
+                    for item in raw_calls
+                    if isinstance(item, dict)
+                )
+                if len(calls) != len(raw_calls):
+                    raise ValueError("tool call entry must be an object")
+                AgentRuntime._validate_tool_calls(calls)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise AgentRuntimeError(
+                    "Persisted assistant tool-call history is invalid."
+                ) from exc
+            return ModelMessage(
+                role="assistant", content=content, tool_calls=calls
+            )
+        if role == "tool":
+            return ModelMessage(
+                role="tool",
+                content=content,
+                tool_call_id=str(row.get("tool_call_id") or ""),
+                name=str(row.get("tool_name") or ""),
+            )
+        return ModelMessage(role=role, content=content)
 
     @staticmethod
-    def _build_metadata(response: ModelResponse) -> dict:
-        """只记录安全元信息：绝不保存 API key / Authorization / RuntimeAIConfig。"""
-        metadata: dict[str, Any] = {
+    def _build_metadata(response: ModelResponse) -> dict[str, Any]:
+        """Only safe metadata: never persist API keys, auth, or RuntimeAIConfig."""
+        return {
             "model": response.model,
             "finish_reason": response.finish_reason,
             "usage": response.usage or {},
         }
-        return metadata

@@ -1,76 +1,102 @@
 # Agent Architecture
 
-> 本文档记录 Agent 运行时的分层、边界与分阶段演进。Agent 不是 Generic chatbot、不是另一个 Planner、不是 Todo/Mastery/Capability editor。
+> Agent is task-bound learning support, not a generic chatbot, another Planner, Todo manager, or Mastery/Capability editor.
 
-## 长期链路（目标）
+## Long-term learning chain
 
 ```text
 Learning Route → Phase → Topic → Learning Component → Task
-→ Agent Study Session → Agent Runtime
-→ Tools / Skills / MCP / Sandbox
+→ Agent Study Session → Agent Runtime → Tools / Skills / MCP / Sandbox
 → Learning Interaction → Assessment / Evidence → Mastery / Capability
 ```
 
-## Agent-1（已实现）
+## Agent-1 — Session and model runtime
+
+```text
+Task → AgentSessionService → AgentRuntime → AgentModelClient
+     → OpenAI-compatible chat completion
+```
+
+- `agent_sessions.task_id` is required; one task has at most one active session.
+- `agent_messages` are append-only. Runtime reloads message-id ordered history for each turn.
+- Legacy `AIClient` / `DeepSeekClient.chat()` / `AdaptiveAIClient.chat()` / `send_chat_request()` remain unchanged.
+
+## Agent-1.1 — History verification
+
+Verifier fingerprint v5 protects immutable Session identity/title and all Message fields. Session `status`, `updated_at`, and `closed_at` remain mutable lifecycle fields and are deliberately not fingerprinted. New Session/Message rows are allowed growth; prior rows may not be deleted or changed. v1–v4 verifier snapshots remain compatible.
+
+## Agent-2 — Read-only native tools
 
 ```text
 Task
-→ AgentSessionService   (app/agent/session.py)
-→ AgentRuntime          (app/agent/runtime.py)
-→ AgentModelClient      (app/ai/agent_protocol.py + agent_client.py)
-→ OpenAI-compatible /chat/completions
+→ AgentSessionService (resolve active session.task_id)
+→ AgentRuntime
+→ AgentToolRegistry
+→ Agent Tool
+→ existing Service
+→ Repository
+→ SQLite
 ```
 
-数据流：
+Production package:
 
 ```text
-tasks.id ──< agent_sessions (task_id, status ∈ {active, closed})
-                └──< agent_messages (role, content, tool_*, metadata_json)
+app/agent/tools/
+├── __init__.py
+├── base.py       # AgentToolContext / AgentTool / AgentToolSpec / controlled errors
+├── registry.py   # uniqueness, strict argument validation, OpenAI declarations, result envelopes
+└── learning.py   # six session-scoped read-only learning tools + factory
 ```
 
-### 组件职责
+The six tools are exactly:
 
-| 组件 | 职责 | 明确不做 |
-|---|---|---|
-| `AgentRepository` (`app/database/agent_repository.py`) | agent_sessions / agent_messages 持久化 | 调 AI、决定 prompt、动 Mastery/Capability |
-| `AgentSessionService` (`app/agent/session.py`) | task-bound session 创建/恢复/关闭；消息追加（不可编辑/删除） | 直接查 tasks raw SQL / TaskRepository |
-| `AgentRuntime` (`app/agent/runtime.py`) | 组装 multi-turn `ModelRequest`、调用模型、持久化 assistant 回复 | 直接访问 SQLite/Repository、发送/执行 tools、写 Mastery/Capability、完成 Task |
-| `AgentModelClient` (`app/ai/agent_protocol.py`) | provider-independent multi-turn 模型协议（含 tool 结构） | 取代或改写 legacy `AIClient` |
-| `AdaptiveAgentModelClient` (`app/ai/agent_client.py`) | OpenAI-compatible 调用，复用现有 Profile/API 设置 | 新建第二套 API 设置、默认 `response_format=json_object` |
+1. `get_task_context` → `TaskService`
+2. `get_route_context` → `TaskService` → `LearningRouteService`
+3. `get_topic_context` → `TaskService` → `StudyPlanService.get_topic/get_phase`
+4. `get_learning_components` → `TaskService` → `TopicLearningProfileService`
+5. `get_mastery` → `TaskService` → `AssessmentService.get_knowledge_point`
+6. `get_capability` → `TaskService` → `CapabilityService.get_current_capability`
 
-### 关键语义
+All tool schemas are `{type: object, properties: {}, additionalProperties: false}`. Model-provided task/route/topic/KP IDs are rejected. Runtime derives `AgentToolContext(session_id, task_id)` from the persisted Session, not from model arguments. Tools receive injected Services only—no connection, Repository, API key, or AI config.
 
-- **Task-bound**：禁止 `task_id=NULL` 的 generic chat session；一个 Task 同时最多一个 `status='active'` session（partial unique index 强制）。closed 后可再次 `start_or_resume` 创建新 session。
-- **Message immutable**：只提供 append / list；不提供 update / delete，历史交互可审计。
-- **Multi-turn**：每轮按 message id 顺序发送 `system + user1 + assistant1 + ... + current user`，不是只发当前 prompt。
-- **Persistence order**：校验 session → 写入 user message → 重载历史 → 构造请求 → `model.complete()` → 写入 assistant message。模型失败时 user message 保留、assistant 不写，抛 `AIServiceError`，不自动无限重试。
-- **No-tool fail-safe**：`request.tools = ()`；若 provider 仍返回 `tool_calls`，Runtime 不执行、不伪造 tool result，抛 `AgentRuntimeError`，已写入的 user message 保留。
-- **不了解上下文压缩**：Agent-1 完整加载 session history；token counting / summarization / compaction 属于后续 memory 阶段（代码中留有 TODO）。
-- **Metadata 安全**：assistant message 只记录 `model` / `finish_reason` / `usage`；绝不保存 API key、Authorization、secret_ref 内容或完整 `RuntimeAIConfig`。
+Registry returns JSON-safe envelopes:
 
-### 需要保持的边界
+```json
+{"ok": true, "data": {}}
+{"ok": false, "error": {"code": "invalid_arguments", "message": "..."}}
+```
 
-- legacy `AIClient` / `DeepSeekClient.chat()` / `AdaptiveAIClient.chat()` / `send_chat_request()` **零改动**，继续服务 Planner / Assessment / JD parse / TaskReview / Route Builder。
-- Agent Tool 不得直接操作 Repository 或 raw SQLite：必须 `Agent Tool → existing Service → Repository → SQLite`。
-- Agent 不能直接 set Mastery 或 Capability：只有 `Assessment → Mastery` 与真实 `Evidence → Capability`。
-- `SkillService` / `skills` 表是职业/技术技能域；Agent Skills 必须使用独立命名（`AgentSkill`、`AgentSkillRegistry`、`agent/skills/`）。
-- Sidebar 仍为 Today / Learning Routes / Practice / Settings。
+Unknown tool, invalid JSON / non-object / extra arguments, and handler exceptions become controlled results; no traceback or internal exception detail is shown to the model. Missing learning context is a successful `available: false` data result.
 
-## 未来演进
+## Persistent tool loop
 
-| 阶段 | 内容 |
-|---|---|
-| Agent-2 | Native Tool Registry + read-only learning tools（经 Service 访问） |
-| Agent-3 | TaskContext Builder + Agent Workspace UI（Today Task → [开始学习]） |
-| Agent-4 | Agent Skills（独立命名空间） |
-| Agent-5 | MCP client |
-| Agent-6 | Sandbox |
-| Agent-7 | Memory / context compaction |
-| Agent-8 | Trace / evaluation |
+```text
+persist user
+→ model.complete(messages, tools)
+→ assistant tool-call message (canonical provider-neutral JSON)
+→ execute each call in order
+→ persist tool result (`role=tool`, call id + name + JSON content)
+→ reload all history and call model again
+→ final assistant message
+```
 
-## 测试
+Assistant tool calls are reconstructed from `tool_calls_json` into `ModelMessage.tool_calls`; tool rows reconstruct `role`, `tool_call_id`, and `name`. Recreating `AgentRuntime` does not lose conversation state. The loop is capped at four tool rounds; over-limit calls are not executed. Existing Agent-1 behavior remains when `tool_registry=None`: request has `tools=()` and unexpected provider tool calls fail safely.
 
-- `tests/test_agent_model_client.py`：payload / 解析 / 错误 / sanitize / 动态 Profile / legacy AIClient 不变。
-- `tests/test_agent_session.py`：task-bound、resume、隔离、close 语义、消息不可编辑。
-- `tests/test_agent_runtime.py`：first/second turn、模型失败、blank、closed、隔离、tool_call fail-safe。
-- `tests/test_agent_architecture.py`：边界与 vertical slice。
+Agent-2 tools do not mutate Task, Assessment, Mastery, Capability, Evidence, Practice, or other business state. Assessment remains the only Mastery path; qualifying Evidence remains the Capability path.
+
+## Still not implemented
+
+- TaskContext auto injection / Builder
+- Agent Workspace UI (Sidebar remains Today / Learning Routes / Practice / Settings)
+- write tools, approvals, mutation policy
+- Agent Skills (separate from career `SkillService` / `skills` table)
+- MCP, Sandbox
+- memory / context compaction
+- trace / evaluation
+
+## Tests
+
+- `tests/test_agent_tool_registry.py`: registration, duplicate/read-only checks, schemas, errors, strict arguments, JSON safety.
+- `tests/test_agent_learning_tools.py`: six Service-backed tools, missing context, mastery/capability evidence, read-only regression.
+- `tests/test_agent_tool_runtime.py`: ordered tool loops, error paths, round cap, session isolation, persistence/reconstruction after Runtime recreation, verifier growth.
+- Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.

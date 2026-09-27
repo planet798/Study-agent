@@ -91,11 +91,11 @@ full 失败                 → 只重跑失败测试，修复
 - Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除；历史表和字段只用于迁移与历史保全。未来 recall 是 Agent contextual learning 方向，不是已实现功能。
 - 测试：`tests/test_assessment_*.py`、`test_review_retirement.py`、`test_skill_service.py`
 
-### Agent core (Agent-1)
-- production：`app/agent/session.py`（`AgentSessionService`）、`app/agent/runtime.py`（`AgentRuntime`）、`app/database/agent_repository.py`、`app/ai/agent_protocol.py`、`app/ai/agent_client.py`
-- 测试：`tests/test_agent_model_client.py`、`test_agent_session.py`、`test_agent_runtime.py`、`test_agent_architecture.py`
-- 不变式：Agent Session 必须 task-bound；一个 Task 同时最多一个 active session；message 追加后不可编辑/删除；Runtime 不直接访问 SQLite/Repository，不发送/执行 tools，不写 Mastery/Capability/Evidence，也不完成 Task（`关闭 session ≠ 完成学习任务`）。
-- legacy `AIClient.chat()` 保持零改动；Agent 使用独立的 `AgentModelClient.complete(ModelRequest)`，不新建第二套 API 设置。
+### Agent core (Agent-1 / Agent-1.1 / Agent-2)
+- production：`app/agent/session.py`、`app/agent/runtime.py`、`app/agent/tools/{base,registry,learning}.py`、`app/database/agent_repository.py`、`app/ai/agent_protocol.py`、`app/ai/agent_client.py`、read-only Service delegates in Assessment / StudyPlan.
+- tests：`tests/test_agent_tool_registry.py`、`test_agent_learning_tools.py`、`test_agent_tool_runtime.py`、`test_agent_history_verifier.py`，以及 Agent-1 model/session/runtime/architecture tests。
+- 不变式：Session task-bound；Tool context 的 task id 只能由 Runtime 从 Session 解析；六个工具均 read-only 且参数为空 object；Tool 不访问 SQLite/Repository，必须经 existing Services；tool calls/results append-only 持久化；Runtime 最多 4 tool rounds。
+- Agent-1 no-tool 路径（`tool_registry=None`）保持；legacy `AIClient.chat()` 保持零改动，共享现有 Profile/API 设置。Agent-2 不做 UI、write tools、approval、MCP、Sandbox、Skills 或 memory。
 
 ### Migration / Schema（**高危，必须真实路径**）
 - production：`app/database/schema.py`、`app/database/connection.py`、

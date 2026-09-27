@@ -1,6 +1,6 @@
-# Product Baseline — after S1–S6 (before Agent-1)
+# Product Baseline — after S1–S6 (Agent-2 core)
 
-> Canonical product boundary. Product simplification is complete; do not continue product removal. Future Agent features below are **NOT IMPLEMENTED YET**.
+> Canonical product boundary. Product simplification is complete; do not continue product removal. Agent implementation status is recorded below; future capabilities are explicitly marked not implemented.
 
 ## Position and surfaces
 
@@ -34,7 +34,7 @@ Daily Review / Review Scheduler / Daily Retention / generated review tasks; Mont
 
 `SCHEMA_VERSION = 21`; `FINGERPRINT_VERSION = 5` (v5 protects immutable Agent Session/Message history). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
 
-## Agent core — Agent-1 implemented
+## Agent core — Agent-1 / Agent-1.1 / Agent-2 implemented
 
 Planner decides **WHAT** to learn. Agent Runtime helps the user actually learn that task:
 
@@ -43,22 +43,21 @@ Task → Agent Study Session → persistent multi-turn messages
      → AgentRuntime → AgentModelClient → OpenAI-compatible chat completion
 ```
 
-Agent-1 core implemented:
+Implemented:
 
-- **task-bound session persistence**（`agent_sessions`，一个 Task 同时最多一个 `active` session；closed 后可重新开始）；
-- **multi-turn message persistence**（`agent_messages`，按 id 顺序完整回放，创建后不可编辑 / 删除）；
-- **`AgentModelClient`**（`app/ai/agent_protocol.py` + `agent_client.py`，与 legacy `AIClient` 独立，共享现有 Profile/API 设置）；
-- **basic no-tool runtime**（`app/agent/runtime.py`，不发送 tools、不执行 tool_calls，模型意外返回 tool_calls 时 fail safe）。
+- **Agent-1**: task-bound session persistence, immutable multi-turn messages, independent `AgentModelClient`, and persistent Runtime.
+- **Agent-1.1**: verifier v5 protects immutable Agent Session/Message history while allowing Session lifecycle changes and legitimate new conversation rows.
+- **Agent-2**: read-only `AgentToolRegistry` and six task-scoped learning tools; Runtime persists assistant tool calls/results, reconstructs history, and limits tool rounds.
 
 NOT IMPLEMENTED:
 
-- native tools / Tool Registry
-- TaskContext Builder
+- TaskContext auto injection / Builder
 - Agent Workspace UI（Sidebar 仍为 Today / Learning Routes / Practice / Settings）
+- write tools / approvals / mutation policy
 - Agent Skills
 - MCP
 - Sandbox
 - memory / context compaction
 - trace / evaluation
 
-Future Agent Tools must call **existing Service → Repository → SQLite**, never Repository or raw SQLite directly. Agent may neither set Mastery nor Capability directly: **Assessment → Mastery** and **Evidence → Capability**. Future Agent Skills must use distinct names (`AgentSkill`, `AgentSkillRegistry`, `agent/skills/`); current `SkillService` and `skills` table describe career/technical skills and must not be repurposed. See `docs/AGENT_ARCHITECTURE.md`.
+Agent Tools must call **existing Service → Repository → SQLite**, never Repository or raw SQLite directly. Agent may neither set Mastery nor Capability directly: **Assessment → Mastery** and **Evidence → Capability**. Future Agent Skills must use distinct names (`AgentSkill`, `AgentSkillRegistry`, `agent/skills/`); current `SkillService` and `skills` table describe career/technical skills and must not be repurposed. See `docs/AGENT_ARCHITECTURE.md`.

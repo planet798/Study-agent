@@ -54,22 +54,22 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
-## Agent core (Agent-1 implemented)
+## Agent core (Agent-1 / Agent-1.1 / Agent-2 implemented)
 
-Planner 决定学什么；Agent Runtime 负责陪用户把任务学完。
+Planner 决定学什么；Agent Runtime 围绕当前 Session 绑定的 Task 提供只读学习上下文。
 
 ```text
-Task → agent_sessions (task-bound, one active per task)
-     → agent_messages (multi-turn, immutable)
-     → AgentRuntime → AgentModelClient → OpenAI-compatible chat completion
+Task → AgentSessionService → AgentRuntime → AgentToolRegistry
+    → read-only Agent Tool → existing Service → Repository → SQLite
+    → AgentModelClient → persistent assistant/tool messages
 ```
 
-- production：`app/agent/session.py`（`AgentSessionService`）、`app/agent/runtime.py`（`AgentRuntime`）、`app/database/agent_repository.py`、`app/ai/agent_protocol.py`、`app/ai/agent_client.py`。
+- Agent-1 提供 task-bound Session、immutable multi-turn message persistence 与独立 `AgentModelClient`；Agent-1.1 verifier v5 保护 Agent 对话历史。
+- Agent-2 提供 `app/agent/tools/` 中的 Tool Registry 与六个只读学习工具。工具只从 `AgentToolContext` 获取当前 session/task identity，所有参数 schema 均拒绝额外字段；不允许任意选择 task / route / topic / KP ID。
+- Agent Runtime 通过 Service → Repository → SQLite 读取；Tool/Runtime 不直接访问 SQLite 或 Repository。工具只能读取，不能写 Task、Assessment、Mastery、Capability、Evidence 或 Practice。
+- tool-call / tool-result 经 `AgentSessionService` 持久化；Runtime 从存储重建 `ModelMessage`，最多执行 4 个 tool rounds。无 Registry 时保持 Agent-1 no-tool 行为。
 - legacy `AIClient`（`app/ai/interface.py`）保持不变，继续服务 Planner / Assessment / JD / TaskReview / Route Builder；Agent 使用独立的 `AgentModelClient.complete(ModelRequest)`。
-- Agent Runtime 不直接访问 SQLite / Repository；不发送 tools、不执行 tool_calls；不写 Mastery / Capability / Evidence，也不完成 Task（关闭 session ≠ 完成学习任务）。
-- Agent Tool 不得直接操作 Repository 或 raw SQLite：必须经 `Agent Tool → existing Service → Repository → SQLite`。Agent 不能直接 set Mastery 或 Capability；只有 `Assessment → Mastery` 和真实 `Evidence → Capability`。
-
-尚未实现：native tools / Tool Registry、TaskContext Builder、Agent Workspace UI、Agent Skills、MCP、Sandbox、memory compaction、trace/eval。
+- 仍未实现：TaskContext auto injection、Agent Workspace UI、write tools / approvals、Agent Skills、MCP、Sandbox、memory compaction、trace/eval。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。未来 Agent Skills 必须使用独立命名（`AgentSkill`、`AgentSkillRegistry`、`agent/skills/`），不能复用或重解释现有技能表。详见 `docs/AGENT_ARCHITECTURE.md`。
 
