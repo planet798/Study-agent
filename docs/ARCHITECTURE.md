@@ -54,9 +54,9 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
-## Agent core (Agent-1 through Agent-6 implemented)
+## Agent core (Agent-1 through Agent-7 implemented)
 
-Planner 决定学什么；Agent Runtime 围绕当前 Session 绑定的 Task 提供只读学习上下文。
+Planner 决定学什么；Agent Runtime 围绕当前 Session 绑定的 Task 提供只读学习上下文与压缩后的对话连续性。
 
 ```text
 Task → AgentSessionService → AgentRuntime → AgentToolRegistry
@@ -77,7 +77,9 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - MCP Context、Skill、Worker thread 和 Native Registry 语义保持；MCP 配置缺失/服务不可用不会禁用 Native 工具。
 - Agent-6 添加 Task-ID-scoped `data/agent_workspaces/task_<id>/` 和五个 Sandbox tools。默认 Registry 仍只读；Sandbox 仅在显式 `sandbox` mutation scope 的 effective Registry 中可写。可选 Docker backend 无网络、只挂载当前 Task workspace、有资源/输出/时间界限；没有 host execution fallback。
 - MCP Context、Agent Skill、Worker thread 和 Native Registry 语义保持；MCP/Sandbox 配置缺失或服务不可用不会禁用 Native 工具。MCP 仍 read-only；Sandbox 文件不等于 Task/Mastery/Capability/Practice evidence。
-- 仍未实现：write tools / approvals、memory compaction、trace/eval。Schema 保持 v21 / fingerprint v5。详见 `docs/AGENT_ARCHITECTURE.md`、`docs/MCP.md` 与 `docs/SANDBOX.md`。
+- Agent-7 添加 Session-scoped derived rolling Memory：`agent_messages` 仍 append-only；只摘要连续完整的历史 user turns，保留最近 4 个完整 turns 与当前 turn；summary 使用 `AgentModelClient`、`tools=()` 和严格字符上限。失败时使用上一份 summary + 安全完整-turn tail；Memory 不影响 Task Context / Skill / tools，不扫描 Sandbox。
+- Agent Runtime 每 user turn 在 Task Context、Skill、MCP、Sandbox 之前准备一次固定 ConversationWindow；每个工具回合从同一边界重新加载新增原始消息。Workspace/UI 仍读取完整 `agent_messages`。
+- 仍未实现：write tools / approvals、trace/eval。Schema 为 v22 / fingerprint v5。详见 `docs/AGENT_ARCHITECTURE.md`、`docs/AGENT_MEMORY.md`、`docs/MCP.md` 与 `docs/SANDBOX.md`。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。Agent learning behavior 配置位于独立 `app/agent/skills/` 命名空间，绝不复用或重解释 Career Skill 表。详见 `docs/AGENT_ARCHITECTURE.md`。
 
@@ -103,17 +105,18 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
 
-## 4. DB schema 版本（v21）
+## 4. DB schema 版本（v22）
 
-- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 21`（`app/database/schema.py`）。
-- `_MIGRATIONS`: v2..v21 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
-- 空库真实路径：`create_schema()`（基础表） + v2..v21 逐级执行。
+- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 22`（`app/database/schema.py`）。
+- `_MIGRATIONS`: v2..v22 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
+- 空库真实路径：`create_schema()`（基础表） + v2..v22 逐级执行。
 - **测试快路径**：`initialize_fresh_database(conn)` → 运行时从真实迁移反推当前完整
-  DDL + 种子，一次性建好并写 `user_version=21`，**不重放**历史迁移。
+  DDL + 种子，一次性建好并写 `user_version=22`，**不重放**历史迁移。
   与真实路径在空库上的结果逐字一致（含 `learning_routes` 种子）。
 - 关键历史节点：v12 canonical routes seed / v13 KP route 唯一 / v15 单 active plan /
   v16 legacy theory backfill / v18 capability / v19 practice evidence / v20 requirements /
-  v21 agent_sessions + agent_messages（Agent-1）。
+  v21 agent_sessions + agent_messages / v22 `agent_session_memory`（可滚动更新的 derived state）。
+- Memory 表进入 verifier `GROWTH_TABLES` 与 inventory，不进入 immutable `HISTORY_TABLES` / fingerprint；`FINGERPRINT_VERSION` 保持 v5，原始 Agent Session/Message history 仍受保护。
 
 ## 5. 依赖边界（不要越界）
 

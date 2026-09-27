@@ -41,19 +41,41 @@ def test_agent_tables_are_history_not_growth_and_have_v5_fingerprints():
     assert "agent_messages" in rm.HISTORY_TABLES
     assert "agent_sessions" not in rm.GROWTH_TABLES
     assert "agent_messages" not in rm.GROWTH_TABLES
+    assert "agent_session_memory" in rm.GROWTH_TABLES
+    assert "agent_session_memory" not in rm.HISTORY_TABLES
+    assert "agent_session_memory" not in rm.FINGERPRINT_COLUMNS
     assert rm.FINGERPRINT_VERSION == 5
     assert rm.FINGERPRINT_COLUMNS["agent_sessions"] == EXPECTED_SESSION_FINGERPRINT
     assert rm.FINGERPRINT_COLUMNS["agent_messages"] == EXPECTED_MESSAGE_FINGERPRINT
 
 
-def test_inventory_counts_agent_tables_on_v21(conn):
+def test_inventory_counts_agent_tables_on_v22(conn):
     _agent_history(conn)
     counts = rm.inventory(conn)["counts"]
     assert counts["agent_sessions"] == 1
     assert counts["agent_messages"] == 1
+    assert counts["agent_session_memory"] == 0
 
 
-def test_v20_before_inventory_uses_none_then_v21_migration_verifies(tmp_path):
+def test_memory_summary_updates_are_derived_not_immutable_history(conn):
+    from app.database.agent_memory_repository import AgentMemoryRepository
+
+    _, session, message = _agent_history(conn)
+    before = rm.inventory(conn)
+    repository = AgentMemoryRepository(conn)
+    first = repository.upsert(session["id"], message["id"], 1, "summary A")
+    second = repository.upsert(session["id"], message["id"], 1, "summary B")
+
+    result = rm.verify(conn, before=before)
+
+    assert second["created_at"] == first["created_at"]
+    assert result["ok"] is True, result
+    assert "agent_session_memory" not in result["history_fingerprint_changes"]
+    assert "agent_session_memory" not in result["history_modified_rows"]
+    assert result["history_fingerprint_changes"] == {}
+
+
+def test_v20_before_inventory_uses_none_then_v22_migration_verifies(tmp_path):
     conn = sqlite3.connect(str(tmp_path / "v20.db"))
     try:
         migrate_stepwise(conn, target=20)
@@ -61,6 +83,7 @@ def test_v20_before_inventory_uses_none_then_v21_migration_verifies(tmp_path):
         before = rm.inventory(conn)
         assert before["counts"]["agent_sessions"] is None
         assert before["counts"]["agent_messages"] is None
+        assert before["counts"]["agent_session_memory"] is None
 
         # Preserve representative pre-existing data while taking the v20 snapshot.
         conn.execute(
@@ -73,12 +96,14 @@ def test_v20_before_inventory_uses_none_then_v21_migration_verifies(tmp_path):
         before = rm.inventory(conn)
         assert before["counts"]["agent_sessions"] is None
         assert before["counts"]["agent_messages"] is None
+        assert before["counts"]["agent_session_memory"] is None
 
         migrate_stepwise(conn)
         after = rm.inventory(conn)
-        assert after["schema_version"] == 21
+        assert after["schema_version"] == 22
         assert after["counts"]["agent_sessions"] >= 0
         assert after["counts"]["agent_messages"] >= 0
+        assert after["counts"]["agent_session_memory"] == 0
         result = rm.verify(conn, before=before)
         assert result["ok"] is True, result
     finally:

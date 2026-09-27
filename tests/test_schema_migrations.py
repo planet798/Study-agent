@@ -573,7 +573,11 @@ def test_v13_db_upgrades_to_v14_without_data_loss(tmp_path):
 
 def _make_v20_db(path):
     """建一个完整的 v20 库（真实迁移路径），并写入可核对的历史数据。"""
-    conn = get_connection(path)
+    from app.database.connection import get_raw_connection
+    from app.database.schema import migrate_stepwise
+
+    conn = get_raw_connection(path)
+    migrate_stepwise(conn, target=20)
     conn.execute(
         "INSERT INTO tasks (title, description, category, estimated_minutes, "
         "priority, status, scheduled_date, postpone_count, created_at, "
@@ -602,13 +606,13 @@ def _make_v20_db(path):
     conn.close()
 
 
-def test_v20_db_migrates_stepwise_to_v21(tmp_path):
+def test_v20_db_migrates_stepwise_to_v22(tmp_path):
     path = tmp_path / "v20.db"
     _make_v20_db(path)
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == SCHEMA_VERSION == 21
+        assert get_schema_version(conn) == SCHEMA_VERSION == 22
 
         # 新表 + 索引存在
         tables = {
@@ -616,7 +620,7 @@ def test_v20_db_migrates_stepwise_to_v21(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert {"agent_sessions", "agent_messages"} <= tables
+        assert {"agent_sessions", "agent_messages", "agent_session_memory"} <= tables
         indexes = {
             r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='index'"
@@ -643,8 +647,58 @@ def test_v20_db_migrates_stepwise_to_v21(tmp_path):
         ).fetchone()[0] == 1
 
         # 迁移幂等
-        assert migrate(conn) == 21
-        assert migrate(conn) == 21
+        assert migrate(conn) == 22
+        assert migrate(conn) == 22
+    finally:
+        conn.close()
+
+
+def test_real_v21_database_migrates_to_v22_without_changing_agent_history(tmp_path):
+    from app.database.agent_repository import AgentRepository
+    from app.database.connection import get_raw_connection
+    from app.database.repository import TaskRepository
+    from app.diagnostics.release_migration import inventory, verify
+    from app.database.schema import migrate_stepwise
+
+    path = tmp_path / "real-v21.db"
+    conn = get_raw_connection(path)
+    try:
+        migrate_stepwise(conn, target=21)
+        task = TaskRepository(conn).create(
+            title="v21 Task", scheduled_date="2026-09-20", source="manual"
+        )
+        sessions = AgentRepository(conn)
+        session = sessions.create_session(task.id, "v21 conversation")
+        user = sessions.add_message(session["id"], "user", "Question")
+        assistant_call = sessions.add_message(
+            session["id"], "assistant", "",
+            tool_calls_json='[{"id":"call-1","name":"lookup","arguments":"{}"}]',
+        )
+        tool = sessions.add_message(
+            session["id"], "tool", '{"ok":true}',
+            tool_call_id="call-1", tool_name="lookup",
+        )
+        final = sessions.add_message(session["id"], "assistant", "Answer")
+        before = inventory(conn)
+        assert before["schema_version"] == 21
+        assert before["counts"]["agent_session_memory"] is None
+
+        migrate_stepwise(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
+        assert get_schema_version(conn) == 22
+        assert conn.execute(
+            "SELECT COUNT(*) FROM agent_session_memory"
+        ).fetchone()[0] == 0
+        assert [row["id"] for row in sessions.list_messages(session["id"])] == [
+            user["id"], assistant_call["id"], tool["id"], final["id"],
+        ]
+        after = inventory(conn)
+        assert after["counts"]["agent_session_memory"] == 0
+        result = verify(conn, before=before)
+        assert result["ok"] is True, result
+        assert result["history_fingerprint_changes"] == {}
+        assert result["history_new_rows"]["agent_messages"] == 0
     finally:
         conn.close()
 
@@ -662,11 +716,18 @@ def test_v21_agent_tables_columns(tmp_path):
             "id", "session_id", "role", "content", "tool_call_id", "tool_name",
             "tool_calls_json", "metadata_json", "created_at",
         ]
+        memory_cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(agent_session_memory)"
+        )]
+        assert memory_cols == [
+            "session_id", "through_message_id", "source_message_count", "summary",
+            "format_version", "created_at", "updated_at",
+        ]
     finally:
         conn.close()
 
 
-def test_fresh_db_has_agent_tables(tmp_path):
+def test_fresh_db_has_agent_tables_and_memory(tmp_path):
     conn = get_connection(tmp_path / "fresh21.db")
     try:
         tables = {
@@ -674,7 +735,7 @@ def test_fresh_db_has_agent_tables(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert {"agent_sessions", "agent_messages"} <= tables
+        assert {"agent_sessions", "agent_messages", "agent_session_memory"} <= tables
     finally:
         conn.close()
 

@@ -63,6 +63,11 @@ class AgentSessionService:
         self.get(session_id)  # 校验存在
         return self.repo.list_messages(int(session_id))
 
+    def messages_after(self, session_id: int, message_id: int) -> list[dict]:
+        """List this Session's original messages after a verified boundary."""
+        self.get(session_id)
+        return self.repo.list_messages_after(int(session_id), int(message_id))
+
     def count_messages(self, session_id: int) -> int:
         return self.repo.count_messages(int(session_id))
 

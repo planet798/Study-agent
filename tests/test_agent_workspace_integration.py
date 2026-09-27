@@ -241,8 +241,13 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
         sandbox_config_path=sandbox_path,
     )
     from app.agent.skills import AgentSkillSelector
+    from app.agent.memory.compactor import AgentMemoryCompactor
 
     assert isinstance(runtime.context_builder, AgentTaskContextBuilder)
+    assert isinstance(runtime.memory_compactor, AgentMemoryCompactor)
+    assert runtime.memory_compactor.session_service is runtime.session_service
+    assert runtime.memory_compactor.memory_repository.conn is conn
+    assert runtime.memory_compactor.model_client is runtime.model_client
     assert isinstance(runtime.model_client, AdaptiveAgentModelClient)
     assert isinstance(runtime.skill_selector, AgentSkillSelector)
     assert runtime.mcp_provider is None  # explicit empty config keeps Agent-4 behavior

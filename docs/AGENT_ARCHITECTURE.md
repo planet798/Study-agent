@@ -6,9 +6,12 @@
 
 ```text
 Learning Route → Phase → Topic → Learning Component → Task
-→ Agent Study Session → Agent Runtime → Tools / Skills / MCP / Sandbox
+→ Agent Study Session → Task Context + Agent Skill + Session Memory
+→ Agent Runtime → Native / MCP / Sandbox Tools
 → Learning Interaction → Assessment / Evidence → Mastery / Capability
 ```
+
+- Task Context = authoritative current application state; Agent Skill = how to teach; Session Memory = derived conversation continuity. Memory never becomes Mastery, Capability, Assessment, or Evidence.
 
 ## Agent-1 — Session and model runtime
 
@@ -18,7 +21,7 @@ Task → AgentSessionService → AgentRuntime → AgentModelClient
 ```
 
 - `agent_sessions.task_id` is required; one task has at most one active session.
-- `agent_messages` are append-only. Runtime reloads message-id ordered history for each turn.
+- `agent_messages` are append-only. Runtime reloads message-id ordered full history when no memory boundary exists; with Agent-7 it reloads only raw rows after one fixed Session Memory boundary.
 - Legacy `AIClient` / `DeepSeekClient.chat()` / `AdaptiveAIClient.chat()` / `send_chat_request()` remain unchanged.
 
 ## Agent-1.1 — History verification
@@ -76,7 +79,7 @@ persist user
 → assistant tool-call message (canonical provider-neutral JSON)
 → execute each call in order
 → persist tool result (`role=tool`, call id + name + JSON content)
-→ reload all history and call model again
+→ reload complete raw turns after the fixed memory boundary and call model again
 → final assistant message
 ```
 
@@ -110,7 +113,7 @@ Task Context.task.activity_kind
 
 - `app/agent/skills/{base,registry,selector,learning}.py` contains six immutable built-ins: `general-study`, `teach-concept`, `code-reading`, `experiment-coach`, `interview-drill`, `practice-coach`.
 - These are static application behavior configuration, not database entities, Tools, Career Skills, user-managed prompts, or permissions. Selection uses only the current turn's Task Context snapshot and happens once per user turn; one tool loop reuses the selected Skill.
-- Prompt order is base safety/read-only policy → trusted Agent Skill instruction (`BEGIN_AGENT_SKILL`) → untrusted Task Context JSON (`BEGIN_TASK_CONTEXT_JSON`) → user message. Skill does not add tools or grant permissions; selected key is returned in `AgentTurnResult` but not persisted.
+- Prompt order is base safety/read-only policy → trusted Agent Skill (`BEGIN_AGENT_SKILL`) → authoritative untrusted Task Context JSON (`BEGIN_TASK_CONTEXT_JSON`) → derived untrusted Session Memory JSON (`BEGIN_SESSION_MEMORY`) → conversation. Skill does not add tools or grant permissions; selected key is returned in `AgentTurnResult` but not persisted.
 - Code/experiment/practice instructions conditionally allow only currently exposed `sandbox_*` capabilities; they never claim host repository/filesystem access.
 
 ## Agent-5 — Optional read-only MCP Tools
@@ -146,17 +149,34 @@ AgentToolRegistry(default: read-only)
 - `sandbox_run` is exposed only when Docker is configured, reachable, and its image already exists locally. It uses a fixed argv-list Docker CLI, `shell=False`, `--network none`, only the current Task workspace bind mount, dropped capabilities, no-new-privileges, read-only container root, resource limits, timeout, bounded output, and container cleanup. Docker failure has no host subprocess fallback.
 - Sandbox never imports application Services/Repositories/SQLite and cannot update Task, Mastery, Capability, Assessment, Practice, or Evidence. Task Context stays Native-only and Skill selection stays once-per-turn.
 
+## Agent-7 — Session Memory / Context Compaction
+
+```text
+append-only full agent_messages
+→ AgentMemoryCompactor.prepare_turn() exactly once, after persisting current user
+→ optional rolling prefix summary + recent complete turns + current turn
+→ fixed ConversationWindow for every model/tool round
+```
+
+- `app/agent/memory/{policy,compactor}.py` uses immutable character-based `AgentMemoryPolicy`, `estimate_message_chars()`, `AgentSessionService.messages_after()`, `AgentMemoryRepository`, and the existing `AgentModelClient`. No tokenizer, embeddings, vector DB, retrieval, cross-session or cross-task memory.
+- `agent_session_memory` (v22) is one derived row per Session. It stores a summary of the original prefix through a same-Session message ID, source message count, format version, and timestamps. Rolling updates preserve `created_at` and move the prefix forward; the table is in verifier `GROWTH_TABLES` / inventory only, never `HISTORY_TABLES` or v5 fingerprints.
+- The compactor groups at each `role=user` boundary. It only summarizes consecutive oldest complete turns; tool-call assistant rows, every associated tool result, and final assistant rows travel as one atomic turn. The active user turn is never summarized. Default retention is four full historical turns plus the active turn.
+- Summary requests use the same `AgentModelClient`, low temperature and bounded tokens/input/output, always `tools=()`. They receive only role/content/tool fields (bounded per message); `metadata_json` is excluded. Invalid, blank, oversized, tool-call, or failed responses are not persisted. Multiple successful batches are committed as one memory upsert, so a later pass failure leaves the prior memory unchanged.
+- If summarization fails, the Runtime uses the previous summary (if any) and a safe whole-turn recent tail, marks earlier raw text omitted, and preserves every original row. `AgentContextTooLargeError` is raised only when the active indivisible turn cannot fit; the already committed user message remains in SQLite.
+- System prompt encloses summary JSON in `BEGIN_SESSION_MEMORY` / `END_SESSION_MEMORY`, labels it derived, possibly incomplete data rather than instructions, and gives current Task Context / Native state priority. Sandbox actual results and external MCP trust rules remain explicit. Compaction happens before Task Context, Skill, MCP, and Sandbox lifecycle; it never scans workspace files or starts external tools.
+- Runtime reloads rows after the fixed raw boundary on each tool round, so new current-turn assistant/tool protocol rows appear without moving the memory boundary. `AgentWorkspacePage` continues to load and render the complete original message history.
+- No memory UI, controls, cross-Session import, Mastery/Capability inference, or application writes.
+
 ## Still not implemented
 
 - write tools, approvals, mutation policy
-- memory / context compaction
 - trace / evaluation
 
 ## Future roadmap
 
 | Stage | Scope |
 |---|---|
-| Agent-7 | Memory / context compaction |
+| Agent-7 | Session Memory / context compaction — implemented |
 | Agent-8 | Trace / evaluation |
 | Later / separately designed | write tools + approval policy |
 
@@ -170,4 +190,5 @@ AgentToolRegistry(default: read-only)
 - `tests/test_agent_skills.py` / `test_agent_skill_runtime.py`: static strategies, deterministic mapping/fallback, prompt boundary, one selection per turn, and no extra model call.
 - `tests/test_agent_mcp_config.py`, `test_agent_mcp_client.py`, `test_agent_mcp_discovery.py`, `test_agent_mcp_tools.py`, `test_agent_mcp_runtime.py`: offline config, official SDK bridge lifecycle, dual authorization gate, bounded results, and Runtime composition.
 - `tests/test_agent_sandbox_config.py`, `test_agent_sandbox_workspace.py`, `test_agent_sandbox_permissions.py`, `test_agent_sandbox_tools.py`, `test_agent_sandbox_backend.py`, `test_agent_sandbox_runtime.py`: config, isolation/path protections, scope authorization, Docker command constraints, and end-to-end tool history.
+- `tests/test_agent_memory_repository.py` / `test_agent_memory_compaction.py`: repository ownership/monotonicity, turn-safe rolling batches, short-session no-call behavior, tool protocol, bounded inputs, failure fallback, pass limit, hard budget, and Runtime tool-loop reuse.
 - Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.

@@ -1157,6 +1157,8 @@ def build_agent_runtime(
     import logging
 
     from app.agent.context import AgentTaskContextBuilder
+    from app.agent.memory.compactor import AgentMemoryCompactor
+    from app.agent.memory.policy import AgentMemoryPolicy
     from app.agent.mcp.config import MCPConfigError, load_mcp_config
     from app.agent.mcp.provider import MCPToolProvider
     from app.agent.runtime import AgentRuntime
@@ -1169,6 +1171,7 @@ def build_agent_runtime(
     from app.ai.agent_client import AdaptiveAgentModelClient
     from app.ai.client import AdaptiveAIClient
     from app.ai.config_service import AIConfigService
+    from app.database.agent_memory_repository import AgentMemoryRepository
     from app.database.agent_repository import AgentRepository
     from app.database.assessment_repository import AssessmentRepository
     from app.database.capability_repository import CapabilityEvidenceRepository
@@ -1208,6 +1211,12 @@ def build_agent_runtime(
     config_service = AIConfigService(db_path=str(db_path or resolve_db_path()))
     config_provider = config_service.get_runtime_config
     agent_model_client = AdaptiveAgentModelClient(config_provider)
+    memory_compactor = AgentMemoryCompactor(
+        session_service,
+        AgentMemoryRepository(fresh_conn),
+        agent_model_client,
+        AgentMemoryPolicy(),
+    )
     assessment_service = AssessmentService(
         AdaptiveAIClient(config_provider),
         assessment_repo=assessment_repo,
@@ -1250,6 +1259,7 @@ def build_agent_runtime(
         skill_selector=AgentSkillSelector(skill_registry),
         mcp_provider=mcp_provider,
         sandbox_provider=sandbox_provider,
+        memory_compactor=memory_compactor,
     )
 
 

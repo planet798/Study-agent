@@ -70,6 +70,37 @@ def test_workspace_loads_task_history_and_hides_tool_protocol(qtbot, repo):
     assert page.input_edit.isEnabled()
 
 
+def test_workspace_still_renders_full_history_when_session_memory_exists(
+    qtbot, conn, repo, task_service
+):
+    from app.agent.session import AgentSessionService
+    from app.database.agent_memory_repository import AgentMemoryRepository
+    from app.database.agent_repository import AgentRepository
+
+    task = _task(repo)
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    session = sessions.start_or_resume(task.id)
+    first = sessions.append_user_message(session["id"], "early question")
+    final = sessions.append_assistant_message(session["id"], "early answer")
+    sessions.append_user_message(session["id"], "latest question")
+    AgentMemoryRepository(conn).upsert(
+        session["id"], final["id"], 2, "compressed early conversation"
+    )
+
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session(
+        session=sessions.get(session["id"]),
+        messages=sessions.messages(session["id"]),
+        task=task, route_name=None, model_configured=True,
+    )
+
+    assert [label.text() for label in page.findChildren(QLabel, "AgentMessageText")] == [
+        "early question", "early answer", "latest question",
+    ]
+    assert first["id"] < final["id"]
+
+
 def test_workspace_empty_history_does_not_send_automatically(qtbot, repo):
     task = _task(repo)
     page = AgentWorkspacePage()

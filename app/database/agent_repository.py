@@ -130,6 +130,14 @@ class AgentRepository:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_messages_after(self, session_id: int, message_id: int) -> list[dict]:
+        """Return only persisted messages after a stable compaction boundary."""
+        rows = self.conn.execute(
+            "SELECT * FROM agent_messages WHERE session_id = ? AND id > ? ORDER BY id",
+            (int(session_id), int(message_id)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def count_messages(self, session_id: int) -> int:
         return int(
             self.conn.execute(

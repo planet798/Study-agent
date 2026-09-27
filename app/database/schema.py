@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1406,6 +1406,31 @@ def _migrate_v21(conn: sqlite3.Connection) -> None:
 _MIGRATIONS[21] = _migrate_v21
 
 
+# v22：Session-scoped derived conversation memory; original agent_messages remain immutable.
+_V22_SQL = """
+CREATE TABLE IF NOT EXISTS agent_session_memory (
+    session_id            INTEGER PRIMARY KEY
+                          REFERENCES agent_sessions(id),
+    through_message_id    INTEGER NOT NULL
+                          REFERENCES agent_messages(id),
+    source_message_count  INTEGER NOT NULL CHECK(source_message_count > 0),
+    summary               TEXT NOT NULL CHECK(length(trim(summary)) > 0),
+    format_version        INTEGER NOT NULL DEFAULT 1 CHECK(format_version > 0),
+    created_at            TEXT NOT NULL,
+    updated_at            TEXT NOT NULL
+);
+"""
+
+
+def _migrate_v22(conn: sqlite3.Connection) -> None:
+    """v22：新增可重建、可滚动更新的 Session Memory derived state。"""
+    conn.executescript(_V22_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[22] = _migrate_v22
+
+
 def get_schema_version(conn) -> int:
     """读取当前数据库结构版本（PRAGMA user_version）。"""
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1479,7 +1504,7 @@ def migrate_stepwise(conn, target: int | None = None, on_step=None) -> int:
 # ============================================================
 #
 # 背景：普通测试每次都会新建一个空库。若走 `migrate()`，会在空库上
-# 逐级重放 v2..v20（共 19 步，每步都 commit/fsync），实测约 280ms，
+# 逐级重放 v2..v22（共 21 步，每步都 commit/fsync），实测约 280ms，
 # 而其中真正 CPU 只有十几毫秒。
 #
 # `initialize_fresh_database()` 用「当前 schema 快照」一次性建好 vN 结构，

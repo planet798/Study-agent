@@ -108,6 +108,7 @@ def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules
     from app.agent.skills import AgentSkill, AgentSkillRegistry, AgentSkillSelector
     from app.services.skill_service import SkillService
     import app.agent.mcp as mcp_package
+    import app.agent.memory as memory_package
     import app.agent.skills as skills_package
 
     assert find_spec("app.agent.skills") is not None
@@ -116,8 +117,8 @@ def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules
     assert AgentSkill is not SkillService
     assert AgentSkillSelector is not SkillService
     assert find_spec("app.agent.sandbox") is not None
-    for module in ("app.agent.memory", "app.agent.trace"):
-        assert find_spec(module) is None, module
+    assert find_spec("app.agent.memory") is not None
+    assert find_spec("app.agent.trace") is None
 
     package_path = Path(skills_package.__file__).parent
     sources = "\\n".join(p.read_text(encoding="utf-8") for p in package_path.glob("*.py"))
@@ -126,6 +127,16 @@ def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules
         "AgentToolRegistry",
     ):
         assert forbidden not in sources
+
+    memory_path = Path(memory_package.__file__).parent
+    memory_sources = "\\n".join(
+        p.read_text(encoding="utf-8") for p in memory_path.glob("*.py")
+    )
+    for forbidden in (
+        "TaskRepository", "AssessmentRepository", "CapabilityRepository",
+        "SkillService", "MCP Client", "Sandbox Backend", "PySide6", "QtWidgets",
+    ):
+        assert forbidden.lower() not in memory_sources.lower()
 
     mcp_path = Path(mcp_package.__file__).parent
     mcp_sources = "\\n".join(p.read_text(encoding="utf-8") for p in mcp_path.glob("*.py"))
@@ -178,11 +189,11 @@ def test_learning_tool_handlers_depend_on_services_not_database():
         assert "conn" not in inspect.signature(tool_type.__init__).parameters
 
 
-def test_agent2_versions_remain_v21_and_fingerprint_v5():
+def test_agent7_schema_is_v22_and_fingerprint_remains_v5():
     from app.database.schema import SCHEMA_VERSION
     from app.diagnostics.release_migration import FINGERPRINT_VERSION
 
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION == 22
     assert FINGERPRINT_VERSION == 5
 
 

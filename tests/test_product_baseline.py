@@ -71,7 +71,7 @@ def test_historical_schema_and_verifier_remain(conn):
         FINGERPRINT_COLUMNS, FINGERPRINT_VERSION, HISTORY_TABLES,
     )
 
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION == 22
     assert FINGERPRINT_VERSION == 5
     for table in ("review_schedule", "weekly_summaries", "monthly_summaries"):
         assert conn.execute(

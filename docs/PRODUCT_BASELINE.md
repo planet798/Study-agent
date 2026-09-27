@@ -32,9 +32,9 @@ Daily Review / Review Scheduler / Daily Retention / generated review tasks; Mont
 
 ## Legacy DB and migration compatibility
 
-`SCHEMA_VERSION = 21`; `FINGERPRINT_VERSION = 5` (v5 protects immutable Agent Session/Message history). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
+`SCHEMA_VERSION = 22`; `FINGERPRINT_VERSION = 5` (v5 protects immutable Agent Session/Message history; derived Session Memory is growth-only). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
 
-## Agent core — Agent-1 through Agent-6 implemented
+## Agent core — Agent-1 through Agent-7 implemented
 
 Planner decides **WHAT** to learn. Agent Runtime helps the user actually learn that task:
 
@@ -52,11 +52,11 @@ Implemented:
 - **Agent-4**: static Agent learning-behavior Skills are selected deterministically from `learning_activity_kind`; they grant no permissions and are not persisted.
 - **Agent-5**: optional official-SDK MCP Tools for operator-configured external servers, gated by exact local allowlist plus `readOnlyHint=True`; transport/client lifecycle is per worker turn and no external integration can mutate Study-Agent state.
 - **Agent-6**: Task-ID-scoped bounded file workspace and optional Docker-only execution. Sandbox mutations are limited to that workspace; application state and Native/MCP permissions remain read-only.
+- **Agent-7**: Session-scoped rolling conversation summary plus recent complete turns. Original `agent_messages` remain append-only and the UI continues to display full history. Summary is derived, untrusted continuity data; it cannot update learning evidence or application state.
 
 NOT IMPLEMENTED:
 
 - write tools / approvals / mutation policy
-- memory / context compaction
 - trace / evaluation
 
 Agent Tools must call **existing Service → Repository → SQLite**, never Repository or raw SQLite directly. Agent may neither set Mastery nor Capability directly: **Assessment → Mastery** and **Evidence → Capability**. `AgentSkill` / `AgentSkillRegistry` in `app/agent/skills/` are static learning-behavior strategies; current `SkillService` and `skills` table describe career/technical skills and must not be repurposed. See `docs/AGENT_ARCHITECTURE.md`.
