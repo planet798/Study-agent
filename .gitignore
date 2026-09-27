@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 data/*.db
+data/mcp_servers.json
 .pytest_cache/
 data/logs/
 data/*.png

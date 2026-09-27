@@ -52,6 +52,10 @@ class AgentToolRegistry:
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
 
+    def registered_tools(self) -> tuple[AgentTool, ...]:
+        """Return immutable registration order for safe Registry composition."""
+        return tuple(self._tools.values())
+
     def model_tools(self) -> tuple[dict, ...]:
         """Return OpenAI-compatible declarations, detached from internal specs."""
         return tuple(

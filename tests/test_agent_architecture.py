@@ -101,20 +101,22 @@ def test_agent_tables_are_protected_history_not_growth():
     assert FINGERPRINT_VERSION == 5
 
 
-def test_agent_skills_are_separate_from_career_skills_and_future_modules_absent():
+def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules_absent():
     from importlib.util import find_spec
     from pathlib import Path
 
     from app.agent.skills import AgentSkill, AgentSkillRegistry, AgentSkillSelector
     from app.services.skill_service import SkillService
+    import app.agent.mcp as mcp_package
     import app.agent.skills as skills_package
 
     assert find_spec("app.agent.skills") is not None
+    assert find_spec("app.agent.mcp") is not None
     assert AgentSkillRegistry is not SkillService
     assert AgentSkill is not SkillService
     assert AgentSkillSelector is not SkillService
     for module in (
-        "app.agent.mcp", "app.agent.sandbox", "app.agent.memory", "app.agent.trace",
+        "app.agent.sandbox", "app.agent.memory", "app.agent.trace",
     ):
         assert find_spec(module) is None, module
 
@@ -125,6 +127,11 @@ def test_agent_skills_are_separate_from_career_skills_and_future_modules_absent(
         "AgentToolRegistry",
     ):
         assert forbidden not in sources
+
+    mcp_path = Path(mcp_package.__file__).parent
+    mcp_sources = "\\n".join(p.read_text(encoding="utf-8") for p in mcp_path.glob("*.py"))
+    for forbidden in ("SkillService", "SkillRepository", "sqlite3", "SELECT ", "UPDATE "):
+        assert forbidden.lower() not in mcp_sources.lower()
 
 
 def test_native_registry_contains_only_read_only_tools():

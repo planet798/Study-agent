@@ -54,7 +54,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
-## Agent core (Agent-1 / Agent-1.1 / Agent-2 / Agent-3 / Agent-4 implemented)
+## Agent core (Agent-1 / Agent-1.1 / Agent-2 / Agent-3 / Agent-4 / Agent-5 implemented)
 
 Planner 决定学什么；Agent Runtime 围绕当前 Session 绑定的 Task 提供只读学习上下文。
 
@@ -73,7 +73,9 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - Agent Workspace 只是最后追加的 internal stack page，不在 `PageKey` / `PAGE_SPECS` / Sidebar 中；离开 Workspace 不关闭 Session；普通 UI 只显示 user 与最终 assistant 文本。
 - Agent-4 提供静态 `AgentSkill` / `AgentSkillRegistry` / `AgentSkillSelector`：从同一 turn 的 `Task Context.task.activity_kind` 确定性选择教学策略，一轮选择一次、无模型分类调用、无 DB access、不授予 Tool 权限、不持久化 Skill key。
 - Agent Skill prompt 是可信静态 instruction，置于 Task Context JSON 数据之前；Career `SkillService` / `skills` 表仍属于职业/技术技能域，二者严格分离。
-- 仍未实现：write tools / approvals、MCP、Sandbox、memory compaction、trace/eval。
+- Agent-5 通过官方 `mcp>=2,<3` SDK 增加 per-user-turn stdio / Streamable HTTP MCP Tools。只有本地精确 `allowed_tools` 与 `readOnlyHint=True` 双重满足才暴露；MCP 是外部不可信数据，Native tools 始终保留且不允许 MCP mutation tools。
+- MCP Context、Skill、Worker thread 和 Native Registry 语义保持；MCP 配置缺失/服务不可用不会禁用 Native 工具。
+- 仍未实现：Sandbox、write tools / approvals、memory compaction、trace/eval。详见 `docs/AGENT_ARCHITECTURE.md` 与 `docs/MCP.md`。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。Agent learning behavior 配置位于独立 `app/agent/skills/` 命名空间，绝不复用或重解释 Career Skill 表。详见 `docs/AGENT_ARCHITECTURE.md`。
 

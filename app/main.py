@@ -1145,14 +1145,18 @@ def _verify_text(result: dict) -> str:
     return "\n".join(lines)
 
 
-def build_agent_runtime(fresh_conn, db_path=None):
+def build_agent_runtime(fresh_conn, db_path=None, mcp_config_path=None):
     """Build a complete Agent Runtime using only the worker-owned connection.
 
     The function is invoked inside ``AgentTurnWorker.run``. Every SQLite-backed
     Repository/Service is constructed from ``fresh_conn``; AIConfigService gets
     only a path and opens its own short-lived connection per config lookup.
     """
+    import logging
+
     from app.agent.context import AgentTaskContextBuilder
+    from app.agent.mcp.config import MCPConfigError, load_mcp_config
+    from app.agent.mcp.provider import MCPToolProvider
     from app.agent.runtime import AgentRuntime
     from app.agent.session import AgentSessionService
     from app.agent.skills.learning import build_default_agent_skill_registry
@@ -1214,12 +1218,23 @@ def build_agent_runtime(fresh_conn, db_path=None):
         capability_service,
     )
     skill_registry = build_default_agent_skill_registry()
+    try:
+        mcp_config = load_mcp_config(mcp_config_path)
+        enabled_mcp = any(server.enabled for server in mcp_config.servers)
+        mcp_provider = MCPToolProvider(mcp_config) if enabled_mcp else None
+    except MCPConfigError:
+        # Optional MCP integration fails closed without disabling native learning tools.
+        logging.getLogger(__name__).warning(
+            "MCP configuration invalid; external MCP tools are disabled for this turn."
+        )
+        mcp_provider = None
     return AgentRuntime(
         session_service,
         agent_model_client,
         tool_registry=registry,
         context_builder=AgentTaskContextBuilder(registry),
         skill_selector=AgentSkillSelector(skill_registry),
+        mcp_provider=mcp_provider,
     )
 
 

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "key": "local_docs",
+      "enabled": true,
+      "transport": "stdio",
+      "command": "python",
+      "args": ["path/to/server.py"],
+      "env_from_process": ["DOCS_API_TOKEN"],
+      "allowed_tools": ["search_docs", "lookup_symbol"]
+    },
+    {
+      "key": "local_http",
+      "enabled": false,
+      "transport": "streamable_http",
+      "url": "http://127.0.0.1:8000/mcp",
+      "allowed_tools": ["search"]
+    }
+  ]
+}

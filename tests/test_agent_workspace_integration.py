@@ -227,17 +227,22 @@ def test_stale_worker_completion_never_renders_into_another_session(
     window.close()
 
 
-def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn):
+def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn, tmp_path):
     from app.agent.context import AgentTaskContextBuilder
     from app.ai.agent_client import AdaptiveAgentModelClient
     from app.main import build_agent_runtime
 
-    runtime = build_agent_runtime(conn, db_path=_db_path(conn))
+    config_path = tmp_path / "mcp-disabled.json"
+    config_path.write_text('{"version":1,"servers":[]}', encoding="utf-8")
+    runtime = build_agent_runtime(
+        conn, db_path=_db_path(conn), mcp_config_path=config_path
+    )
     from app.agent.skills import AgentSkillSelector
 
     assert isinstance(runtime.context_builder, AgentTaskContextBuilder)
     assert isinstance(runtime.model_client, AdaptiveAgentModelClient)
     assert isinstance(runtime.skill_selector, AgentSkillSelector)
+    assert runtime.mcp_provider is None  # explicit empty config keeps Agent-4 behavior
     assert runtime.session_service.repo.conn is conn
     registry = runtime.tool_registry
     assert registry.get("get_task_context").task_service.repo.conn is conn
@@ -249,7 +254,7 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn)
 
 
 def test_full_workspace_worker_context_tool_loop_and_verifier_growth(
-    qtbot, conn, repo, task_service, date_service
+    qtbot, conn, repo, task_service, date_service, tmp_path
 ):
     from app.ai.agent_protocol import ModelResponse, ModelToolCall
     from app.diagnostics import release_migration as rm
@@ -263,10 +268,15 @@ def test_full_workspace_worker_context_tool_loop_and_verifier_growth(
     model_requests = []
     factory_errors = []
     factory_db_path = _db_path(conn)
+    mcp_config_path = tmp_path / "mcp-disabled.json"
+    mcp_config_path.write_text('{"version":1,"servers":[]}', encoding="utf-8")
 
     def runtime_factory(fresh_conn):
         try:
-            runtime = build_agent_runtime(fresh_conn, db_path=factory_db_path)
+            runtime = build_agent_runtime(
+                fresh_conn, db_path=factory_db_path,
+                mcp_config_path=mcp_config_path,
+            )
         except Exception as exc:
             factory_errors.append(repr(exc))
             raise

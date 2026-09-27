@@ -113,10 +113,26 @@ Task Context.task.activity_kind
 - Prompt order is base safety/read-only policy → trusted Agent Skill instruction (`BEGIN_AGENT_SKILL`) → untrusted Task Context JSON (`BEGIN_TASK_CONTEXT_JSON`) → user message. Skill does not add tools or grant permissions; selected key is returned in `AgentTurnResult` but not persisted.
 - Code/experiment/practice instructions explicitly prohibit claiming local file, terminal, or execution access before Sandbox exists.
 
+## Agent-5 — Optional read-only MCP Tools
+
+```text
+per-user-turn MCP scope (AgentTurnWorker thread)
+→ official MCP Client (stdio / Streamable HTTP)
+→ list_tools pages
+→ local exact allowlist AND annotations.readOnlyHint is True
+→ namespaced MCPAgentTool
+→ effective Registry = Native tools first + approved MCP tools
+```
+
+- `app/agent/mcp/{config,client,tools,provider}.py` reads operator-local `data/mcp_servers.json` (or `STUDY_AGENT_MCP_CONFIG`). Missing config means MCP disabled; no MCP database tables or Settings UI.
+- Official `mcp>=2,<3` SDK is used for transports/protocol negotiation. One private asyncio loop/AsyncExitStack and connected Clients live across discovery and all MCP tool rounds for one user turn, then close; no global client, SSE transport, or `asyncio.run()` per tool call.
+- Every external tool requires both an exact local `allowed_tools` entry and `readOnlyHint=True`. Wildcards and mutation tools are rejected. Names are namespaced (`mcp_<server>_<tool>`); collisions are skipped. Remote descriptions/schema/results are untrusted external data.
+- MCP Resources/Prompts/etc. are ignored. Results are provenance-tagged, JSON-safe and bounded; image/audio/binary content is described, not base64-forwarded. Server failures degrade to Native tools for that turn.
+- Task Context remains Native-only and authoritative; Agent Skill remains selected once from that same Task Context and grants no permission. MCP never changes the Skill or Native read-only policy.
+
 ## Still not implemented
 
 - write tools, approvals, mutation policy
-- MCP
 - Sandbox
 - memory / context compaction
 - trace / evaluation
@@ -125,7 +141,6 @@ Task Context.task.activity_kind
 
 | Stage | Scope |
 |---|---|
-| Agent-5 | MCP |
 | Agent-6 | Sandbox |
 | Later / separately designed | write tools + approval policy; Memory; Trace / Evaluation |
 
@@ -137,4 +152,5 @@ Task Context.task.activity_kind
 - `tests/test_agent_task_context.py` / `test_agent_workspace_integration.py`: one context snapshot per turn, no context tool-history writes, task-to-session flow, failure reload, and stale worker isolation.
 - `tests/test_agent_workspace_ui.py` / `test_agent_ui_worker.py`: plain-text UI visibility, busy/config state, Sidebar boundary, and worker connection ownership.
 - `tests/test_agent_skills.py` / `test_agent_skill_runtime.py`: static strategies, deterministic mapping/fallback, prompt boundary, one selection per turn, and no extra model call.
+- `tests/test_agent_mcp_config.py`, `test_agent_mcp_client.py`, `test_agent_mcp_discovery.py`, `test_agent_mcp_tools.py`, `test_agent_mcp_runtime.py`: offline config, official SDK bridge lifecycle, dual authorization gate, bounded results, and Runtime composition.
 - Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.
