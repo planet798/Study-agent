@@ -713,6 +713,22 @@ def _run_capability_cli(argv) -> int:
         conn.close()
 
 
+def _run_agent_diagnostic_cli(argv) -> int:
+    """Offline, read-only Agent diagnostics; never initialize a GUI or migrate."""
+    import argparse
+    import json
+    from app.diagnostics.agent_diagnostic import run_agent_diagnostic, format_agent_diagnostic
+
+    parser = argparse.ArgumentParser(prog="study-agent agent-diagnostic")
+    parser.add_argument("--db", default=None)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    code, report = run_agent_diagnostic(db_path=args.db)
+    print(json.dumps(report, ensure_ascii=False, indent=2) if args.json
+          else format_agent_diagnostic(report))
+    return code
+
+
 def _run_planner_diagnostic_cli(argv) -> int:
     """planner-diagnostic 子命令（只读）：
 
@@ -1339,6 +1355,8 @@ def main() -> int:
         return _run_six_routes_cli(sys.argv[2:])
     if "capability-backfill" in sys.argv[1:]:
         return _run_capability_cli(sys.argv[2:])
+    if "agent-diagnostic" in sys.argv[1:]:
+        return _run_agent_diagnostic_cli(sys.argv[2:])
     if "planner-diagnostic" in sys.argv[1:]:
         return _run_planner_diagnostic_cli(sys.argv[2:])
     if "db-release" in sys.argv[1:]:

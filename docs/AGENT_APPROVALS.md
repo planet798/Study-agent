@@ -37,4 +37,6 @@ Assessment requests require an active Task with a Knowledge Point. Approval rech
 
 Note requests require canonical stripped title (1–120 chars) and content (1–8000 chars), no extra fields. The Service creates a plain-text preview capped at 500 chars from the bound immutable Tool Call. Approval revalidates that call and saves one `LearningOutcome(kind=note)` with `derive_git=False`, `task_id=None`, and KP/Topic links. NULL Task linkage prevents later Task-completion outcomes from overwriting the note. No Mastery, Capability evidence, Task status, or filesystem write results from saving a note.
 
+Agent-11 serializes a Workspace Agent turn and approval execution: approval buttons are disabled while a turn runs; chat and other approvals are disabled during application execution. Re-entering a busy Session retains these states. Status and troubleshooting are in `docs/AGENT_PRODUCTION.md`.
+
 Versions remain `SCHEMA_VERSION=24`, `FINGERPRINT_VERSION=6`, `EVALUATOR_VERSION=2`. No Assessment submission Tool, arbitrary note editor, natural-language approval, remembered permissions, or MCP write capability is provided.

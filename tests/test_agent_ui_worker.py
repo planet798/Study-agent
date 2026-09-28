@@ -81,9 +81,38 @@ def test_worker_failure_is_user_safe_and_connection_closes(qtbot, monkeypatch):
 
     worker = AgentTurnWorker("db", factory, 7, "failed turn")
     error, = _run_worker(qtbot, worker, success=False)
-    assert error == "本轮暂未完成，请检查模型配置或网络后重试。"
+    assert error == "本轮学习暂未完成，请稍后重试。"
     assert "secret" not in error and "traceback" not in error
     assert conn.closed is True
+
+
+def test_worker_classifies_model_failure_after_persisting_user_message(qtbot, conn):
+    from app.agent.session import AgentSessionService
+    from app.database.agent_repository import AgentRepository
+    from app.database.repository import TaskRepository
+    from app.services.task_service import TaskService
+    from app.ai.interface import AIServiceError
+
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    task_service = TaskService(TaskRepository(conn))
+    task = task_service.create_task("Worker task", scheduled_date="2026-09-15")
+    session = AgentSessionService(AgentRepository(conn), task_service).start_or_resume(task.id)
+    class Client:
+        def is_configured(self): return True
+    def factory(fresh):
+        svc = AgentSessionService(AgentRepository(fresh), TaskService(TaskRepository(fresh)))
+        class Runtime:
+            session_service = svc
+            model_client = Client()
+            def send_message(self, sid, text):
+                svc.append_user_message(sid, text)
+                raise AIServiceError("SECRET_KEY https://user:pass@example.com")
+        return Runtime()
+    worker = AgentTurnWorker(path, factory, session["id"], "question")
+    error, = _run_worker(qtbot, worker, success=False)
+    assert "模型连接失败" in error and "你的消息已保存" in error
+    assert "SECRET_KEY" not in error and "user:pass" not in error
+    assert AgentRepository(conn).list_messages(session["id"])[-1]["content"] == "question"
 
 
 def test_runtime_factory_failure_still_closes_connection(qtbot, monkeypatch):

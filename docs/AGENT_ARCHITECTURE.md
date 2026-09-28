@@ -205,6 +205,10 @@ Native/MCP remain read-only; Sandbox mutation is task-workspace scoped. Only the
 
 The Approval Provider now registers three fixed request Tools: Task completion, formal Assessment start/resume, and bounded learning-note save. Each Tool only requests approval. The Repository binds to immutable `agent_messages.tool_calls_json` without copying note payload; Service validators run at request and again at execution. Note previews are plain text via Service views. The worker reuses the configured Assessment service/AI Profile and canonical LearningOutcome service. Assessment approval creates or resumes a pending attempt, never answers questions or changes Mastery; Note approval creates `kind=note` with `task_id=None` and no Git or Capability evidence. No schema/fingerprint/evaluator version bump. See `docs/AGENT_APPROVALS.md`.
 
+## Agent-11 — Workspace production hardening
+
+`AgentCapabilityStatus` reads local AI/MCP/Sandbox configuration without opening external connections or executing Docker. Workspace shows a lightweight status row and static sanitized warnings, Settings shortcut, Ctrl+Enter, input-size guard and safe scroll-to-bottom. The finite UI error mapper does not echo exceptions, and distinguishes confirmed persisted user messages from pre-persistence failures. Turn and approval execution are serialized within the Workspace; re-entry restores in-flight busy state, while Session A results never render into Session B. Workers are waited on and released during shutdown. `agent-diagnostic` opens an existing DB read-only, reports local capability counts and safe inventory without network/model/MCP/Docker calls. See `docs/AGENT_PRODUCTION.md`.
+
 ## Still not implemented
 
 - Assessment submission Tools, arbitrary note editing, or other application mutations
@@ -217,6 +221,7 @@ The Approval Provider now registers three fixed request Tools: Task completion, 
 | Agent-8 | Trace / deterministic Evaluation — implemented |
 | Agent-9 | Explicit approval-gated Task completion request — implemented |
 | Agent-10 | Approved Assessment & Learning Note Actions — implemented |
+| Agent-11 | Agent UX polish + production hardening — implemented; Platform v1 freeze |
 | Agent-11 | Agent UX polish + production hardening — next |
 
 ## Tests

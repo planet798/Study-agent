@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QEvent, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -13,9 +13,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..agent.status import AgentCapabilityStatus
 from ..services.learning_activity import activity_label
 from .components.button import SAButton
 from .task_widget import format_minutes
+
+
+MAX_AGENT_INPUT_CHARS = 20_000
+
+STATUS_WARNINGS = {
+    "mcp_config_invalid": "MCP 配置无效，本次仅使用内置能力。",
+    "sandbox_config_invalid": "Sandbox 配置无效，文件与执行能力已禁用。",
+    "sandbox_execution_unavailable": "Sandbox 文件能力可用，但代码执行环境不可用。",
+}
 
 
 class AgentWorkspacePage(QWidget):
@@ -25,6 +35,7 @@ class AgentWorkspacePage(QWidget):
     send_requested = Signal(int, str)
     approval_approve_requested = Signal(int)
     approval_reject_requested = Signal(int)
+    settings_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -63,6 +74,18 @@ class AgentWorkspacePage(QWidget):
         self.task_description_label.setVisible(False)
         root.addWidget(self.task_description_label)
 
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("AgentStatusRow")
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.status_label.setWordWrap(True)
+        root.addWidget(self.status_label)
+        self.capability_warning_label = QLabel("")
+        self.capability_warning_label.setObjectName("AgentCapabilityWarning")
+        self.capability_warning_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.capability_warning_label.setWordWrap(True)
+        self.capability_warning_label.hide()
+        root.addWidget(self.capability_warning_label)
+
         self.model_unavailable_label = QLabel(
             "AI 模型尚未配置，请先在设置中配置当前模型。"
         )
@@ -71,6 +94,11 @@ class AgentWorkspacePage(QWidget):
         self.model_unavailable_label.setWordWrap(True)
         self.model_unavailable_label.setVisible(False)
         root.addWidget(self.model_unavailable_label)
+        self.settings_button = SAButton("前往设置", variant="subtle", size="small")
+        self.settings_button.setObjectName("AgentGoToSettings")
+        self.settings_button.clicked.connect(self.settings_requested.emit)
+        self.settings_button.hide()
+        root.addWidget(self.settings_button, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.error_label = QLabel("")
         self.error_label.setObjectName("AgentErrorBanner")
@@ -111,6 +139,11 @@ class AgentWorkspacePage(QWidget):
         self.busy_label.setTextFormat(Qt.TextFormat.PlainText)
         self.busy_label.setVisible(False)
         root.addWidget(self.busy_label)
+        self.input_warning_label = QLabel("单条消息过长，请拆分后发送。")
+        self.input_warning_label.setObjectName("AgentInputWarning")
+        self.input_warning_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.input_warning_label.hide()
+        root.addWidget(self.input_warning_label)
 
         input_row = QHBoxLayout()
         input_row.setSpacing(10)
@@ -119,6 +152,7 @@ class AgentWorkspacePage(QWidget):
         self.input_edit.setPlaceholderText("围绕当前学习任务提问…")
         self.input_edit.setFixedHeight(88)
         self.input_edit.textChanged.connect(self._update_send_enabled)
+        self.input_edit.installEventFilter(self)
         input_row.addWidget(self.input_edit, stretch=1)
         self.send_button = SAButton("发送", variant="primary", size="medium")
         self.send_button.setObjectName("AgentSendButton")
@@ -134,6 +168,10 @@ class AgentWorkspacePage(QWidget):
         route_name: str | None,
         model_configured: bool,
         approvals=(),
+        *,
+        capability_status: AgentCapabilityStatus | None = None,
+        turn_busy: bool = False,
+        approval_busy: tuple[int, ...] = (),
     ) -> None:
         """Replace all Task/Session state; never leaves previous Session content."""
         self.current_session_id = int(session["id"])
@@ -166,13 +204,29 @@ class AgentWorkspacePage(QWidget):
                     self._add_bubble("学习助手", text, "assistant")
                     visible_count += 1
         self.empty_hint.setVisible(visible_count == 0)
+        self._approval_busy = set(approval_busy)
         self._render_approvals(approvals)
-        self._model_configured = bool(model_configured)
+        status = capability_status or AgentCapabilityStatus(model_configured=bool(model_configured))
+        self._model_configured = bool(status.model_configured)
+        parts = ["AI 已配置" if self._model_configured else "AI 未配置", "应用数据只读"]
+        if status.approvals_enabled:
+            parts.append("写操作需批准")
+        if status.mcp_configured:
+            parts.append("MCP 已配置")
+        if status.sandbox_configured:
+            parts.append("Sandbox 已启用")
+        if status.sandbox_execution_configured:
+            parts.append("Sandbox 执行已配置")
+        self.status_label.setText(" · ".join(parts))
+        warnings = [STATUS_WARNINGS[code] for code in status.warnings if code in STATUS_WARNINGS]
+        self.capability_warning_label.setText("\n".join(warnings))
+        self.capability_warning_label.setVisible(bool(warnings))
         self.model_unavailable_label.setVisible(not self._model_configured)
+        self.settings_button.setVisible(not self._model_configured)
         self.input_edit.clear()
         self.set_error("")
-        self.set_busy(False)
-        self._update_send_enabled()
+        self.set_busy(turn_busy)
+        QTimer.singleShot(0, self._scroll_bottom)
 
     def _render_approvals(self, approvals) -> None:
         while self.approvals_layout.count():
@@ -234,22 +288,54 @@ class AgentWorkspacePage(QWidget):
             count += 1
         self.approvals_container.setVisible(count > 0)
 
+    def _scroll_bottom(self) -> None:
+        bar = self.conversation_scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def clear_session(self, error: str = "") -> None:
+        self.current_session_id = None
+        self._approval_busy.clear()
+        self._busy = False
+        self._model_configured = False
+        for label in (self.task_title_label, self.task_meta_label,
+                      self.task_description_label, self.status_label,
+                      self.capability_warning_label):
+            label.clear()
+        self.capability_warning_label.hide()
+        self.task_description_label.hide()
+        self.model_unavailable_label.hide()
+        self.settings_button.hide()
+        self._clear_conversation()
+        self._render_approvals(())
+        self.input_edit.clear()
+        self.input_warning_label.hide()
+        self.busy_label.hide()
+        self.empty_hint.show()
+        self.set_error(error)
+        self._update_send_enabled()
+
     def set_approval_busy(self, approval_id: int, busy: bool) -> None:
         if busy:
             self._approval_busy.add(int(approval_id))
         else:
             self._approval_busy.discard(int(approval_id))
+        self._update_approval_buttons()
+        self._update_send_enabled()
+
+    def _update_approval_buttons(self) -> None:
+        locked = self._busy or bool(self._approval_busy)
         for card in self.approvals_container.findChildren(QFrame, "AgentApprovalCard"):
             for button in card.findChildren(SAButton):
-                button.setEnabled(not self._approval_busy)
+                button.setEnabled(not locked)
                 if button.objectName() == "AgentApprovalApprove":
                     button.setText("正在执行…" if self._approval_busy
                                    else button.property("normal_text"))
 
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)
+        self.busy_label.setText("Agent 正在思考…" if self._busy else "")
         self.busy_label.setVisible(self._busy)
-        self.input_edit.setEnabled(not self._busy and self._model_configured)
+        self._update_approval_buttons()
         self._update_send_enabled()
 
     def set_error(self, message: str) -> None:
@@ -288,21 +374,28 @@ class AgentWorkspacePage(QWidget):
         )
 
     def _update_send_enabled(self) -> None:
-        self.send_button.setEnabled(
-            self._model_configured
-            and not self._busy
-            and bool(self.input_edit.toPlainText().strip())
-        )
-        if not self._model_configured:
-            self.input_edit.setEnabled(False)
-        elif not self._busy:
-            self.input_edit.setEnabled(True)
+        text = self.input_edit.toPlainText()
+        too_long = len(text) > MAX_AGENT_INPUT_CHARS
+        self.input_warning_label.setVisible(too_long)
+        enabled = (self.current_session_id is not None and self._model_configured
+                   and not self._busy and not self._approval_busy)
+        self.input_edit.setEnabled(enabled)
+        self.send_button.setEnabled(enabled and bool(text.strip()) and not too_long)
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt API
+        if (watched is self.input_edit and event.type() == QEvent.Type.KeyPress
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self._send_current()
+            return True
+        return super().eventFilter(watched, event)
 
     def _send_current(self) -> None:
         if self.current_session_id is None:
             return
         text = self.input_edit.toPlainText()
-        if not text.strip() or self._busy or not self._model_configured:
+        if (not text.strip() or len(text) > MAX_AGENT_INPUT_CHARS
+                or self._busy or self._approval_busy or not self._model_configured):
             return
         self.input_edit.clear()
         self.send_requested.emit(self.current_session_id, text)

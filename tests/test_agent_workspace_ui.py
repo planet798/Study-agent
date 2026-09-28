@@ -150,6 +150,69 @@ def test_workspace_send_emits_plain_text_and_rejects_blank(qtbot, repo):
     assert page.input_edit.toPlainText() == ""
 
 
+def test_workspace_ctrl_enter_length_limit_and_clear(qtbot, repo):
+    from app.ui.agent_workspace_page import MAX_AGENT_INPUT_CHARS
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 10}, [], task, None, model_configured=True)
+    page.show()
+    sent, settings = [], []
+    page.send_requested.connect(lambda *args: sent.append(args))
+    page.settings_requested.connect(lambda: settings.append(True))
+    page.input_edit.setPlainText("one")
+    qtbot.keyClick(page.input_edit, Qt.Key.Key_Return)
+    assert page.input_edit.toPlainText().count("\n") == 1 and not sent
+    page.input_edit.setPlainText("x" * (MAX_AGENT_INPUT_CHARS + 1))
+    assert page.input_warning_label.isVisible() and not page.send_button.isEnabled()
+    qtbot.keyClick(page.input_edit, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    assert not sent and len(page.input_edit.toPlainText()) == MAX_AGENT_INPUT_CHARS + 1
+    page.input_edit.setPlainText("two")
+    qtbot.keyClick(page.input_edit, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    assert sent == [(10, "two")]
+    page.load_session({"id": 11}, [], task, None, model_configured=False)
+    assert page.settings_button.isVisible()
+    page.settings_button.click()
+    assert settings == [True]
+    assert not page.send_button.isEnabled()
+    page.clear_session("安全错误")
+    assert page.current_session_id is None
+    assert page.task_title_label.text() == ""
+    assert page.findChildren(QLabel, "AgentMessageText") == []
+    assert page.error_label.text() == "安全错误"
+
+
+def test_workspace_status_row_scroll_and_busy_persistence(qtbot, repo):
+    from app.agent.status import AgentCapabilityStatus
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.resize(720, 480)
+    page.show()
+    messages = []
+    for i in range(35):
+        messages += [{"role": "user", "content": f"question {i}", "tool_calls_json": ""},
+                     {"role": "assistant", "content": f"answer {i}", "tool_calls_json": ""}]
+    status = AgentCapabilityStatus(True, mcp_configured=True, sandbox_configured=True,
+        approvals_enabled=True, warnings=("mcp_config_invalid",))
+    page.load_session({"id": 12}, messages, task, None, True,
+                      capability_status=status, turn_busy=True,
+                      approvals=[{"id": 7, "status": "pending", "tool_name": "request_complete_current_task"}])
+    qtbot.waitUntil(lambda: page.conversation_scroll.verticalScrollBar().value() ==
+                    page.conversation_scroll.verticalScrollBar().maximum(), timeout=2000)
+    assert "MCP 已配置" in page.status_label.text()
+    assert "写操作需批准" in page.status_label.text()
+    assert "配置无效" in page.capability_warning_label.text()
+    assert not page.input_edit.isEnabled()
+    assert not page.findChild(type(page.send_button), "AgentApprovalApprove").isEnabled()
+    page.load_session({"id": 12}, messages, task, None, True,
+                      capability_status=status, approval_busy=(7,))
+    assert not page.input_edit.isEnabled()
+    assert page.findChild(type(page.send_button), "AgentApprovalApprove").text() == "正在执行…"
+    page.set_approval_busy(7, False)
+    assert page.input_edit.isEnabled()
+
+
 def test_task_widget_agent_action_priority_and_fallback(qtbot, repo):
     task = _task(repo, topic_id=1)
     fallback = TaskWidget(task)

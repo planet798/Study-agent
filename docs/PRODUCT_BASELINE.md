@@ -34,7 +34,7 @@ Daily Review / Review Scheduler / Daily Retention / generated review tasks; Mont
 
 `SCHEMA_VERSION = 24`; `FINGERPRINT_VERSION = 6` (v6 also protects Approval request identity and immutable user authorization events; Session Memory and Trace/Evaluation remain derived growth-only telemetry). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
 
-## Agent core — Agent-1 through Agent-10 implemented
+## Agent core — Agent-1 through Agent-11 implemented
 
 Planner decides **WHAT** to learn. Agent Runtime helps the user actually learn that task:
 
@@ -57,6 +57,7 @@ Implemented:
 - **Agent-8**: Content-free per-turn Trace/events and deterministic protocol Evaluation (`pass` / `warn` / `fail`). Trace never duplicates conversation/tool payloads; Evaluation uses no LLM and does not assess answer quality or learning outcomes. Trace/Evaluation failures are fail-open.
 - **Agent-9**: Local approval-request Tool for Task completion; explicit Workspace approval runs canonical `TaskService.complete_task()` in a worker-owned connection. Append-only authorization events are protected history. No natural-language approval or auto-resume.
 - **Agent-10**: Adds fixed request-only Tools for formal Assessment start/resume and bounded LearningOutcome note save. Approval executes through canonical Services on a fresh worker connection. Assessment startup does not judge answers or change Mastery; Note save creates no Capability evidence and never occupies the Task-completion outcome link.
+- **Agent-11**: Workspace production UX adds static capability status, safe errors, Settings shortcut, Ctrl+Enter, bounded input, in-flight serialization and resilient reload/shutdown. Offline `agent-diagnostic` reports read-only local health without external calls. Platform v1 is frozen for dogfooding and bug fixes.
 
 NOT IMPLEMENTED:
 

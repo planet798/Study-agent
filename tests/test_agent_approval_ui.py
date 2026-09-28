@@ -75,6 +75,42 @@ def test_three_pending_card_types_plain_text_preview_and_independent_labels(qtbo
             for card in cards] == buttons
 
 
+def test_reenter_during_approval_disables_chat_and_other_decisions(
+    qtbot, conn, repo, task_service, date_service
+):
+    import threading
+    from app.agent.session import AgentSessionService
+    from app.database.agent_repository import AgentRepository
+    from app.main import build_agent_approval_executor
+    from tests.test_agent_approval_integration import CompletionModel, build_window, request
+
+    task = repo.create(title="In-flight approval", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    window, approvals = build_window(conn, task_service, date_service, sessions, CompletionModel())
+    qtbot.addWidget(window)
+    page, sid = request(qtbot, window, sessions, task)
+    entered, release = threading.Event(), threading.Event()
+    def factory(fresh):
+        entered.set()
+        if not release.wait(5):
+            raise RuntimeError("test worker timeout")
+        return build_agent_approval_executor(fresh)
+    window.agent_approval_service_factory = factory
+    page.findChild(type(page.send_button), "AgentApprovalApprove").click()
+    assert entered.wait(3)
+    window._on_agent_back()
+    window._on_start_study(task.id)
+    assert page.current_session_id == sid
+    assert not page.input_edit.isEnabled()
+    assert not page.findChild(type(page.send_button), "AgentApprovalReject").isEnabled()
+    window._on_agent_send(sid, "forbidden during approval")
+    assert len(sessions.messages(sid)) == 4
+    release.set()
+    qtbot.waitUntil(lambda: not window._approval_inflight, timeout=7000)
+    assert approvals.list_pending_for_session(sid) == []
+    window.close()
+
+
 def test_stale_workspace_does_not_open_assessment_dialog(qtbot, conn, repo, task_service, date_service):
     from app.agent.session import AgentSessionService
     from app.database.agent_repository import AgentRepository
@@ -120,6 +156,6 @@ def test_pending_card_static_buttons_busy_and_chat(qtbot, conn):
     page.set_approval_busy(7, True)
     button = page.findChild(type(page.send_button), "AgentApprovalApprove")
     assert not button.isEnabled() and button.text() == "正在执行…"
-    assert page.send_button.isEnabled()
+    assert not page.send_button.isEnabled()  # serialize approval execution and Agent turn
     page.load_session({"id": 1}, [], task, None, True, [{"id": 7, "status": "executed", "tool_name": "request_complete_current_task"}])
     assert not page.approvals_container.isVisible()

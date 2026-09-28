@@ -57,7 +57,7 @@ from .dialogs import AIReviewDialog, NotDoneDialog
 from .manual_task_dialog import KIND_ACTIVITY, KIND_KNOWLEDGE, AddLearningTaskDialog
 from .task_widget import TaskWidget
 from .today_page import TodayPage
-from .agent_workspace_page import AgentWorkspacePage
+from .agent_workspace_page import AgentWorkspacePage, MAX_AGENT_INPUT_CHARS
 
 POSTPONE_WARNING = "该任务已经连续延期 3 次，请考虑拆分任务或调整计划。"
 
@@ -329,6 +329,7 @@ class MainWindow(QMainWindow):
             self.agent_workspace_page = AgentWorkspacePage()
             self.agent_workspace_page.back_requested.connect(self._on_agent_back)
             self.agent_workspace_page.send_requested.connect(self._on_agent_send)
+            self.agent_workspace_page.settings_requested.connect(self._switch_to_ai_settings)
             self.agent_workspace_page.approval_approve_requested.connect(self._on_agent_approval_approve)
             self.agent_workspace_page.approval_reject_requested.connect(self._on_agent_approval_reject)
             self.stack.addWidget(self.agent_workspace_page)
@@ -405,6 +406,13 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - history remains available without AI config
             return False
 
+    def _agent_capability_status(self):
+        from ..agent.status import build_agent_capability_status
+        return build_agent_capability_status(
+            self.ai_config_service,
+            approvals_enabled=self.agent_approval_service is not None,
+        )
+
     def _route_name_for_task(self, task) -> str | None:
         if task.route_id is None or self.route_service is None:
             return None
@@ -424,6 +432,7 @@ class MainWindow(QMainWindow):
         try:
             task = self.task_service.get_task(int(task_id))
             if task.status != STATUS_ACTIVE:
+                page.clear_session("当前任务已不在待学习状态。")
                 return
             session = self.agent_session_service.start_or_resume(task.id)
             messages = self.agent_session_service.messages(session["id"])
@@ -434,9 +443,10 @@ class MainWindow(QMainWindow):
                 route_name=self._route_name_for_task(task),
                 model_configured=self._agent_model_is_configured(),
                 approvals=self._pending_approvals(session["id"]),
+                capability_status=self._agent_capability_status(),
+                turn_busy=session["id"] in self._agent_inflight_sessions,
+                approval_busy=tuple(self._approval_inflight),
             )
-            if session["id"] in self._agent_inflight_sessions:
-                page.set_busy(True)
             self.stack.setCurrentIndex(self.agent_workspace_page_index)
             # Workspace is a Today sub-flow, never a selected Sidebar destination.
             self.sidebar.set_current(PageKey.TODAY)
@@ -444,6 +454,7 @@ class MainWindow(QMainWindow):
             self.page_header.set_subtitle(task.title)
             self.page_header.set_icon(None)
         except Exception:  # noqa: BLE001 - a failed Session open must not break Today
+            page.clear_session("无法打开学习会话，请稍后重试。")
             self.statusBar().showMessage("无法打开学习会话，请稍后重试。", 4000)
 
     def _pending_approvals(self, session_id: int):
@@ -475,14 +486,14 @@ class MainWindow(QMainWindow):
                 route_name=self._route_name_for_task(task),
                 model_configured=self._agent_model_is_configured(),
                 approvals=self._pending_approvals(session["id"]),
+                capability_status=self._agent_capability_status(),
+                turn_busy=int(session_id) in self._agent_inflight_sessions,
+                approval_busy=tuple(self._approval_inflight),
             )
-            if int(session_id) in self._agent_inflight_sessions:
-                page.set_busy(True)
             if error:
                 page.set_error(error)
-        except Exception:  # noqa: BLE001 - keep Workspace responsive on reload errors
-            page.set_busy(False)
-            page.set_error("无法重新加载会话记录，请返回今日后重试。")
+        except Exception:  # noqa: BLE001 - never show stale Task/Session data
+            page.clear_session("无法重新加载会话记录，请返回今日后重试。")
 
     def _approval_for_current_session(self, approval_id: int):
         page = self.agent_workspace_page
@@ -493,7 +504,8 @@ class MainWindow(QMainWindow):
         )
 
     def _on_agent_approval_reject(self, approval_id: int) -> None:
-        if approval_id in self._approval_inflight:
+        if (self._approval_inflight or self.agent_workspace_page is None or
+                self.agent_workspace_page.current_session_id in self._agent_inflight_sessions):
             return
         try:
             row = self._approval_for_current_session(approval_id)
@@ -505,7 +517,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("拒绝操作暂未完成，请重试。", 4000)
 
     def _on_agent_approval_approve(self, approval_id: int) -> None:
-        if self._approval_inflight or self.agent_approval_service_factory is None:
+        if (self._approval_inflight or self.agent_workspace_page is None
+                or self.agent_approval_service_factory is None
+                or self.agent_workspace_page.current_session_id in self._agent_inflight_sessions):
             return
         try:
             row = self._approval_for_current_session(approval_id)
@@ -532,6 +546,8 @@ class MainWindow(QMainWindow):
 
     def _on_agent_approval_finished(self, approval_id, session_id, result, error):
         self._approval_inflight.discard(approval_id)
+        if self._quit_requested:
+            return
         if self.agent_workspace_page is not None:
             self.agent_workspace_page.set_approval_busy(approval_id, False)
         self.refresh(preserve_scroll=True)
@@ -562,10 +578,10 @@ class MainWindow(QMainWindow):
         session_id = int(session_id)
         if page.current_session_id != session_id:
             return
-        if session_id in self._agent_inflight_sessions:
-            page.set_busy(True)
+        if session_id in self._agent_inflight_sessions or self._approval_inflight:
+            page.set_busy(session_id in self._agent_inflight_sessions)
             return
-        if not user_text.strip():
+        if not user_text.strip() or len(user_text) > MAX_AGENT_INPUT_CHARS:
             return
 
         self._agent_inflight_sessions.add(session_id)
@@ -590,6 +606,8 @@ class MainWindow(QMainWindow):
 
     def _on_agent_turn_finished(self, session_id: int, error: str | None) -> None:
         self._agent_inflight_sessions.discard(int(session_id))
+        if self._quit_requested:
+            return
         # A stale Session completion persists normally but never renders into another.
         self._reload_agent_session(int(session_id), error=error)
         # If the user returned to Today while the worker ran, refresh the card label
@@ -1354,9 +1372,10 @@ class MainWindow(QMainWindow):
         self._release_worker(worker)
 
     def _release_worker(self, worker: QThread) -> None:
-        """AI 线程结束后从列表中移除引用。"""
+        """Release finished worker references and its Qt object safely."""
         if worker in self._ai_workers:
             self._ai_workers.remove(worker)
+            worker.deleteLater()
 
     def _on_dialog_postpone(self, task_id: int) -> None:
         """用户在 AI 结果对话框中点击"延期到明天"。"""
@@ -1441,6 +1460,9 @@ class MainWindow(QMainWindow):
         """请求所有 AI worker 停止并等待其线程结束，之后释放引用。"""
         workers = list(self._ai_workers)
         self._ai_workers.clear()
+        self._agent_inflight_sessions.clear()
+        self._approval_inflight.clear()
+        self._assessment_inflight.clear()
         for w in workers:
             if w is None:
                 continue

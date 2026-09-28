@@ -147,6 +147,73 @@ def test_today_task_opens_internal_workspace_and_resumes_same_session(
     window.close()
 
 
+def test_workspace_switch_clears_stale_approvals_errors_and_input(
+    qtbot, conn, repo, task_service, date_service
+):
+    task_a = repo.create(title="A", scheduled_date="2026-01-05", source="generated")
+    task_b = repo.create(title="B", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    window = _make_window(conn, task_service, date_service, sessions, lambda _c: None)
+    qtbot.addWidget(window)
+    window._on_start_study(task_a.id)
+    a = window.agent_workspace_page.current_session_id
+    class ApprovalViews:
+        def list_pending_views_for_session(self, sid):
+            return ([{"id": 7, "session_id": a, "status": "pending",
+                      "tool_name": "request_complete_current_task"}] if sid == a else [])
+    window.agent_approval_service = ApprovalViews()
+    window._reload_agent_session(a)
+    page = window.agent_workspace_page
+    assert page.approvals_layout.count() == 1
+    page.set_error("old error")
+    page.input_edit.setPlainText("old unsent input")
+    window._on_start_study(task_b.id)
+    assert page.task_title_label.text() == "B"
+    assert page.approvals_layout.count() == 0
+    assert not page.error_label.text() and not page.input_edit.toPlainText()
+    window._on_start_study(task_a.id)
+    assert page.current_session_id == a
+    assert not page.error_label.text()
+    window.close()
+
+
+def test_missing_session_reload_clears_previous_task_content(
+    qtbot, conn, repo, task_service, date_service, monkeypatch
+):
+    task = repo.create(title="Old task", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    window = _make_window(conn, task_service, date_service, sessions, lambda _c: None)
+    qtbot.addWidget(window)
+    window._on_start_study(task.id)
+    page = window.agent_workspace_page
+    sid = page.current_session_id
+    monkeypatch.setattr(sessions, "get", lambda _sid: (_ for _ in ()).throw(RuntimeError("db error")))
+    window._reload_agent_session(sid)
+    assert page.current_session_id is None
+    assert page.task_title_label.text() == ""
+    assert not page.approvals_container.isVisible()
+    assert "无法重新加载" in page.error_label.text()
+    window.close()
+
+
+def test_workspace_settings_shortcut_navigates_to_existing_settings(
+    qtbot, conn, repo, task_service, date_service
+):
+    from app.ui.app_shell import PageKey
+    task = repo.create(title="Unconfigured model", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    window = _make_window(conn, task_service, date_service, sessions,
+                          lambda _conn: None, configured=False)
+    qtbot.addWidget(window)
+    window._on_start_study(task.id)
+    page = window.agent_workspace_page
+    assert not page.settings_button.isHidden()
+    page.settings_button.click()
+    assert window.stack.currentWidget() is window.ai_settings_page
+    assert window.sidebar.current_key() == PageKey.SETTINGS.value
+    window.close()
+
+
 def test_existing_history_shows_continue_and_manual_learning_is_eligible(
     qtbot, conn, repo, task_service, date_service
 ):
@@ -227,6 +294,82 @@ def test_stale_worker_completion_never_renders_into_another_session(
     window.close()
 
 
+def test_reenter_inflight_session_keeps_busy_until_worker_finishes(
+    qtbot, conn, repo, task_service, date_service
+):
+    task = repo.create(title="In-flight", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    entered, release = threading.Event(), threading.Event()
+    window = _make_window(conn, task_service, date_service, sessions,
+                          _worker_factory_with_behavior("answer", entered=entered, release=release))
+    qtbot.addWidget(window)
+    window._on_start_study(task.id)
+    page = window.agent_workspace_page
+    page.input_edit.setPlainText("hello")
+    page.send_button.click()
+    assert entered.wait(3)
+    sid = page.current_session_id
+    window._on_agent_back()
+    window._on_start_study(task.id)
+    assert page.current_session_id == sid
+    assert not page.send_button.isEnabled() and not page.input_edit.isEnabled()
+    assert not page.busy_label.isHidden()
+    window._on_agent_send(sid, "must not start a second turn")
+    assert len(window._agent_inflight_sessions) == 1
+    release.set()
+    qtbot.waitUntil(lambda: not window._agent_inflight_sessions, timeout=5000)
+    assert page.input_edit.isEnabled()
+    assert [r["role"] for r in sessions.messages(sid)] == ["user", "assistant"]
+    window.close()
+
+
+def test_workspace_status_and_optional_config_degradation_are_nonblocking(
+    qtbot, conn, repo, task_service, date_service, tmp_path, monkeypatch
+):
+    task = repo.create(title="Optional config", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    mcp, sandbox = tmp_path / "mcp.json", tmp_path / "sandbox.json"
+    mcp.write_text('invalid SECRET_MCP_URL', encoding="utf-8")
+    sandbox.write_text('invalid PRIVATE_SANDBOX_PATH', encoding="utf-8")
+    monkeypatch.setenv("STUDY_AGENT_MCP_CONFIG", str(mcp))
+    monkeypatch.setenv("STUDY_AGENT_SANDBOX_CONFIG", str(sandbox))
+    window = _make_window(conn, task_service, date_service, sessions,
+                          _worker_factory_with_behavior("native answer"))
+    qtbot.addWidget(window)
+    window._on_start_study(task.id)
+    page = window.agent_workspace_page
+    assert "MCP 配置无效" in page.capability_warning_label.text()
+    assert "Sandbox 配置无效" in page.capability_warning_label.text()
+    assert "SECRET_MCP_URL" not in page.capability_warning_label.text()
+    page.input_edit.setPlainText("native question")
+    page.send_button.click()
+    qtbot.waitUntil(lambda: not window._agent_inflight_sessions, timeout=5000)
+    assert "native answer" in [b.text() for b in page.findChildren(QLabel, "AgentMessageText")]
+    window.close()
+
+
+def test_shutdown_waits_for_running_worker_and_clears_references(
+    qtbot, conn, repo, task_service, date_service
+):
+    from PySide6.QtCore import QThread
+    task = repo.create(title="Shutdown", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    window = _make_window(conn, task_service, date_service, sessions, lambda _c: None)
+    qtbot.addWidget(window)
+    class CooperativeWorker(QThread):
+        def run(self):
+            while not self.isInterruptionRequested():
+                self.msleep(5)
+    worker = CooperativeWorker(window)
+    window._ai_workers.append(worker)
+    worker.start()
+    qtbot.waitUntil(worker.isRunning, timeout=2000)
+    window._stop_ai_workers()
+    assert not worker.isRunning()
+    assert not window._ai_workers
+    window.close()
+
+
 def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn, tmp_path):
     from app.agent.context import AgentTaskContextBuilder
     from app.ai.agent_client import AdaptiveAgentModelClient
@@ -266,6 +409,33 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
     assert registry.get("get_learning_components").topic_learning_service.conn is conn
     assert registry.get("get_mastery").assessment_service.assessment_repo.conn is conn
     assert registry.get("get_capability").capability_service.conn is conn
+
+
+def test_production_invalid_optional_configs_keep_native_agent_turn(
+    conn, repo, task_service, tmp_path
+):
+    from app.ai.agent_protocol import ModelResponse
+    from app.main import build_agent_runtime
+
+    mcp = tmp_path / "invalid-mcp.json"
+    sandbox = tmp_path / "invalid-sandbox.json"
+    mcp.write_text('{"private":"SECRET_ENDPOINT"}', encoding="utf-8")
+    sandbox.write_text('{"private":"SECRET_DOCKER_PATH"}', encoding="utf-8")
+    task = repo.create(title="Native fallback", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    session = sessions.start_or_resume(task.id)
+    runtime = build_agent_runtime(conn, db_path=_db_path(conn),
+                                  mcp_config_path=mcp, sandbox_config_path=sandbox)
+    assert runtime.mcp_provider is None and runtime.sandbox_provider is None
+    class FakeModel:
+        def is_configured(self): return True
+        def complete(self, request):
+            assert any(tool["function"]["name"] == "get_task_context" for tool in request.tools)
+            return ModelResponse("Native tools remain available")
+    runtime.model_client = FakeModel()
+    result = runtime.send_message(session["id"], "continue learning")
+    assert result.assistant_message["content"] == "Native tools remain available"
+    assert "SECRET_ENDPOINT" not in result.assistant_message["content"]
 
 
 def test_full_workspace_worker_context_tool_loop_and_verifier_growth(

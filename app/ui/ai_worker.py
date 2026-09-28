@@ -184,14 +184,33 @@ class AgentTurnWorker(QThread):
         self._user_text = user_text
 
     def run(self) -> None:  # noqa: D102
-        conn = None
+        from ..agent.errors import map_agent_error
+
+        conn = runtime = None
+        before_count = None
         try:
             conn = get_connection(self._db_path)
             runtime = self._runtime_factory(conn)
+            service = getattr(runtime, "session_service", None)
+            if service is not None:
+                before_count = service.count_messages(self._session_id)
             result = runtime.send_message(self._session_id, self._user_text)
             self.succeeded.emit(result)
-        except Exception:  # noqa: BLE001 - no raw exception/secrets to the UI
-            self.failed.emit("本轮暂未完成，请检查模型配置或网络后重试。")
+        except Exception as error:  # noqa: BLE001 - no raw exception/secrets to the UI
+            persisted = False
+            configured = None
+            try:
+                service = getattr(runtime, "session_service", None)
+                if service is not None and before_count is not None:
+                    persisted = service.count_messages(self._session_id) > before_count
+                model = getattr(runtime, "model_client", None)
+                if model is not None:
+                    configured = bool(model.is_configured())
+            except Exception:
+                pass
+            self.failed.emit(map_agent_error(
+                error, model_configured=configured, user_message_persisted=persisted,
+            ).message)
         finally:
             if conn is not None:
                 try:
