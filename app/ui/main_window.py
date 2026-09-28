@@ -120,6 +120,8 @@ class MainWindow(QMainWindow):
         theme_settings=None,
         agent_session_service=None,
         agent_runtime_factory=None,
+        agent_approval_service=None,
+        agent_approval_service_factory=None,
     ):
         super().__init__()
         # 主题偏好（QSettings；测试可注入隔离实例）；UI-2 runtime，不改 DB。
@@ -127,6 +129,8 @@ class MainWindow(QMainWindow):
         self.task_service = task_service
         self.agent_session_service = agent_session_service
         self.agent_runtime_factory = agent_runtime_factory
+        self.agent_approval_service = agent_approval_service
+        self.agent_approval_service_factory = agent_approval_service_factory
         self.date_service = date_service
         self.today_provider = today_provider or _default_today
         # AI 复核服务：可选，未配置/未传时本地功能完全正常
@@ -186,6 +190,7 @@ class MainWindow(QMainWindow):
         self._ai_workers: list[QThread] = []
         # 防止重复发送造成同一 Session 的模型回复乱序。
         self._agent_inflight_sessions: set[int] = set()
+        self._approval_inflight: set[int] = set()
         # 防止连续双击【开始验收】创建多个 worker / 多个 pending attempt
         self._assessment_inflight: set[int] = set()
 
@@ -324,6 +329,8 @@ class MainWindow(QMainWindow):
             self.agent_workspace_page = AgentWorkspacePage()
             self.agent_workspace_page.back_requested.connect(self._on_agent_back)
             self.agent_workspace_page.send_requested.connect(self._on_agent_send)
+            self.agent_workspace_page.approval_approve_requested.connect(self._on_agent_approval_approve)
+            self.agent_workspace_page.approval_reject_requested.connect(self._on_agent_approval_reject)
             self.stack.addWidget(self.agent_workspace_page)
             self.agent_workspace_page_index = self.stack.count() - 1
 
@@ -426,6 +433,7 @@ class MainWindow(QMainWindow):
                 task=task,
                 route_name=self._route_name_for_task(task),
                 model_configured=self._agent_model_is_configured(),
+                approvals=self._pending_approvals(session["id"]),
             )
             if session["id"] in self._agent_inflight_sessions:
                 page.set_busy(True)
@@ -437,6 +445,14 @@ class MainWindow(QMainWindow):
             self.page_header.set_icon(None)
         except Exception:  # noqa: BLE001 - a failed Session open must not break Today
             self.statusBar().showMessage("无法打开学习会话，请稍后重试。", 4000)
+
+    def _pending_approvals(self, session_id: int):
+        if self.agent_approval_service is None:
+            return ()
+        try:
+            return self.agent_approval_service.list_pending_for_session(session_id)
+        except Exception:
+            return ()
 
     def _on_agent_back(self) -> None:
         """Return to Today; leaving the Workspace never closes the Session."""
@@ -458,6 +474,7 @@ class MainWindow(QMainWindow):
                 task=task,
                 route_name=self._route_name_for_task(task),
                 model_configured=self._agent_model_is_configured(),
+                approvals=self._pending_approvals(session["id"]),
             )
             if int(session_id) in self._agent_inflight_sessions:
                 page.set_busy(True)
@@ -466,6 +483,61 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - keep Workspace responsive on reload errors
             page.set_busy(False)
             page.set_error("无法重新加载会话记录，请返回今日后重试。")
+
+    def _approval_for_current_session(self, approval_id: int):
+        page = self.agent_workspace_page
+        if page is None or self.agent_approval_service is None:
+            return None
+        row = self.agent_approval_service.repository.get(int(approval_id))
+        if row is None or row["status"] != "pending" or row["session_id"] != page.current_session_id:
+            return None
+        return row
+
+    def _on_agent_approval_reject(self, approval_id: int) -> None:
+        if approval_id in self._approval_inflight:
+            return
+        try:
+            row = self._approval_for_current_session(approval_id)
+            if row is None:
+                return
+            self.agent_approval_service.reject(approval_id)
+            self._reload_agent_session(row["session_id"])
+        except Exception:
+            self.statusBar().showMessage("拒绝操作暂未完成，请重试。", 4000)
+
+    def _on_agent_approval_approve(self, approval_id: int) -> None:
+        if approval_id in self._approval_inflight or self.agent_approval_service_factory is None:
+            return
+        try:
+            row = self._approval_for_current_session(approval_id)
+            if row is None:
+                return
+        except Exception:
+            return
+        from .agent_approval_worker import AgentApprovalWorker
+        self._approval_inflight.add(approval_id)
+        self.agent_workspace_page.set_approval_busy(approval_id, True)
+        worker = AgentApprovalWorker(self.db_path, self.agent_approval_service_factory,
+                                     approval_id, parent=self)
+        worker.succeeded.connect(
+            lambda result, aid=approval_id, sid=row["session_id"]:
+                self._on_agent_approval_finished(aid, sid, result, None)
+        )
+        worker.failed.connect(
+            lambda message, aid=approval_id, sid=row["session_id"]:
+                self._on_agent_approval_finished(aid, sid, None, message)
+        )
+        worker.finished.connect(lambda w=worker: self._release_worker(w))
+        self._ai_workers.append(worker)
+        worker.start()
+
+    def _on_agent_approval_finished(self, approval_id, session_id, result, error):
+        self._approval_inflight.discard(approval_id)
+        if self.agent_workspace_page is not None:
+            self.agent_workspace_page.set_approval_busy(approval_id, False)
+        self.refresh(preserve_scroll=True)
+        self._reload_agent_session(session_id)
+        self.statusBar().showMessage(error or "任务已按你的批准标记为完成", 4000)
 
     def _on_agent_send(self, session_id: int, user_text: str) -> None:
         """Dispatch a turn to a worker that owns a fresh thread-local connection."""

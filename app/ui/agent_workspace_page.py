@@ -23,6 +23,8 @@ class AgentWorkspacePage(QWidget):
 
     back_requested = Signal()
     send_requested = Signal(int, str)
+    approval_approve_requested = Signal(int)
+    approval_reject_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -30,6 +32,7 @@ class AgentWorkspacePage(QWidget):
         self.current_session_id: int | None = None
         self._model_configured = False
         self._busy = False
+        self._approval_busy: set[int] = set()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -88,6 +91,12 @@ class AgentWorkspacePage(QWidget):
         self.conversation_scroll.setWidget(self.conversation_body)
         root.addWidget(self.conversation_scroll, stretch=1)
 
+        self.approvals_container = QWidget()
+        self.approvals_container.setObjectName("AgentPendingApprovals")
+        self.approvals_layout = QVBoxLayout(self.approvals_container)
+        self.approvals_container.hide()
+        root.addWidget(self.approvals_container)
+
         self.empty_hint = QLabel(
             "围绕这个任务开始学习。你可以让我讲解概念、分析代码、"
             "设计练习，或询问当前学习状态。"
@@ -124,6 +133,7 @@ class AgentWorkspacePage(QWidget):
         task,
         route_name: str | None,
         model_configured: bool,
+        approvals=(),
     ) -> None:
         """Replace all Task/Session state; never leaves previous Session content."""
         self.current_session_id = int(session["id"])
@@ -156,12 +166,60 @@ class AgentWorkspacePage(QWidget):
                     self._add_bubble("学习助手", text, "assistant")
                     visible_count += 1
         self.empty_hint.setVisible(visible_count == 0)
+        self._render_approvals(approvals)
         self._model_configured = bool(model_configured)
         self.model_unavailable_label.setVisible(not self._model_configured)
         self.input_edit.clear()
         self.set_error("")
         self.set_busy(False)
         self._update_send_enabled()
+
+    def _render_approvals(self, approvals) -> None:
+        while self.approvals_layout.count():
+            item = self.approvals_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        count = 0
+        for row in approvals:
+            if row.get("status") != "pending" or row.get("tool_name") != "request_complete_current_task":
+                continue
+            approval_id = int(row["id"])
+            card = QFrame()
+            card.setObjectName("AgentApprovalCard")
+            layout = QVBoxLayout(card)
+            label = QLabel("待批准操作：Agent 请求完成当前学习任务。批准后执行现有任务完成流程；不代表通过验收或提高 Mastery。")
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            buttons = QHBoxLayout()
+            reject = SAButton("拒绝", variant="subtle", size="small")
+            reject.setObjectName("AgentApprovalReject")
+            reject.clicked.connect(lambda _checked=False, aid=approval_id: self.approval_reject_requested.emit(aid))
+            approve = SAButton("批准", variant="primary", size="small")
+            approve.setObjectName("AgentApprovalApprove")
+            approve.clicked.connect(lambda _checked=False, aid=approval_id: self.approval_approve_requested.emit(aid))
+            buttons.addWidget(reject)
+            buttons.addWidget(approve)
+            layout.addLayout(buttons)
+            if approval_id in self._approval_busy:
+                reject.setEnabled(False)
+                approve.setEnabled(False)
+                approve.setText("正在执行…")
+            self.approvals_layout.addWidget(card)
+            count += 1
+        self.approvals_container.setVisible(count > 0)
+
+    def set_approval_busy(self, approval_id: int, busy: bool) -> None:
+        if busy:
+            self._approval_busy.add(int(approval_id))
+        else:
+            self._approval_busy.discard(int(approval_id))
+        for card in self.approvals_container.findChildren(QFrame, "AgentApprovalCard"):
+            # Single-action v1; only one pending request per session/action.
+            for button in card.findChildren(SAButton):
+                button.setEnabled(not self._approval_busy)
+                if button.objectName() == "AgentApprovalApprove":
+                    button.setText("正在执行…" if self._approval_busy else "批准")
 
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)

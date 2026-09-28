@@ -134,7 +134,7 @@ def test_successful_no_tool_turn_persists_trace_and_pass_evaluation(conn):
     assert trace["tool_call_count"] == trace["tool_rounds"] == 0
     assert trace["usage_complete"] == 1
     assert json.loads(AgentEvaluationRepository(conn).get_for_trace(
-        result.trace_id, 1
+        result.trace_id, 2
     )["checks_json"])["turn_succeeded"] is True
 
 
@@ -216,7 +216,7 @@ def test_ai_failure_persists_failed_trace_and_reraises_original_error(conn):
     assert trace["error_code"] == "ai_service_error"
     assert event["status"] == "error"
     assert "private endpoint" not in event["details_json"]
-    assert AgentEvaluationRepository(conn).get_for_trace(trace["id"], 1)["status"] == "fail"
+    assert AgentEvaluationRepository(conn).get_for_trace(trace["id"], 2)["status"] == "fail"
 
 
 def test_context_too_large_leaves_user_and_failed_trace(conn):

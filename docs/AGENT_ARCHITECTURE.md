@@ -160,7 +160,7 @@ append-only full agent_messages
 ```
 
 - `app/agent/memory/{policy,compactor}.py` uses immutable character-based `AgentMemoryPolicy`, `estimate_message_chars()`, `AgentSessionService.messages_after()`, `AgentMemoryRepository`, and the existing `AgentModelClient`. No tokenizer, embeddings, vector DB, retrieval, cross-session or cross-task memory.
-- `agent_session_memory` (v22) is one derived row per Session. It stores a summary of the original prefix through a same-Session message ID, source message count, format version, and timestamps. Rolling updates preserve `created_at` and move the prefix forward; the table is in verifier `GROWTH_TABLES` / inventory only, never `HISTORY_TABLES` or v5 fingerprints.
+- `agent_session_memory` (v22) is one derived row per Session. It stores a summary of the original prefix through a same-Session message ID, source message count, format version, and timestamps. Rolling updates preserve `created_at` and move the prefix forward; the table is in verifier `GROWTH_TABLES` / inventory only, never `HISTORY_TABLES` or immutable-history fingerprints.
 - The compactor groups at each `role=user` boundary. It only summarizes consecutive oldest complete turns; tool-call assistant rows, every associated tool result, and final assistant rows travel as one atomic turn. The active user turn is never summarized. Default retention is four full historical turns plus the active turn.
 - Summary requests use the same `AgentModelClient`, low temperature and bounded tokens/input/output, always `tools=()`. They receive only role/content/tool fields (bounded per message); `metadata_json` is excluded. Invalid, blank, oversized, tool-call, or failed responses are not persisted. Multiple successful batches are committed as one memory upsert, so a later pass failure leaves the prior memory unchanged.
 - If summarization fails, the Runtime uses the previous summary (if any) and a safe whole-turn recent tail, marks earlier raw text omitted, and preserves every original row. `AgentContextTooLargeError` is raised only when the active indivisible turn cannot fit; the already committed user message remains in SQLite.
@@ -179,7 +179,7 @@ accepted user message
 → pass / warn / fail
 ```
 
-- `agent_turn_traces`, `agent_trace_events`, and `agent_turn_evaluations` (v23) are derived operational telemetry. They are in verifier growth/inventory only; immutable `agent_sessions` / `agent_messages` history and fingerprint v5 are unchanged.
+- `agent_turn_traces`, `agent_trace_events`, and `agent_turn_evaluations` (v23) are derived operational telemetry. They are in verifier growth/inventory only; immutable `agent_sessions` / `agent_messages` history is unchanged (introduced under fingerprint v5; v6 adds Approval history).
 - `AgentTraceCollector` is pure Python and keeps only controlled identifiers, counts, durations, usage, result flags, memory boundary/flags, and static Skill key. It never copies prompts/messages, tool arguments/results, MCP descriptions/content, Sandbox paths/output, or API configuration. Event detail objects are allowlisted and capped at 4096 characters.
 - Each Agent and Memory-summarizer call is observed once; usage aliases are normalized without treating booleans as integers. Missing/invalid usage makes `usage_complete=false` while known token counts still accumulate. Tool events classify registered names as native/MCP/Sandbox and store only success/error code, never message bodies.
 - Trace writes and all events are one repository transaction. Completed traces are inserted once—there is no `running` row. Persistence and Evaluation are fail-open and cannot change the Agent result or mask the original failure.
@@ -187,9 +187,23 @@ accepted user message
 - The worker-owned connection is wired by `app/main.py::build_agent_runtime`; MainWindow and Workspace do not access or display Trace. Sidebar/navigation remains unchanged.
 - Implementation details and privacy invariants: `docs/AGENT_TRACE_EVAL.md`.
 
+## Agent-9 — Explicit per-request approval
+
+```text
+Agent Runtime
+├── Session Memory / Task Context / Agent Skill
+├── Native read Tools / MCP read Tools
+├── Sandbox task-scoped mutation
+├── Approval request Tool → Pending Approval
+└── Trace / Evaluation
+User approval click → Approval Worker → canonical TaskService → application mutation
+```
+
+Native/MCP remain read-only; Sandbox mutation is task-workspace scoped. Only the local `request_complete_current_task` approval Tool (`mutation_scope="approval"`) may create pending authorization metadata. A persisted assistant tool-call ID binds each request, and its pending Tool result never implies the Task has been completed. Workspace button clicks alone reject or dispatch canonical `TaskService.complete_task()` in a fresh-connection Approval Worker. No chat-text consent, auto-approval, remembered permissions, second Tool result, automatic model resume, or Session close. v24 Approval Requests and append-only Events are verifier-protected authorization history (fingerprint v6); Trace/Eval remain content-free derived telemetry (evaluator v2 adds approval-tool counts). See `docs/AGENT_APPROVALS.md`.
+
 ## Still not implemented
 
-- write tools, approvals, mutation policy
+- Assessment / learning-note actions or other application mutations
 
 ## Future roadmap
 
@@ -197,7 +211,8 @@ accepted user message
 |---|---|
 | Agent-7 | Session Memory / context compaction — implemented |
 | Agent-8 | Trace / deterministic Evaluation — implemented |
-| Agent-9 | Write Tools + Approval Policy — next, separately designed |
+| Agent-9 | Explicit approval-gated Task completion request — implemented |
+| Agent-10 | Approved Assessment & Learning Note Actions — next, separately designed |
 
 ## Tests
 
@@ -210,5 +225,6 @@ accepted user message
 - `tests/test_agent_mcp_config.py`, `test_agent_mcp_client.py`, `test_agent_mcp_discovery.py`, `test_agent_mcp_tools.py`, `test_agent_mcp_runtime.py`: offline config, official SDK bridge lifecycle, dual authorization gate, bounded results, and Runtime composition.
 - `tests/test_agent_sandbox_config.py`, `test_agent_sandbox_workspace.py`, `test_agent_sandbox_permissions.py`, `test_agent_sandbox_tools.py`, `test_agent_sandbox_backend.py`, `test_agent_sandbox_runtime.py`: config, isolation/path protections, scope authorization, Docker command constraints, and end-to-end tool history.
 - `tests/test_agent_memory_repository.py` / `test_agent_memory_compaction.py`: repository ownership/monotonicity, turn-safe rolling batches, short-session no-call behavior, tool protocol, bounded inputs, failure fallback, pass limit, hard budget, and Runtime tool-loop reuse.
+- `tests/test_agent_approval_*.py`: request/event transaction, canonical completion, UI/worker/integration, verifier and privacy.
 - `tests/test_agent_trace_repository.py`, `test_agent_trace_collector.py`, `test_agent_trace_runtime.py`, `test_agent_trace_privacy.py`, and `test_agent_evaluation.py`: atomic persistence/ownership/seq, timing/usage bounds, runtime success/failure/fail-open, private-data sentinels, and deterministic checks.
 - Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.

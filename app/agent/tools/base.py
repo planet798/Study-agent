@@ -17,6 +17,8 @@ class AgentToolContext:
 
     session_id: int
     task_id: int
+    assistant_message_id: int = 0
+    tool_call_id: str = ""
 
 
 @dataclass(frozen=True)

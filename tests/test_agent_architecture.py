@@ -98,7 +98,7 @@ def test_agent_tables_are_protected_history_not_growth():
         assert table in HISTORY_TABLES
         assert table not in GROWTH_TABLES
         assert table in FINGERPRINT_COLUMNS
-    assert FINGERPRINT_VERSION == 5
+    assert FINGERPRINT_VERSION == 6
 
 
 def test_agent_trace_and_eval_are_separate_pure_observability_modules():
@@ -122,6 +122,7 @@ def test_agent_trace_and_eval_are_separate_pure_observability_modules():
     assert find_spec("app.agent.memory") is not None
     assert find_spec("app.agent.trace") is not None
     assert find_spec("app.agent.eval") is not None
+    assert find_spec("app.agent.approval") is not None
 
     package_path = Path(skills_package.__file__).parent
     sources = "\\n".join(p.read_text(encoding="utf-8") for p in package_path.glob("*.py"))
@@ -207,12 +208,30 @@ def test_learning_tool_handlers_depend_on_services_not_database():
         assert "conn" not in inspect.signature(tool_type.__init__).parameters
 
 
-def test_agent8_schema_is_v23_and_fingerprint_remains_v5():
+def test_approval_domain_keeps_request_tool_separate_from_canonical_executor():
+    from app.agent.approval.tools import RequestCompleteCurrentTaskTool
+    from app.agent.approval.provider import AgentApprovalProvider
+    from app.agent.approval.service import AgentApprovalService
+    from app.agent.mcp.tools import MCPAgentTool
+    from app.agent.sandbox.tools import sandbox_tools_for_task
+
+    request_source = inspect.getsource(RequestCompleteCurrentTaskTool)
+    provider_source = inspect.getsource(AgentApprovalProvider)
+    assert "complete_task(" not in request_source
+    assert "complete_task(" not in provider_source
+    assert "request_complete_current_task" in request_source
+    assert "TaskService.complete_task" not in provider_source
+    assert "complete_task(" in inspect.getsource(AgentApprovalService.approve_and_execute)
+    assert "approval" not in inspect.getsource(MCPAgentTool)
+    assert "approval" not in inspect.getsource(sandbox_tools_for_task)
+
+
+def test_agent9_schema_v24_and_fingerprint_v6():
     from app.database.schema import SCHEMA_VERSION
     from app.diagnostics.release_migration import FINGERPRINT_VERSION
 
-    assert SCHEMA_VERSION == 23
-    assert FINGERPRINT_VERSION == 5
+    assert SCHEMA_VERSION == 24
+    assert FINGERPRINT_VERSION == 6
 
 
 def test_vertical_slice_task_to_runtime(conn, repo):

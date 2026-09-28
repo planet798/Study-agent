@@ -1156,6 +1156,8 @@ def build_agent_runtime(
     """
     import logging
 
+    from app.agent.approval.provider import AgentApprovalProvider
+    from app.agent.approval.service import AgentApprovalService
     from app.agent.context import AgentTaskContextBuilder
     from app.agent.eval.evaluator import AgentTurnEvaluator
     from app.agent.memory.compactor import AgentMemoryCompactor
@@ -1173,6 +1175,7 @@ def build_agent_runtime(
     from app.ai.agent_client import AdaptiveAgentModelClient
     from app.ai.client import AdaptiveAIClient
     from app.ai.config_service import AIConfigService
+    from app.database.agent_approval_repository import AgentApprovalRepository
     from app.database.agent_evaluation_repository import AgentEvaluationRepository
     from app.database.agent_memory_repository import AgentMemoryRepository
     from app.database.agent_repository import AgentRepository
@@ -1270,7 +1273,29 @@ def build_agent_runtime(
         sandbox_provider=sandbox_provider,
         memory_compactor=memory_compactor,
         trace_service=trace_service,
+        approval_provider=AgentApprovalProvider(AgentApprovalService(
+            AgentApprovalRepository(fresh_conn), task_service,
+        )),
     )
+
+
+def build_agent_approval_executor(conn):
+    """Worker-owned canonical completion wiring, matching the normal Today action."""
+    from app.agent.approval.service import AgentApprovalService
+    from app.database.agent_approval_repository import AgentApprovalRepository
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.database.repository import TaskRepository
+    from app.database.skill_repository import LearningOutcomeRepository
+    from app.services.capability_service import CapabilityService
+    from app.services.learning_outcome_service import LearningOutcomeService
+    from app.services.task_service import TaskService
+
+    capability = CapabilityService(conn, CapabilityEvidenceRepository(conn))
+    outcome = LearningOutcomeService(LearningOutcomeRepository(conn))
+    outcome.capability_service = capability
+    task_service = TaskService(TaskRepository(conn), outcome_service=outcome,
+                               capability_service=capability)
+    return AgentApprovalService(AgentApprovalRepository(conn), task_service)
 
 
 def main() -> int:
@@ -1353,6 +1378,12 @@ def main() -> int:
         AgentRepository(conn), task_service
     )
     agent_db_path = str(resolve_db_path())
+    from app.agent.approval.service import AgentApprovalService
+    from app.database.agent_approval_repository import AgentApprovalRepository
+    agent_approval_service = AgentApprovalService(AgentApprovalRepository(conn), task_service)
+
+    def agent_approval_service_factory(fresh_conn):
+        return build_agent_approval_executor(fresh_conn)
 
     def agent_runtime_factory(fresh_conn):
         return build_agent_runtime(fresh_conn, db_path=agent_db_path)
@@ -1750,6 +1781,8 @@ def main() -> int:
         practice_service=practice_service,
         agent_session_service=agent_session_service,
         agent_runtime_factory=agent_runtime_factory,
+        agent_approval_service=agent_approval_service,
+        agent_approval_service_factory=agent_approval_service_factory,
         practice_capability_service=practice_capability_service,
         practice_readiness_service=practice_readiness_service,
     )

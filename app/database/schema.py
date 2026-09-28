@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1498,6 +1498,49 @@ def _migrate_v23(conn: sqlite3.Connection) -> None:
 _MIGRATIONS[23] = _migrate_v23
 
 
+_V24_SQL = """
+CREATE TABLE IF NOT EXISTS agent_approval_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES agent_sessions(id),
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    assistant_message_id INTEGER NOT NULL REFERENCES agent_messages(id),
+    tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected','executed','failed')),
+    requested_at TEXT NOT NULL,
+    decided_at TEXT,
+    executed_at TEXT,
+    failure_code TEXT NOT NULL DEFAULT '',
+    UNIQUE(session_id, tool_call_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_approval_one_pending_action
+    ON agent_approval_requests(session_id, tool_name) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_agent_approval_session
+    ON agent_approval_requests(session_id, status, id);
+CREATE TABLE IF NOT EXISTS agent_approval_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    approval_id INTEGER NOT NULL REFERENCES agent_approval_requests(id),
+    event_type TEXT NOT NULL
+        CHECK(event_type IN ('requested','approved','rejected','executed','failed')),
+    actor TEXT NOT NULL CHECK(actor IN ('agent','user','system')),
+    code TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_approval_events_request
+    ON agent_approval_events(approval_id, id);
+"""
+
+
+def _migrate_v24(conn: sqlite3.Connection) -> None:
+    """User-authorized application actions with append-only decision events."""
+    conn.executescript(_V24_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[24] = _migrate_v24
+
+
 def get_schema_version(conn) -> int:
     """读取当前数据库结构版本（PRAGMA user_version）。"""
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1571,7 +1614,7 @@ def migrate_stepwise(conn, target: int | None = None, on_step=None) -> int:
 # ============================================================
 #
 # 背景：普通测试每次都会新建一个空库。若走 `migrate()`，会在空库上
-# 逐级重放 v2..v23（共 22 步，每步都 commit/fsync），实测约 280ms，
+# 逐级重放 v2..v24（共 23 步，每步都 commit/fsync），实测约 280ms，
 # 而其中真正 CPU 只有十几毫秒。
 #
 # `initialize_fresh_database()` 用「当前 schema 快照」一次性建好 vN 结构，

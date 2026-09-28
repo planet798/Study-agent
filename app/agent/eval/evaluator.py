@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-EVALUATOR_VERSION = 1
+EVALUATOR_VERSION = 2
 
 
 class AgentTurnEvaluator:
@@ -67,7 +67,7 @@ class AgentTurnEvaluator:
         )
         event_tool_kinds = {
             kind: sum(1 for _, data in tool_pairs if data.get("tool_kind") == kind)
-            for kind in ("native", "mcp", "sandbox")
+            for kind in ("native", "mcp", "sandbox", "approval")
         }
         memory_prepare = next(
             (data for event, data in zip(events, details)
@@ -154,6 +154,7 @@ class AgentTurnEvaluator:
             "native_tool_calls": event_tool_kinds["native"],
             "mcp_tool_calls": event_tool_kinds["mcp"],
             "sandbox_tool_calls": event_tool_kinds["sandbox"],
+            "approval_tool_calls": event_tool_kinds["approval"],
         }
         return {
             "evaluator_version": self.version,

@@ -16,7 +16,7 @@ _ALLOWED_ERROR_CODES = {
     "memory_error", "unexpected_error", "tool_error", "tool_execution_error",
     "invalid_tool_arguments", "tool_not_found", "invalid_arguments",
     "tool_execution_failed", "sandbox_tool_failed", "sandbox_execution_unavailable",
-    "mcp_tool_failed", "mcp_result_too_large",
+    "mcp_tool_failed", "mcp_result_too_large", "task_not_active", "approval_request_failed",
 }
 _MODEL_SUCCESS_FIELDS = {
     "purpose", "model", "finish_reason", "request_message_count", "request_chars",
@@ -297,7 +297,7 @@ class AgentTraceRepository:
                 if not isinstance(value, str) or value not in {"agent", "memory_summary"}:
                     raise ValueError("trace purpose is invalid")
             elif key == "tool_kind":
-                if not isinstance(value, str) or value not in {"native", "mcp", "sandbox"}:
+                if not isinstance(value, str) or value not in {"native", "mcp", "sandbox", "approval"}:
                     raise ValueError("trace tool_kind is invalid")
             elif key == "error_code":
                 if not isinstance(value, str) or value not in _ALLOWED_ERROR_CODES:

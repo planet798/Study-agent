@@ -58,13 +58,14 @@ def test_clean_success_passes_without_numeric_quality_score():
     events = [_model()]
     result = AgentTurnEvaluator().evaluate(_trace(events), events)
 
-    assert result["evaluator_version"] == EVALUATOR_VERSION == 1
+    assert result["evaluator_version"] == EVALUATOR_VERSION == 2
     assert result["status"] == "pass"
     assert all(result["checks"][key] for key in (
         "turn_succeeded", "final_assistant_persisted", "event_counts_consistent",
         "tool_protocol_complete", "tool_round_limit_respected", "model_usage_complete",
     ))
     assert "score" not in result["metrics"]
+    assert result["metrics"]["approval_tool_calls"] == 0
 
 
 def test_missing_usage_and_controlled_tool_error_warn_not_fail():

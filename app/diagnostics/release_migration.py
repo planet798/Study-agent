@@ -37,6 +37,8 @@ HISTORY_TABLES = (
     # v21+ Agent conversation 是正式用户历史数据，必须保留且不可篡改。
     "agent_sessions",
     "agent_messages",
+    "agent_approval_requests",
+    "agent_approval_events",
 )
 
 # 允许增加的 canonical / 派生表
@@ -119,7 +121,8 @@ def inventory(conn: sqlite3.Connection) -> dict:
             "practice_projects", "practice_topic_evidence",
             "practice_topic_requirements", "agent_sessions", "agent_messages",
             "agent_session_memory", "agent_turn_traces", "agent_trace_events",
-            "agent_turn_evaluations",
+            "agent_turn_evaluations", "agent_approval_requests",
+            "agent_approval_events",
         )},
     }
     data["tasks_done"] = _scalar(
@@ -219,6 +222,13 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
         "id", "session_id", "role", "content", "tool_call_id", "tool_name",
         "tool_calls_json", "metadata_json", "created_at",
     ),
+    "agent_approval_requests": (
+        "id", "session_id", "task_id", "assistant_message_id",
+        "tool_call_id", "tool_name", "requested_at",
+    ),
+    "agent_approval_events": (
+        "id", "approval_id", "event_type", "actor", "code", "created_at",
+    ),
 }
 # 说明：以下 **migration-owned** 字段有意不入 tasks fingerprint：
 #   - route_id：v15 canonical MOVE 会合法更新 topic 所属 route；
@@ -232,9 +242,10 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
 # v3：每表额外保存 per-row（id -> immutable fields hash），支持“历史子集”校验：
 #     迁移前已有行必须保留且不可被非法修改，迁移后允许正常新增新行。
 # v5：protect immutable Agent Session/Message history；Session lifecycle 可变字段不入指纹。
-# v1–v4 旧 snapshot 仍可读；旧 snapshot 缺少新表/字段时只比较其已有 fingerprints，
+# v6：protect immutable approval request identity and append-only user authorization events.
+# v1–v5 旧 snapshot 仍可读；旧 snapshot 缺少新表/字段时只比较其已有 fingerprints，
 #     不要求 fingerprint_version_match=True 才成功。
-FINGERPRINT_VERSION = 5
+FINGERPRINT_VERSION = 6
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -653,7 +664,12 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
     after = inventory(conn)
     integrity = integrity_check(conn)
     fk_problems = foreign_key_check(conn)
+    approval_problems = []
+    if _table_exists(conn, "agent_approval_requests"):
+        from app.database.agent_approval_repository import AgentApprovalRepository
+        approval_problems = AgentApprovalRepository(conn).consistency_problems()
     result = {
+        "approval_consistency_problems": approval_problems,
         "schema_version": after["schema_version"],
         "integrity_check": integrity,
         "foreign_key_problems": fk_problems,
@@ -776,6 +792,7 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
         and not result["route_problems"]
         and not result["evidence_problems"]
         and not result["component_problems"]
+        and not approval_problems
         and not result["history_decreases"]
         and not result["history_fingerprint_changes"]
         and not result["history_id_changes"]

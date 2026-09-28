@@ -195,16 +195,18 @@ class AgentTraceCollector:
         duration_ms: int,
         *,
         execution_error: bool = False,
+        tool_kind: str | None = None,
     ) -> None:
         safe_name = name if isinstance(name, str) and _IDENTIFIER_RE.fullmatch(name) else "other_tool"
+        kind = tool_kind if tool_kind in ("native", "mcp", "sandbox", "approval") else classify_tool_kind(safe_name)
         if execution_error:
-            details = {"tool_kind": classify_tool_kind(safe_name), "ok": False,
+            details = {"tool_kind": kind, "ok": False,
                        "error_code": "tool_execution_error"}
             self._record_safely("tool", safe_name, "error", duration_ms, details)
             return
         ok = isinstance(envelope, dict) and type(envelope.get("ok")) is bool
         succeeded = bool(ok and envelope["ok"])
-        details = {"tool_kind": classify_tool_kind(safe_name), "ok": succeeded}
+        details = {"tool_kind": kind, "ok": succeeded}
         if not succeeded:
             error = envelope.get("error") if isinstance(envelope, dict) else None
             code = error.get("code") if isinstance(error, dict) else "tool_error"
@@ -385,7 +387,7 @@ class AgentTraceCollector:
                     raise ValueError("invalid trace model purpose")
                 clean[key] = value
             elif key == "tool_kind":
-                if not isinstance(value, str) or value not in {"native", "mcp", "sandbox"}:
+                if not isinstance(value, str) or value not in {"native", "mcp", "sandbox", "approval"}:
                     raise ValueError("invalid trace tool kind")
                 clean[key] = value
             elif key == "error_code":
@@ -428,7 +430,7 @@ def _safe_error_code(value: Any, fallback: str) -> str:
     if isinstance(value, str) and value in TRACE_ERROR_CODES | {
         "tool_error", "tool_execution_error", "invalid_tool_arguments",
         "tool_not_found", "sandbox_tool_failed", "sandbox_execution_unavailable",
-        "mcp_tool_failed", "mcp_result_too_large", "",
+        "mcp_tool_failed", "mcp_result_too_large", "task_not_active", "approval_request_failed", "",
     }:
         return value
     return fallback

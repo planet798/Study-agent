@@ -42,7 +42,7 @@ Every `AgentModelClient.complete()` call is observed, including Memory summariza
 
 ### Tool and external-scope events
 
-A completed Tool execution has one event, regardless of whether its controlled envelope is successful. `tool_call_count` counts executions; a multi-call model response contributes one `tool_round` and one call count per Tool. Names beginning `sandbox_` classify as Sandbox; `mcp_` as MCP; other registered tools as Native. A controlled error stores only its code and yields a `warn` evaluation when the turn otherwise succeeds.
+A completed Tool execution has one event, regardless of whether its controlled envelope is successful. The local `mutation_scope=approval` request Tool is classified `approval`, not Native; its event never records approval ID or user decision. `tool_call_count` counts executions; a multi-call model response contributes one `tool_round` and one call count per Tool. Names beginning `sandbox_` classify as Sandbox; `mcp_` as MCP; other registered tools as Native. A controlled error stores only its code and yields a `warn` evaluation when the turn otherwise succeeds.
 
 ## Runtime lifecycle and fail-open behavior
 
@@ -63,8 +63,8 @@ Trace insertion and Evaluation are best-effort. If collector creation, trace per
 
 Overall status is `fail` for failed turns or a core invariant mismatch; `warn` when core invariants hold but a controlled Tool error occurred or usage is incomplete; otherwise `pass`. Missing provider usage is not an Agent failure. Metrics are bounded structural counts, durations, memory flags and tokens; there is no numeric score.
 
-There is no LLM-as-a-Judge, quality score, teaching score, mastery inference, automatic retry, prompt optimization, Skill/Registry mutation, or Trace-to-Mastery/Capability flow. Future write Tools and approvals are a separate Agent-9 design.
+There is no LLM-as-a-Judge, quality score, teaching score, mastery inference, automatic retry, prompt optimization, Skill/Registry mutation, or Trace-to-Mastery/Capability flow. The single approval-gated Task completion request is described in `docs/AGENT_APPROVALS.md`; other write actions require separate design.
 
 ## Versions and UI
 
-`SCHEMA_VERSION = 23`, `FINGERPRINT_VERSION = 5`, `EVALUATOR_VERSION = 1`. The v23 migration adds the three telemetry tables without changing v21/v22 history or their migrations. Production constructs repositories/service from the `AgentTurnWorker`-owned connection. No Trace Viewer, token dashboard, Evaluation UI, or Sidebar page is added.
+Trace/Evaluation tables were introduced in v23. Current versions: `SCHEMA_VERSION = 24`, `FINGERPRINT_VERSION = 6`, `EVALUATOR_VERSION = 2`. Evaluation v2 adds `approval_tool_calls` for the local request-only approval Tool; v1 evaluation rows remain unchanged. Approval execution and user decisions are recorded in separate append-only authorization events, never by rewriting a completed Trace. Production constructs repositories/service from the `AgentTurnWorker`-owned connection. No Trace Viewer, token dashboard, Evaluation UI, or Sidebar page is added.

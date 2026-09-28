@@ -69,6 +69,30 @@ def test_registry_rejects_non_read_only_tool():
         registry.register(EchoTool(read_only=False))
 
 
+def test_approval_and_sandbox_scopes_are_explicit_and_isolated():
+    class Mutation(EchoTool):
+        def __init__(self, name, scope):
+            super().__init__(name=name)
+            self._spec = AgentToolSpec(name, "request", EMPTY_OBJECT_SCHEMA,
+                                       read_only=False, mutation_scope=scope)
+
+    approval = Mutation("request_complete_current_task", "approval")
+    sandbox = Mutation("sandbox_write_file", "sandbox")
+    for scopes, tool in (((), approval), (("sandbox",), approval),
+                         (("approval",), sandbox)):
+        with pytest.raises(ValueError, match="scope"):
+            AgentToolRegistry(allowed_mutation_scopes=scopes).register(tool)
+    only_approval = AgentToolRegistry(allowed_mutation_scopes=("approval",))
+    only_approval.register(approval)
+    combined = AgentToolRegistry(allowed_mutation_scopes=("approval", "sandbox"))
+    combined.register(approval)
+    combined.register(sandbox)
+    assert combined.names() == ("request_complete_current_task", "sandbox_write_file")
+    for scope in ("application", "database", "task", "mastery", "capability", "mcp_write"):
+        with pytest.raises(ValueError, match="only sandbox and approval"):
+            AgentToolRegistry(allowed_mutation_scopes=(scope,))
+
+
 def test_unknown_tool_is_controlled_error_envelope():
     result = AgentToolRegistry().execute(
         "missing", AgentToolContext(session_id=1, task_id=3), {}

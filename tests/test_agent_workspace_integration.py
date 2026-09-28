@@ -256,6 +256,8 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
     assert isinstance(runtime.skill_selector, AgentSkillSelector)
     assert runtime.mcp_provider is None  # explicit empty config keeps Agent-4 behavior
     assert runtime.sandbox_provider is None
+    assert runtime.approval_provider.service.repository.conn is conn
+    assert runtime.approval_provider.service.task_service.repo.conn is conn
     assert runtime.session_service.repo.conn is conn
     registry = runtime.tool_registry
     assert registry.get("get_task_context").task_service.repo.conn is conn

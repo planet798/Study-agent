@@ -32,9 +32,9 @@ Daily Review / Review Scheduler / Daily Retention / generated review tasks; Mont
 
 ## Legacy DB and migration compatibility
 
-`SCHEMA_VERSION = 23`; `FINGERPRINT_VERSION = 5` (v5 protects immutable Agent Session/Message history; Session Memory and Trace/Evaluation are derived growth-only telemetry). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
+`SCHEMA_VERSION = 24`; `FINGERPRINT_VERSION = 6` (v6 also protects Approval request identity and immutable user authorization events; Session Memory and Trace/Evaluation remain derived growth-only telemetry). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
 
-## Agent core — Agent-1 through Agent-8 implemented
+## Agent core — Agent-1 through Agent-9 implemented
 
 Planner decides **WHAT** to learn. Agent Runtime helps the user actually learn that task:
 
@@ -54,10 +54,11 @@ Implemented:
 - **Agent-5**: optional official-SDK MCP Tools for operator-configured external servers, gated by exact local allowlist plus `readOnlyHint=True`; transport/client lifecycle is per worker turn and no external integration can mutate Study-Agent state.
 - **Agent-6**: Task-ID-scoped bounded file workspace and optional Docker-only execution. Sandbox mutations are limited to that workspace; application state and Native/MCP permissions remain read-only.
 - **Agent-7**: Session-scoped rolling conversation summary plus recent complete turns. Original `agent_messages` remain append-only and the UI continues to display full history. Summary is derived, untrusted continuity data; it cannot update learning evidence or application state.
-- **Agent-8**: Content-free per-turn Trace/events and deterministic protocol Evaluation (`pass` / `warn` / `fail`). Trace never duplicates conversation/tool payloads; Evaluation uses no LLM and does not assess answer quality or learning outcomes. Trace/Evaluation failures are fail-open and never affect Task/Mastery/Capability/Practice.
+- **Agent-8**: Content-free per-turn Trace/events and deterministic protocol Evaluation (`pass` / `warn` / `fail`). Trace never duplicates conversation/tool payloads; Evaluation uses no LLM and does not assess answer quality or learning outcomes. Trace/Evaluation failures are fail-open.
+- **Agent-9**: One local approval-request Tool for Task completion; it only creates pending metadata. Explicit per-request Workspace approval runs canonical `TaskService.complete_task()` in a worker-owned connection; rejection does not mutate Task. Append-only authorization events are protected history. No natural-language approval or auto-resume.
 
 NOT IMPLEMENTED:
 
-- write tools / approvals / mutation policy
+- Assessment/learning-note approval actions or other application writes
 
 Agent Tools must call **existing Service → Repository → SQLite**, never Repository or raw SQLite directly. Agent may neither set Mastery nor Capability directly: **Assessment → Mastery** and **Evidence → Capability**. `AgentSkill` / `AgentSkillRegistry` in `app/agent/skills/` are static learning-behavior strategies; current `SkillService` and `skills` table describe career/technical skills and must not be repurposed. See `docs/AGENT_ARCHITECTURE.md`.

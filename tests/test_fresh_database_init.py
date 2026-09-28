@@ -199,8 +199,8 @@ def test_legacy_v14_to_v20_still_runs_every_step(tmp_path):
 
 
 def test_migration_registry_covers_every_version():
-    # v21+ conversation, v22 memory, and v23 Trace/Evaluation migrations exist.
-    assert SCHEMA_VERSION >= 23
+    # v21 conversation, v22 memory, v23 Trace, v24 Approval migrations exist.
+    assert SCHEMA_VERSION >= 24
     assert sorted(schema_mod._MIGRATIONS) == list(range(2, SCHEMA_VERSION + 1))
 
 

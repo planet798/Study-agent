@@ -28,8 +28,8 @@ class AgentToolRegistry:
 
     def __init__(self, allowed_mutation_scopes: tuple[str, ...] = ()):
         scopes = tuple(allowed_mutation_scopes)
-        if any(scope != "sandbox" for scope in scopes):
-            raise ValueError("only the sandbox mutation scope is supported")
+        if any(scope not in ("sandbox", "approval") for scope in scopes):
+            raise ValueError("only sandbox and approval mutation scopes are supported")
         if len(set(scopes)) != len(scopes):
             raise ValueError("duplicate mutation scope")
         self._allowed_mutation_scopes = frozenset(scopes)
