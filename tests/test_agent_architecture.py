@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 import sqlite3
+from pathlib import Path
 
 from app.agent.runtime import AgentRuntime
 from app.agent.session import AgentSessionService
@@ -206,6 +208,23 @@ def test_learning_tool_handlers_depend_on_services_not_database():
         assert "SELECT " not in source.upper()
         assert "Repository" not in source
         assert "conn" not in inspect.signature(tool_type.__init__).parameters
+
+
+def test_approval_ui_does_not_import_repository_or_follow_service_repository():
+    ui_dir = Path(__file__).resolve().parents[1] / "app" / "ui"
+    for path in ui_dir.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "app.database.agent_approval_repository", path
+                assert all(alias.name != "AgentApprovalRepository" for alias in node.names), path
+            if isinstance(node, ast.Import):
+                assert all("agent_approval_repository" not in alias.name for alias in node.names), path
+            if isinstance(node, ast.Attribute) and node.attr == "repository":
+                assert not (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "agent_approval_service"
+                ), path
 
 
 def test_approval_domain_keeps_request_tool_separate_from_canonical_executor():

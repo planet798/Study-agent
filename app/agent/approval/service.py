@@ -32,6 +32,15 @@ class AgentApprovalService:
     def list_pending_for_session(self, session_id: int) -> list[dict]:
         return self.repository.list_pending_for_session(session_id)
 
+    def get_pending_for_session(self, approval_id: int, session_id: int) -> dict | None:
+        """Return only a recognized pending action owned by this Session."""
+        row = self.repository.get(int(approval_id))
+        if (row is None or row["status"] != "pending"
+                or row["session_id"] != int(session_id)
+                or row["tool_name"] != ACTION):
+            return None
+        return row
+
     def reject(self, approval_id: int) -> dict:
         row = self.repository.get(approval_id)
         if row is None or row["tool_name"] != ACTION or row["status"] != "pending":

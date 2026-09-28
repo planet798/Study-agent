@@ -488,10 +488,9 @@ class MainWindow(QMainWindow):
         page = self.agent_workspace_page
         if page is None or self.agent_approval_service is None:
             return None
-        row = self.agent_approval_service.repository.get(int(approval_id))
-        if row is None or row["status"] != "pending" or row["session_id"] != page.current_session_id:
-            return None
-        return row
+        return self.agent_approval_service.get_pending_for_session(
+            int(approval_id), page.current_session_id,
+        )
 
     def _on_agent_approval_reject(self, approval_id: int) -> None:
         if approval_id in self._approval_inflight:

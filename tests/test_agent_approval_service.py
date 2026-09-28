@@ -22,6 +22,24 @@ def request(task, session, call, approval):
     return approval.request_complete_current_task(session["id"], task.id, call["id"], "c1")
 
 
+def test_get_pending_for_session_enforces_ownership_status_and_known_action(conn):
+    _service, task, session, call, approval = setup(conn)
+    pending = request(task, session, call, approval)
+    approval_id = pending["approval_id"]
+    assert approval.get_pending_for_session(approval_id, session["id"])["id"] == approval_id
+    assert approval.get_pending_for_session(approval_id, session["id"] + 1) is None
+    assert approval.get_pending_for_session(approval_id + 1000, session["id"]) is None
+    approval.reject(approval_id)
+    assert approval.get_pending_for_session(approval_id, session["id"]) is None
+
+    _service2, task2, session2, call2, approval2 = setup(conn)
+    other = request(task2, session2, call2, approval2)
+    conn.execute("UPDATE agent_approval_requests SET tool_name='unknown_action' WHERE id=?",
+                 (other["approval_id"],))
+    conn.commit()
+    assert approval2.get_pending_for_session(other["approval_id"], session2["id"]) is None
+
+
 def test_request_reject_and_replay(conn):
     service, task, session, call, approval = setup(conn)
     pending = request(task, session, call, approval)
