@@ -142,3 +142,32 @@ def test_agent_conversation_selectors_present_in_both_themes():
             "QScrollArea#AgentConversationScroll",
         ):
             assert selector in rendered, (theme, selector)
+
+
+def test_rendered_qss_has_no_duplicated_units():
+    """Unit-bearing tokens must not be suffixed with a second unit."""
+    for theme in ("light", "dark"):
+        rendered = render_theme(theme)
+        assert "pxpx" not in rendered
+        assert re.search(r"\d+pxpx", rendered) is None
+        for value in re.findall(r"font-size:\s*([^;]+);", rendered):
+            assert re.fullmatch(r"\d+(?:\.\d+)?px", value.strip()), (theme, value)
+        for value in re.findall(r"border-radius:\s*([^;]+);", rendered):
+            assert re.fullmatch(r"\d+(?:\.\d+)?px", value.strip()), (theme, value)
+
+
+def test_agent_message_speaker_renders_valid_font_size():
+    """The speaker label must keep a single-unit, token-derived font size."""
+    for theme in ("light", "dark"):
+        rendered = render_theme(theme)
+        match = re.search(r"QLabel#AgentMessageSpeaker\s*\{([^}]*)\}", rendered)
+        assert match is not None, theme
+        block = match.group(1)
+        font_size = re.search(r"font-size:\s*([^;]+);", block)
+        assert font_size is not None, block
+        value = font_size.group(1).strip()
+        assert re.fullmatch(r"\d+(?:\.\d+)?px", value), value
+        assert value == tokens.render_map(theme)["font_size_caption"]
+        # Speaker stays smaller than body text.
+        body_value = tokens.render_map(theme)["font_size_body"]
+        assert int(value[:-2]) < int(body_value[:-2])

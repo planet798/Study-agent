@@ -709,7 +709,7 @@ QFrame#AgentMessageBubble[role="user"] {
 }
 QLabel#AgentMessageSpeaker {
     color: {{text_secondary}};
-    font-size: {{font_size_caption}}px;
+    font-size: {{font_size_caption}};
     font-weight: 600;
 }
 QTextBrowser#AgentUserMessageText {
