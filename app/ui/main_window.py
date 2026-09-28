@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
         if self.agent_approval_service is None:
             return ()
         try:
-            return self.agent_approval_service.list_pending_for_session(session_id)
+            return self.agent_approval_service.list_pending_views_for_session(session_id)
         except Exception:
             return ()
 
@@ -505,7 +505,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("拒绝操作暂未完成，请重试。", 4000)
 
     def _on_agent_approval_approve(self, approval_id: int) -> None:
-        if approval_id in self._approval_inflight or self.agent_approval_service_factory is None:
+        if self._approval_inflight or self.agent_approval_service_factory is None:
             return
         try:
             row = self._approval_for_current_session(approval_id)
@@ -536,7 +536,21 @@ class MainWindow(QMainWindow):
             self.agent_workspace_page.set_approval_busy(approval_id, False)
         self.refresh(preserve_scroll=True)
         self._reload_agent_session(session_id)
-        self.statusBar().showMessage(error or "任务已按你的批准标记为完成", 4000)
+        if error:
+            self.statusBar().showMessage(error, 4000)
+        elif result is not None:
+            action = result.get("action", "complete_current_task")
+            if action == "start_assessment":
+                if (self.agent_workspace_page is not None
+                        and self.stack.currentWidget() is self.agent_workspace_page
+                        and self.agent_workspace_page.current_session_id == session_id):
+                    self._open_assessment_dialog(result["result"]["attempt"])
+                else:
+                    self.statusBar().showMessage("验收已准备好，可从今日继续。", 4000)
+            elif action == "save_learning_note":
+                self.statusBar().showMessage("学习笔记已保存", 4000)
+            else:
+                self.statusBar().showMessage("任务已按你的批准标记为完成", 4000)
 
     def _on_agent_send(self, session_id: int, user_text: str) -> None:
         """Dispatch a turn to a worker that owns a fresh thread-local connection."""

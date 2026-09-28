@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from ..tools.registry import AgentToolRegistry
 from .service import AgentApprovalService
-from .tools import RequestCompleteCurrentTaskTool
+from .tools import (RequestCompleteCurrentTaskTool, RequestStartAssessmentTool,
+                    RequestSaveLearningNoteTool)
 
 
 class AgentApprovalProvider:
@@ -18,4 +19,6 @@ class AgentApprovalProvider:
             for tool in base_registry.registered_tools():
                 registry.register(tool)
         registry.register(RequestCompleteCurrentTaskTool(self.service))
+        registry.register(RequestStartAssessmentTool(self.service))
+        registry.register(RequestSaveLearningNoteTool(self.service))
         return registry

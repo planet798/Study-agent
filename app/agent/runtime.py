@@ -149,10 +149,13 @@ class AgentRuntime:
             content += "\n\n本轮未提供 Sandbox 工具；不得声称访问文件系统或执行代码/命令。"
         if effective_registry is not None and "request_complete_current_task" in effective_registry.names():
             content += (
-                "\n\nrequest_complete_current_task 只请求用户批准完成当前任务，不会直接完成任务。"
-                "只有用户在 Study-Agent Workspace 明确点击批准后，应用才调用 TaskService 完成任务。"
-                "收到 approval_required 时不得声称任务已经完成；应告诉用户正在等待批准，"
-                "不得绕过批准。Sandbox 写入/运行只影响 Task workspace，不等于应用任务完成。"
+                "\n\nrequest_complete_current_task、request_start_assessment、"
+                "request_save_learning_note 都只创建 Pending Approval，不会直接完成任务。只有用户在 Study-Agent "
+                "Workspace 明确点击批准后才会执行应用写操作。收到 approval_required 不得声称"
+                "任务完成、验收通过或笔记已保存；须告诉用户等待批准，不得绕过批准。"
+                "开始验收不等于通过验收；只有用户亲自提交答案并判题后才能更新 Mastery。"
+                "学习笔记只创建 note outcome，不代表掌握或任务完成。"
+                "Sandbox 写入/运行只影响 Task workspace，不等于应用任务完成或学习笔记保存。"
             )
         if mcp_enabled:
             content += (

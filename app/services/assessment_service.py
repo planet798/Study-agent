@@ -83,6 +83,10 @@ class AssessmentService:
             raise RuntimeError("AssessmentService 未注入 assessment_repo")
         return self.assessment_repo
 
+    def get_pending_attempt_for_task(self, task_id: int) -> dict | None:
+        """Read-only facade for resuming an existing formal Assessment."""
+        return self._require_repo().find_pending_attempt_for_task(int(task_id))
+
     def get_knowledge_point(self, knowledge_point_id: int) -> dict | None:
         """只读查询一个 Knowledge Point，供学习上下文使用。
 

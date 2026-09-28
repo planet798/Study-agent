@@ -17,6 +17,7 @@ _ALLOWED_ERROR_CODES = {
     "invalid_tool_arguments", "tool_not_found", "invalid_arguments",
     "tool_execution_failed", "sandbox_tool_failed", "sandbox_execution_unavailable",
     "mcp_tool_failed", "mcp_result_too_large", "task_not_active", "approval_request_failed",
+    "assessment_not_available", "invalid_note", "approval_action_already_pending",
 }
 _MODEL_SUCCESS_FIELDS = {
     "purpose", "model", "finish_reason", "request_message_count", "request_chars",

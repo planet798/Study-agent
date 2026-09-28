@@ -201,9 +201,13 @@ User approval click → Approval Worker → canonical TaskService → applicatio
 
 Native/MCP remain read-only; Sandbox mutation is task-workspace scoped. Only the local `request_complete_current_task` approval Tool (`mutation_scope="approval"`) may create pending authorization metadata. A persisted assistant tool-call ID binds each request, and its pending Tool result never implies the Task has been completed. Workspace button clicks alone reject or dispatch canonical `TaskService.complete_task()` in a fresh-connection Approval Worker. No chat-text consent, auto-approval, remembered permissions, second Tool result, automatic model resume, or Session close. v24 Approval Requests and append-only Events are verifier-protected authorization history (fingerprint v6); Trace/Eval remain content-free derived telemetry (evaluator v2 adds approval-tool counts). See `docs/AGENT_APPROVALS.md`.
 
+## Agent-10 — Approved Assessment & Learning Note actions
+
+The Approval Provider now registers three fixed request Tools: Task completion, formal Assessment start/resume, and bounded learning-note save. Each Tool only requests approval. The Repository binds to immutable `agent_messages.tool_calls_json` without copying note payload; Service validators run at request and again at execution. Note previews are plain text via Service views. The worker reuses the configured Assessment service/AI Profile and canonical LearningOutcome service. Assessment approval creates or resumes a pending attempt, never answers questions or changes Mastery; Note approval creates `kind=note` with `task_id=None` and no Git or Capability evidence. No schema/fingerprint/evaluator version bump. See `docs/AGENT_APPROVALS.md`.
+
 ## Still not implemented
 
-- Assessment / learning-note actions or other application mutations
+- Assessment submission Tools, arbitrary note editing, or other application mutations
 
 ## Future roadmap
 
@@ -212,7 +216,8 @@ Native/MCP remain read-only; Sandbox mutation is task-workspace scoped. Only the
 | Agent-7 | Session Memory / context compaction — implemented |
 | Agent-8 | Trace / deterministic Evaluation — implemented |
 | Agent-9 | Explicit approval-gated Task completion request — implemented |
-| Agent-10 | Approved Assessment & Learning Note Actions — next, separately designed |
+| Agent-10 | Approved Assessment & Learning Note Actions — implemented |
+| Agent-11 | Agent UX polish + production hardening — next |
 
 ## Tests
 

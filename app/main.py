@@ -1275,12 +1275,37 @@ def build_agent_runtime(
         trace_service=trace_service,
         approval_provider=AgentApprovalProvider(AgentApprovalService(
             AgentApprovalRepository(fresh_conn), task_service,
+            assessment_service=assessment_service,
         )),
     )
 
 
-def build_agent_approval_executor(conn):
-    """Worker-owned canonical completion wiring, matching the normal Today action."""
+def build_assessment_service_for_connection(conn, db_path=None):
+    """Fresh, worker-owned Assessment dependencies with the existing AI Profile."""
+    from app.ai.client import AdaptiveAIClient
+    from app.ai.config_service import AIConfigService
+    from app.ai.prompt_registry import PromptOverrideRepository, PromptRegistry
+    from app.database.assessment_repository import AssessmentRepository
+    from app.database.capability_repository import CapabilityEvidenceRepository
+    from app.database.skill_repository import LearningOutcomeRepository
+    from app.services.assessment_service import AssessmentService
+    from app.services.capability_service import CapabilityService
+    from app.services.learning_outcome_service import LearningOutcomeService
+
+    path = str(db_path or resolve_db_path())
+    ai_client = AdaptiveAIClient(AIConfigService(db_path=path).get_runtime_config)
+    registry = PromptRegistry(PromptOverrideRepository(conn))
+    capability = CapabilityService(conn, CapabilityEvidenceRepository(conn))
+    outcome = LearningOutcomeService(LearningOutcomeRepository(conn),
+                                     ai_client=ai_client, prompt_registry=registry,
+                                     capability_service=capability)
+    return AssessmentService(ai_client, assessment_repo=AssessmentRepository(conn),
+                             outcome_service=outcome, prompt_registry=registry,
+                             capability_service=capability)
+
+
+def build_agent_approval_executor(conn, db_path=None):
+    """Worker-owned canonical completion, Assessment and Note wiring."""
     from app.agent.approval.service import AgentApprovalService
     from app.database.agent_approval_repository import AgentApprovalRepository
     from app.database.capability_repository import CapabilityEvidenceRepository
@@ -1295,7 +1320,9 @@ def build_agent_approval_executor(conn):
     outcome.capability_service = capability
     task_service = TaskService(TaskRepository(conn), outcome_service=outcome,
                                capability_service=capability)
-    return AgentApprovalService(AgentApprovalRepository(conn), task_service)
+    assessment = build_assessment_service_for_connection(conn, db_path=db_path)
+    return AgentApprovalService(AgentApprovalRepository(conn), task_service,
+                                assessment_service=assessment, outcome_service=outcome)
 
 
 def main() -> int:
@@ -1383,7 +1410,7 @@ def main() -> int:
     agent_approval_service = AgentApprovalService(AgentApprovalRepository(conn), task_service)
 
     def agent_approval_service_factory(fresh_conn):
-        return build_agent_approval_executor(fresh_conn)
+        return build_agent_approval_executor(fresh_conn, db_path=agent_db_path)
 
     def agent_runtime_factory(fresh_conn):
         return build_agent_runtime(fresh_conn, db_path=agent_db_path)
@@ -1678,31 +1705,9 @@ def main() -> int:
         capability_service=capability_service,
     )
 
-    # 验收后台线程专用：为 worker 的“独立连接”构造一套同配置依赖，
-    # 避免把主线程 sqlite 连接传入子线程（SQLite thread affinity）。
+    # Both normal Assessment and approved Assessment use one worker-owned builder.
     def build_assessment_service(fresh_conn):
-        fresh_assessment_repo = AssessmentRepository(fresh_conn)
-        fresh_outcome = LearningOutcomeService(
-            LearningOutcomeRepository(fresh_conn)
-        )
-        fresh_outcome.ai_client = ai_client
-        fresh_outcome.prompt_registry = prompt_registry
-        from app.database.capability_repository import (
-            CapabilityEvidenceRepository,
-        )
-        from app.services.capability_service import CapabilityService
-
-        fresh_capability = CapabilityService(
-            fresh_conn, CapabilityEvidenceRepository(fresh_conn)
-        )
-        fresh_outcome.capability_service = fresh_capability
-        return AssessmentService(
-            ai_client,
-            assessment_repo=fresh_assessment_repo,
-            outcome_service=fresh_outcome,
-            prompt_registry=prompt_registry,
-            capability_service=fresh_capability,
-        )
+        return build_assessment_service_for_connection(fresh_conn, db_path=agent_db_path)
     # Phase A：手动添加今日学习任务（学习活动 / 知识学习）
     from app.services.manual_task_service import ManualTaskService
 

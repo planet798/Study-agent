@@ -17,6 +17,38 @@ def approval_fixture(conn):
     return task, session, call
 
 
+def test_three_actions_bind_json_object_arguments_without_copying_note_body(conn):
+    from app.database.agent_approval_repository import (
+        ACTION_START_ASSESSMENT, ACTION_SAVE_NOTE, SUPPORTED_ACTIONS,
+    )
+    task, session, _call = approval_fixture(conn)
+    agent = AgentRepository(conn)
+    repository = AgentApprovalRepository(conn)
+    assert SUPPORTED_ACTIONS == {ACTION, ACTION_START_ASSESSMENT, ACTION_SAVE_NOTE}
+    for name, call_id, raw in ((ACTION_START_ASSESSMENT, "assess", "{}"),
+                               (ACTION_SAVE_NOTE, "note", '{"title":"PRIVATE_NOTE_TITLE","content":"PRIVATE_NOTE_CONTENT"}')):
+        assistant = agent.add_message(session["id"], "assistant", "",
+            tool_calls_json=json.dumps([{"id":call_id,"name":name,"arguments":raw}]))
+        row, reused = repository.create_request(session["id"], task.id, assistant["id"], call_id, name)
+        assert not reused
+        assert repository.get_bound_tool_call(row["id"]) == {
+            "id":call_id, "name":name, "arguments":raw,
+        }
+    rows = [dict(row) for row in conn.execute("SELECT * FROM agent_approval_requests")]
+    events = [dict(row) for row in conn.execute("SELECT * FROM agent_approval_events")]
+    assert "PRIVATE_NOTE_CONTENT" not in str((rows, events))
+
+    for raw in ("[1]", "bad JSON"):
+        invalid = agent.add_message(session["id"], "assistant", "", tool_calls_json=json.dumps([
+            {"id":"bad", "name":ACTION_SAVE_NOTE, "arguments":raw}]))
+        with pytest.raises(ValueError, match="object|JSON"):
+            repository.create_request(session["id"], task.id, invalid["id"], "bad", ACTION_SAVE_NOTE)
+    forged = agent.add_message(session["id"], "assistant", "", tool_calls_json=json.dumps([
+        {"id":"cross", "name":ACTION_START_ASSESSMENT, "arguments":"{}"}]))
+    with pytest.raises(ValueError, match="binding"):
+        repository.create_request(session["id"], task.id, forged["id"], "cross", ACTION_SAVE_NOTE)
+
+
 def test_request_and_event_are_atomic_and_bound_to_persisted_call(conn):
     task, session, call = approval_fixture(conn)
     repository = AgentApprovalRepository(conn)

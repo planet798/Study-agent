@@ -56,6 +56,42 @@ def test_pending_tool_protocol_trace_and_duplicate_pending(conn):
     assert first.evaluation_status == second.evaluation_status == "pass"
     assert json.loads(AgentEvaluationRepository(conn).get_for_trace(first.trace_id, 2)["metrics_json"])["approval_tool_calls"] == 1
 
+def test_assessment_and_note_requests_only_add_pending_metadata(conn):
+    from app.database.assessment_repository import AssessmentRepository
+    kp = AssessmentRepository(conn).create_knowledge_point("New KP")
+    tasks = TaskService(TaskRepository(conn))
+    task = TaskRepository(conn).create("Knowledge task", scheduled_date="2026-09-15",
+                                      knowledge_point_id=kp["id"])
+    sessions = AgentSessionService(AgentRepository(conn), tasks)
+    session = sessions.start_or_resume(task.id)
+    approval = AgentApprovalService(AgentApprovalRepository(conn), tasks)
+    class Script(AgentModelClient):
+        calls = 0
+        def is_configured(self): return True
+        def complete(self, request):
+            self.calls += 1
+            if self.calls in (1, 3):
+                name, args = (("request_start_assessment", "{}") if self.calls == 1 else
+                    ("request_save_learning_note", json.dumps({"title":"draft", "content":"content"})))
+                return ModelResponse("", (ModelToolCall(f"call{self.calls}", name, args),))
+            return ModelResponse("等待审批")
+    model = Script()
+    runtime = AgentRuntime(sessions, model,
+        approval_provider=AgentApprovalProvider(approval),
+        trace_service=AgentTraceService(AgentTraceRepository(conn), AgentEvaluationRepository(conn)))
+    assessment = runtime.send_message(session["id"], "Request assessment")
+    note = runtime.send_message(session["id"], "Request note")
+    assert len(approval.list_pending_for_session(session["id"])) == 2
+    assert conn.execute("SELECT COUNT(*) FROM assessment_attempts").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM learning_outcomes").fetchone()[0] == 0
+    assert AssessmentRepository(conn).get_knowledge_point(kp["id"])["mastery_estimate"] == 0
+    assert tasks.get_status(task.id) == "active"
+    for result in (assessment, note):
+        assert json.loads(AgentEvaluationRepository(conn).get_for_trace(
+            result.trace_id, 2)["metrics_json"])["approval_tool_calls"] == 1
+    assert "content" not in json.dumps(AgentTraceRepository(conn).list_events(note.trace_id))
+
+
 def test_model_cannot_call_approval_executor(conn):
     task_service = TaskService(TaskRepository(conn))
     task = task_service.create_task("Study", scheduled_date="2026-09-15")
@@ -68,7 +104,10 @@ def test_model_cannot_call_approval_executor(conn):
         def complete(self, request):
             self.calls += 1
             if self.calls == 1:
-                assert [tool["function"]["name"] for tool in request.tools] == ["request_complete_current_task"]
+                assert [tool["function"]["name"] for tool in request.tools] == [
+                    "request_complete_current_task", "request_start_assessment",
+                    "request_save_learning_note",
+                ]
                 return ModelResponse("", (ModelToolCall("bad", "approve_and_execute", "{}"),))
             return ModelResponse("Could not approve")
     runtime = AgentRuntime(sessions, BadModel(), approval_provider=provider)

@@ -44,6 +44,57 @@ def test_failed_worker_execution_never_reports_success(qtbot, conn, repo, task_s
     window.close()
 
 
+def test_three_pending_card_types_plain_text_preview_and_independent_labels(qtbot, conn):
+    task = TaskRepository(conn).create(title="Task", scheduled_date="2026-09-15")
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    rows = [
+        {"id": 3, "status": "pending", "tool_name": "request_save_learning_note",
+         "note_title": "<b>NOTE_PRIVATE_TITLE</b>",
+         "note_preview": "<script>NOTE_PRIVATE_CONTENT</script>"},
+        {"id": 2, "status": "pending", "tool_name": "request_start_assessment"},
+        {"id": 1, "status": "pending", "tool_name": "request_complete_current_task"},
+    ]
+    page.load_session({"id": 1}, [], task, None, True, rows)
+    cards = page.findChildren(QFrame, "AgentApprovalCard")
+    assert [card.property("approval_id") for card in cards] == [1, 2, 3]
+    buttons = [card.findChild(type(page.send_button), "AgentApprovalApprove").text()
+               for card in cards]
+    assert buttons == ["批准", "批准并开始验收", "批准保存"]
+    assessment_text = " ".join(label.text() for label in cards[1].findChildren(QLabel))
+    assert "亲自回答" in assessment_text and "Mastery" in assessment_text
+    preview = cards[2].findChild(QLabel, "AgentApprovalNotePreview")
+    from PySide6.QtCore import Qt
+    assert preview.textFormat() == Qt.TextFormat.PlainText
+    assert "<script>NOTE_PRIVATE_CONTENT</script>" in preview.text()
+    page.set_approval_busy(2, True)
+    assert all(not card.findChild(type(page.send_button), "AgentApprovalApprove").isEnabled()
+               for card in cards)
+    page.set_approval_busy(2, False)
+    assert [card.findChild(type(page.send_button), "AgentApprovalApprove").text()
+            for card in cards] == buttons
+
+
+def test_stale_workspace_does_not_open_assessment_dialog(qtbot, conn, repo, task_service, date_service):
+    from app.agent.session import AgentSessionService
+    from app.database.agent_repository import AgentRepository
+    from tests.test_agent_approval_integration import CompletionModel, build_window
+    task = repo.create(title="Task", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    window, _approval = build_window(conn, task_service, date_service, sessions, CompletionModel())
+    qtbot.addWidget(window)
+    window._on_start_study(task.id)
+    sid = window.agent_workspace_page.current_session_id
+    window._on_agent_back()
+    opened = []
+    window._open_assessment_dialog = opened.append
+    window._on_agent_approval_finished(123, sid,
+        {"status":"executed", "action":"start_assessment", "result":{"attempt":{"id": 1}}}, None)
+    assert opened == []
+    assert "可从今日继续" in window.statusBar().currentMessage()
+    window.close()
+
+
 def test_pending_card_static_buttons_busy_and_chat(qtbot, conn):
     task = TaskRepository(conn).create(title="Task", scheduled_date="2026-09-15")
     page = AgentWorkspacePage()

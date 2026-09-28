@@ -33,6 +33,25 @@ def test_approval_provider_preserves_sandbox_scope_without_enabling_mcp_write(co
     assert base.allowed_mutation_scopes == ("sandbox",)
 
 
+def test_three_request_tools_have_fixed_scopes_and_schemas(conn):
+    from app.agent.approval.tools import (RequestStartAssessmentTool,
+        RequestSaveLearningNoteTool)
+    service = AgentApprovalService(AgentApprovalRepository(conn), TaskService(TaskRepository(conn)))
+    assessment = RequestStartAssessmentTool(service).spec
+    note = RequestSaveLearningNoteTool(service).spec
+    for spec in (assessment, note):
+        assert not spec.read_only and spec.mutation_scope == "approval"
+    assert assessment.parameters == {"type": "object", "properties": {}, "additionalProperties": False}
+    assert note.parameters["required"] == ["title", "content"]
+    assert note.parameters["additionalProperties"] is False
+    assert set(note.parameters["properties"]) == {"title", "content"}
+    from app.agent.approval.provider import AgentApprovalProvider
+    provider = AgentApprovalProvider(service)
+    assert provider.compose(None).names() == (
+        "request_complete_current_task", "request_start_assessment", "request_save_learning_note"
+    )
+
+
 def test_approval_tool_declares_empty_schema_and_never_completes_task(conn):
     task_service = TaskService(TaskRepository(conn))
     task = task_service.create_task("approval tool", scheduled_date="2026-09-15")

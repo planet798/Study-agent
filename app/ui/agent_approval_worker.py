@@ -21,7 +21,12 @@ class AgentApprovalWorker(QThread):
             conn = get_connection(self._db_path)
             result = self._factory(conn).approve_and_execute(self._approval_id)
             if result["status"] == "failed":
-                self.failed.emit("任务状态已变化或执行未成功，请刷新后查看。")
+                messages = {
+                    "request_complete_current_task": "任务状态已变化或执行未成功，请刷新后查看。",
+                    "request_start_assessment": "验收启动失败，请稍后重试。",
+                    "request_save_learning_note": "学习笔记保存失败，请稍后重试。",
+                }
+                self.failed.emit(messages.get(result.get("tool_name"), "审批暂未完成，请稍后重试。"))
             else:
                 self.succeeded.emit(result)
         except Exception:

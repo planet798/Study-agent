@@ -206,6 +206,16 @@ class LearningOutcomeService:
             derive_git=derive_git,
         )
 
+    def create_learning_note_for_task(self, task, title: str, content: str,
+                                      date: str = "") -> dict:
+        """Save an approved ordinary note without occupying Task completion linkage."""
+        return self.create_manual_outcome(
+            date=date, kind="note", title=title, content=content,
+            linked_kp_id=task.knowledge_point_id,
+            linked_topic_id=task.topic_id,
+            task_id=None, derive_git=False,
+        )
+
     # ================= Task 完成 Hook =================
 
     def generate_from_task(

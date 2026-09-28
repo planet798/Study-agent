@@ -228,7 +228,10 @@ def test_approval_ui_does_not_import_repository_or_follow_service_repository():
 
 
 def test_approval_domain_keeps_request_tool_separate_from_canonical_executor():
-    from app.agent.approval.tools import RequestCompleteCurrentTaskTool
+    from app.agent.approval.tools import (
+        RequestCompleteCurrentTaskTool, RequestStartAssessmentTool,
+        RequestSaveLearningNoteTool,
+    )
     from app.agent.approval.provider import AgentApprovalProvider
     from app.agent.approval.service import AgentApprovalService
     from app.agent.mcp.tools import MCPAgentTool
@@ -236,11 +239,23 @@ def test_approval_domain_keeps_request_tool_separate_from_canonical_executor():
 
     request_source = inspect.getsource(RequestCompleteCurrentTaskTool)
     provider_source = inspect.getsource(AgentApprovalProvider)
+    for cls in (RequestCompleteCurrentTaskTool, RequestStartAssessmentTool,
+                RequestSaveLearningNoteTool):
+        tree = ast.parse(inspect.getsource(cls))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                assert node.func.attr not in {
+                    "complete_task", "start_assessment", "create_manual_outcome",
+                    "create_learning_note_for_task",
+                }
     assert "complete_task(" not in request_source
     assert "complete_task(" not in provider_source
     assert "request_complete_current_task" in request_source
     assert "TaskService.complete_task" not in provider_source
-    assert "complete_task(" in inspect.getsource(AgentApprovalService.approve_and_execute)
+    assert "complete_task(" in inspect.getsource(AgentApprovalService._execute_completion)
+    for method in ("_execute_completion", "_execute_assessment", "_execute_note"):
+        assert method not in request_source
+        assert method not in provider_source
     assert "approval" not in inspect.getsource(MCPAgentTool)
     assert "approval" not in inspect.getsource(sandbox_tools_for_task)
 

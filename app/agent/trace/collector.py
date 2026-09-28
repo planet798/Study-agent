@@ -430,7 +430,8 @@ def _safe_error_code(value: Any, fallback: str) -> str:
     if isinstance(value, str) and value in TRACE_ERROR_CODES | {
         "tool_error", "tool_execution_error", "invalid_tool_arguments",
         "tool_not_found", "sandbox_tool_failed", "sandbox_execution_unavailable",
-        "mcp_tool_failed", "mcp_result_too_large", "task_not_active", "approval_request_failed", "",
+        "mcp_tool_failed", "mcp_result_too_large", "task_not_active", "approval_request_failed",
+        "assessment_not_available", "invalid_note", "approval_action_already_pending", "",
     }:
         return value
     return fallback

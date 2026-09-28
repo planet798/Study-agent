@@ -180,30 +180,55 @@ class AgentWorkspacePage(QWidget):
             if item.widget() is not None:
                 item.widget().deleteLater()
         count = 0
-        for row in approvals:
-            if row.get("status") != "pending" or row.get("tool_name") != "request_complete_current_task":
+        descriptions = {
+            "request_complete_current_task": (
+                "待批准操作：Agent 请求完成当前学习任务。批准后执行现有任务完成流程；"
+                "不代表通过验收或提高 Mastery。", "批准",
+            ),
+            "request_start_assessment": (
+                "Agent 请求开始当前任务的正式学习验收。批准后系统会生成或恢复题目；"
+                "你仍需亲自回答，只有提交并判题后才可能更新 Mastery。", "批准并开始验收",
+            ),
+            "request_save_learning_note": (
+                "Agent 请求保存学习笔记。笔记不是 Mastery 或任务完成证据。", "批准保存",
+            ),
+        }
+        for row in sorted(approvals, key=lambda item: int(item["id"])):
+            name = row.get("tool_name")
+            if row.get("status") != "pending" or name not in descriptions:
                 continue
             approval_id = int(row["id"])
             card = QFrame()
             card.setObjectName("AgentApprovalCard")
+            card.setProperty("approval_id", approval_id)
             layout = QVBoxLayout(card)
-            label = QLabel("待批准操作：Agent 请求完成当前学习任务。批准后执行现有任务完成流程；不代表通过验收或提高 Mastery。")
+            text, approve_text = descriptions[name]
+            label = QLabel(text)
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setWordWrap(True)
             layout.addWidget(label)
+            if name == "request_save_learning_note":
+                preview = QLabel(
+                    f"标题：{row.get('note_title', '')}\n内容预览：{row.get('note_preview', '')}"
+                )
+                preview.setObjectName("AgentApprovalNotePreview")
+                preview.setTextFormat(Qt.TextFormat.PlainText)
+                preview.setWordWrap(True)
+                layout.addWidget(preview)
             buttons = QHBoxLayout()
             reject = SAButton("拒绝", variant="subtle", size="small")
             reject.setObjectName("AgentApprovalReject")
             reject.clicked.connect(lambda _checked=False, aid=approval_id: self.approval_reject_requested.emit(aid))
-            approve = SAButton("批准", variant="primary", size="small")
+            approve = SAButton(approve_text, variant="primary", size="small")
             approve.setObjectName("AgentApprovalApprove")
+            approve.setProperty("normal_text", approve_text)
             approve.clicked.connect(lambda _checked=False, aid=approval_id: self.approval_approve_requested.emit(aid))
             buttons.addWidget(reject)
             buttons.addWidget(approve)
             layout.addLayout(buttons)
-            if approval_id in self._approval_busy:
-                reject.setEnabled(False)
-                approve.setEnabled(False)
+            for button in (reject, approve):
+                button.setEnabled(not self._approval_busy)
+            if self._approval_busy:
                 approve.setText("正在执行…")
             self.approvals_layout.addWidget(card)
             count += 1
@@ -215,11 +240,11 @@ class AgentWorkspacePage(QWidget):
         else:
             self._approval_busy.discard(int(approval_id))
         for card in self.approvals_container.findChildren(QFrame, "AgentApprovalCard"):
-            # Single-action v1; only one pending request per session/action.
             for button in card.findChildren(SAButton):
                 button.setEnabled(not self._approval_busy)
                 if button.objectName() == "AgentApprovalApprove":
-                    button.setText("正在执行…" if self._approval_busy else "批准")
+                    button.setText("正在执行…" if self._approval_busy
+                                   else button.property("normal_text"))
 
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)
