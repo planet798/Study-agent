@@ -101,15 +101,17 @@ def test_agent_tables_are_protected_history_not_growth():
     assert FINGERPRINT_VERSION == 5
 
 
-def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules_absent():
+def test_agent_trace_and_eval_are_separate_pure_observability_modules():
     from importlib.util import find_spec
     from pathlib import Path
 
     from app.agent.skills import AgentSkill, AgentSkillRegistry, AgentSkillSelector
     from app.services.skill_service import SkillService
+    import app.agent.eval as eval_package
     import app.agent.mcp as mcp_package
     import app.agent.memory as memory_package
     import app.agent.skills as skills_package
+    import app.agent.trace as trace_package
 
     assert find_spec("app.agent.skills") is not None
     assert find_spec("app.agent.mcp") is not None
@@ -118,7 +120,8 @@ def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules
     assert AgentSkillSelector is not SkillService
     assert find_spec("app.agent.sandbox") is not None
     assert find_spec("app.agent.memory") is not None
-    assert find_spec("app.agent.trace") is None
+    assert find_spec("app.agent.trace") is not None
+    assert find_spec("app.agent.eval") is not None
 
     package_path = Path(skills_package.__file__).parent
     sources = "\\n".join(p.read_text(encoding="utf-8") for p in package_path.glob("*.py"))
@@ -137,6 +140,21 @@ def test_agent_skills_and_mcp_are_separate_from_career_skills_and_future_modules
         "SkillService", "MCP Client", "Sandbox Backend", "PySide6", "QtWidgets",
     ):
         assert forbidden.lower() not in memory_sources.lower()
+
+    trace_path = Path(trace_package.__file__).parent
+    trace_sources = "\\n".join(
+        p.read_text(encoding="utf-8") for p in trace_path.glob("*.py")
+    )
+    for forbidden in ("sqlite3", "PySide6", "QtWidgets", "MCPClientBridge",
+                      "DockerSandboxBackend", "TaskService", "CapabilityService"):
+        assert forbidden.lower() not in trace_sources.lower()
+    eval_path = Path(eval_package.__file__).parent
+    eval_sources = "\\n".join(
+        p.read_text(encoding="utf-8") for p in eval_path.glob("*.py")
+    )
+    for forbidden in ("AgentModelClient", "AIClient", "AgentRepository",
+                      "AgentSessionService", "TaskService", "sqlite3"):
+        assert forbidden.lower() not in eval_sources.lower()
 
     mcp_path = Path(mcp_package.__file__).parent
     mcp_sources = "\\n".join(p.read_text(encoding="utf-8") for p in mcp_path.glob("*.py"))
@@ -189,11 +207,11 @@ def test_learning_tool_handlers_depend_on_services_not_database():
         assert "conn" not in inspect.signature(tool_type.__init__).parameters
 
 
-def test_agent7_schema_is_v22_and_fingerprint_remains_v5():
+def test_agent8_schema_is_v23_and_fingerprint_remains_v5():
     from app.database.schema import SCHEMA_VERSION
     from app.diagnostics.release_migration import FINGERPRINT_VERSION
 
-    assert SCHEMA_VERSION == 22
+    assert SCHEMA_VERSION == 23
     assert FINGERPRINT_VERSION == 5
 
 

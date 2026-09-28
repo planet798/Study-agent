@@ -606,13 +606,13 @@ def _make_v20_db(path):
     conn.close()
 
 
-def test_v20_db_migrates_stepwise_to_v22(tmp_path):
+def test_v20_db_migrates_stepwise_to_v23(tmp_path):
     path = tmp_path / "v20.db"
     _make_v20_db(path)
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == SCHEMA_VERSION == 22
+        assert get_schema_version(conn) == SCHEMA_VERSION == 23
 
         # 新表 + 索引存在
         tables = {
@@ -620,7 +620,10 @@ def test_v20_db_migrates_stepwise_to_v22(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert {"agent_sessions", "agent_messages", "agent_session_memory"} <= tables
+        assert {
+            "agent_sessions", "agent_messages", "agent_session_memory",
+            "agent_turn_traces", "agent_trace_events", "agent_turn_evaluations",
+        } <= tables
         indexes = {
             r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='index'"
@@ -630,6 +633,7 @@ def test_v20_db_migrates_stepwise_to_v22(tmp_path):
             "idx_agent_sessions_task",
             "idx_agent_sessions_one_active_per_task",
             "idx_agent_messages_session",
+            "idx_agent_turn_traces_session", "idx_agent_turn_traces_task",
         } <= indexes
 
         # 历史数据不受影响
@@ -647,13 +651,13 @@ def test_v20_db_migrates_stepwise_to_v22(tmp_path):
         ).fetchone()[0] == 1
 
         # 迁移幂等
-        assert migrate(conn) == 22
-        assert migrate(conn) == 22
+        assert migrate(conn) == 23
+        assert migrate(conn) == 23
     finally:
         conn.close()
 
 
-def test_real_v21_database_migrates_to_v22_without_changing_agent_history(tmp_path):
+def test_real_v21_database_migrates_to_v23_without_changing_agent_history(tmp_path):
     from app.database.agent_repository import AgentRepository
     from app.database.connection import get_raw_connection
     from app.database.repository import TaskRepository
@@ -682,11 +686,14 @@ def test_real_v21_database_migrates_to_v22_without_changing_agent_history(tmp_pa
         before = inventory(conn)
         assert before["schema_version"] == 21
         assert before["counts"]["agent_session_memory"] is None
+        assert before["counts"]["agent_turn_traces"] is None
+        assert before["counts"]["agent_trace_events"] is None
+        assert before["counts"]["agent_turn_evaluations"] is None
 
         migrate_stepwise(conn)
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
-        assert get_schema_version(conn) == 22
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 23
+        assert get_schema_version(conn) == 23
         assert conn.execute(
             "SELECT COUNT(*) FROM agent_session_memory"
         ).fetchone()[0] == 0
@@ -695,6 +702,9 @@ def test_real_v21_database_migrates_to_v22_without_changing_agent_history(tmp_pa
         ]
         after = inventory(conn)
         assert after["counts"]["agent_session_memory"] == 0
+        assert after["counts"]["agent_turn_traces"] == 0
+        assert after["counts"]["agent_trace_events"] == 0
+        assert after["counts"]["agent_turn_evaluations"] == 0
         result = verify(conn, before=before)
         assert result["ok"] is True, result
         assert result["history_fingerprint_changes"] == {}
@@ -703,7 +713,53 @@ def test_real_v21_database_migrates_to_v22_without_changing_agent_history(tmp_pa
         conn.close()
 
 
-def test_v21_agent_tables_columns(tmp_path):
+def test_real_v22_database_migrates_to_v23_preserving_memory_and_history(tmp_path):
+    from app.database.agent_memory_repository import AgentMemoryRepository
+    from app.database.agent_repository import AgentRepository
+    from app.database.connection import get_raw_connection
+    from app.database.repository import TaskRepository
+    from app.database.schema import migrate_stepwise
+    from app.diagnostics.release_migration import inventory, verify
+
+    conn = get_raw_connection(tmp_path / "real-v22.db")
+    try:
+        migrate_stepwise(conn, target=22)
+        task = TaskRepository(conn).create(
+            title="v22 Task", scheduled_date="2026-10-01", source="manual"
+        )
+        repo = AgentRepository(conn)
+        session = repo.create_session(task.id, "v22 history")
+        user = repo.add_message(session["id"], "user", "question")
+        assistant = repo.add_message(session["id"], "assistant", "answer")
+        memory = AgentMemoryRepository(conn).upsert(
+            session["id"], assistant["id"], 2, "derived summary"
+        )
+        before = inventory(conn)
+        assert before["schema_version"] == 22
+        assert before["counts"]["agent_turn_traces"] is None
+        assert before["counts"]["agent_trace_events"] is None
+        assert before["counts"]["agent_turn_evaluations"] is None
+
+        migrate_stepwise(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 23
+        assert AgentMemoryRepository(conn).get_for_session(session["id"]) == memory
+        assert [row["id"] for row in repo.list_messages(session["id"])] == [
+            user["id"], assistant["id"],
+        ]
+        after = inventory(conn)
+        assert after["counts"]["agent_session_memory"] == 1
+        assert after["counts"]["agent_turn_traces"] == 0
+        assert after["counts"]["agent_trace_events"] == 0
+        assert after["counts"]["agent_turn_evaluations"] == 0
+        result = verify(conn, before=before)
+        assert result["ok"] is True, result
+        assert result["history_fingerprint_changes"] == {}
+    finally:
+        conn.close()
+
+
+def test_v23_agent_tables_columns(tmp_path):
     conn = get_connection(tmp_path / "v21cols.db")
     try:
         session_cols = [r[1] for r in conn.execute("PRAGMA table_info(agent_sessions)")]
@@ -723,11 +779,32 @@ def test_v21_agent_tables_columns(tmp_path):
             "session_id", "through_message_id", "source_message_count", "summary",
             "format_version", "created_at", "updated_at",
         ]
+        trace_cols = [r[1] for r in conn.execute("PRAGMA table_info(agent_turn_traces)")]
+        assert trace_cols == [
+            "id", "session_id", "task_id", "user_message_id", "assistant_message_id",
+            "status", "skill_key", "memory_compacted", "memory_omitted_earlier",
+            "memory_through_message_id", "tool_rounds", "model_call_count",
+            "memory_model_call_count", "tool_call_count", "tool_error_count",
+            "prompt_tokens", "completion_tokens", "total_tokens", "usage_complete",
+            "error_code", "started_at", "finished_at", "duration_ms",
+        ]
+        event_cols = [r[1] for r in conn.execute("PRAGMA table_info(agent_trace_events)")]
+        assert event_cols == [
+            "id", "trace_id", "seq", "kind", "name", "status", "duration_ms",
+            "details_json", "created_at",
+        ]
+        evaluation_cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(agent_turn_evaluations)"
+        )]
+        assert evaluation_cols == [
+            "id", "trace_id", "evaluator_version", "status", "checks_json",
+            "metrics_json", "created_at",
+        ]
     finally:
         conn.close()
 
 
-def test_fresh_db_has_agent_tables_and_memory(tmp_path):
+def test_fresh_db_has_agent_trace_and_memory_tables(tmp_path):
     conn = get_connection(tmp_path / "fresh21.db")
     try:
         tables = {
@@ -735,7 +812,10 @@ def test_fresh_db_has_agent_tables_and_memory(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert {"agent_sessions", "agent_messages", "agent_session_memory"} <= tables
+        assert {
+            "agent_sessions", "agent_messages", "agent_session_memory",
+            "agent_turn_traces", "agent_trace_events", "agent_turn_evaluations",
+        } <= tables
     finally:
         conn.close()
 

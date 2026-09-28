@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
+
+if TYPE_CHECKING:
+    from ..trace.collector import AgentTraceCollector
 
 from ...ai.agent_protocol import AgentModelClient, ModelMessage, ModelRequest, ModelResponse
 from ...database.agent_memory_repository import AgentMemoryRepository
@@ -181,6 +184,7 @@ class AgentMemoryCompactor:
         self,
         session_id: int,
         current_user_message_id: int,
+        trace_collector: AgentTraceCollector | None = None,
     ) -> ConversationWindow:
         """Compact only complete historical turns; never summarize the active turn."""
         memory = self.memory_repository.get_for_session(int(session_id))
@@ -256,9 +260,17 @@ class AgentMemoryCompactor:
                 break
             user_content = self._summary_user_content(candidate_summary, batch_json)
             try:
-                next_summary = self._summarize(user_content)
+                next_summary = self._summarize(user_content, trace_collector)
             except Exception:  # noqa: BLE001 - summary failures are fail-soft
                 failed = True
+                if trace_collector is not None:
+                    try:
+                        trace_collector.record_event(
+                            "memory", "summary", "error", 0,
+                            {"error_code": "memory_error"},
+                        )
+                    except Exception:  # noqa: BLE001 - telemetry cannot affect fail-soft memory
+                        pass
                 break
 
             batch = eligible[:batch_count]
@@ -446,7 +458,11 @@ class AgentMemoryCompactor:
         )
         return request_chars <= self.policy.summary_input_max_chars
 
-    def _summarize(self, user_content: str) -> str:
+    def _summarize(
+        self,
+        user_content: str,
+        trace_collector: AgentTraceCollector | None = None,
+    ) -> str:
         request = ModelRequest(
             messages=(
                 ModelMessage(role="system", content=SUMMARY_SYSTEM_PROMPT),
@@ -456,7 +472,12 @@ class AgentMemoryCompactor:
             temperature=0.1,
             max_tokens=self.policy.summary_max_tokens,
         )
-        response = self.model_client.complete(request)
+        response = (
+            trace_collector.complete_model(
+                self.model_client, request, purpose="memory_summary"
+            )
+            if trace_collector is not None else self.model_client.complete(request)
+        )
         if not isinstance(response, ModelResponse):
             raise ValueError("invalid summary response")
         if response.tool_calls:

@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1431,6 +1431,73 @@ def _migrate_v22(conn: sqlite3.Connection) -> None:
 _MIGRATIONS[22] = _migrate_v22
 
 
+# v23: bounded operational Agent turn telemetry and deterministic evaluations.
+_V23_SQL = """
+CREATE TABLE IF NOT EXISTS agent_turn_traces (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id                  INTEGER NOT NULL REFERENCES agent_sessions(id),
+    task_id                     INTEGER NOT NULL REFERENCES tasks(id),
+    user_message_id             INTEGER NOT NULL REFERENCES agent_messages(id),
+    assistant_message_id        INTEGER REFERENCES agent_messages(id),
+    status                      TEXT NOT NULL CHECK(status IN ('succeeded','failed')),
+    skill_key                   TEXT NOT NULL DEFAULT '',
+    memory_compacted            INTEGER NOT NULL DEFAULT 0 CHECK(memory_compacted IN (0,1)),
+    memory_omitted_earlier      INTEGER NOT NULL DEFAULT 0 CHECK(memory_omitted_earlier IN (0,1)),
+    memory_through_message_id   INTEGER,
+    tool_rounds                 INTEGER NOT NULL DEFAULT 0 CHECK(tool_rounds >= 0),
+    model_call_count            INTEGER NOT NULL DEFAULT 0 CHECK(model_call_count >= 0),
+    memory_model_call_count     INTEGER NOT NULL DEFAULT 0 CHECK(memory_model_call_count >= 0),
+    tool_call_count             INTEGER NOT NULL DEFAULT 0 CHECK(tool_call_count >= 0),
+    tool_error_count            INTEGER NOT NULL DEFAULT 0 CHECK(tool_error_count >= 0),
+    prompt_tokens               INTEGER NOT NULL DEFAULT 0 CHECK(prompt_tokens >= 0),
+    completion_tokens           INTEGER NOT NULL DEFAULT 0 CHECK(completion_tokens >= 0),
+    total_tokens                INTEGER NOT NULL DEFAULT 0 CHECK(total_tokens >= 0),
+    usage_complete              INTEGER NOT NULL DEFAULT 1 CHECK(usage_complete IN (0,1)),
+    error_code                  TEXT NOT NULL DEFAULT '',
+    started_at                  TEXT NOT NULL,
+    finished_at                 TEXT NOT NULL,
+    duration_ms                 INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_turn_traces_session
+    ON agent_turn_traces(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_agent_turn_traces_task
+    ON agent_turn_traces(task_id, id);
+
+CREATE TABLE IF NOT EXISTS agent_trace_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id        INTEGER NOT NULL REFERENCES agent_turn_traces(id),
+    seq             INTEGER NOT NULL CHECK(seq > 0),
+    kind            TEXT NOT NULL CHECK(kind IN ('runtime','memory','model','tool','mcp','sandbox')),
+    name            TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL CHECK(status IN ('info','ok','error')),
+    duration_ms     INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0),
+    details_json    TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT NOT NULL,
+    UNIQUE(trace_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS agent_turn_evaluations (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id            INTEGER NOT NULL REFERENCES agent_turn_traces(id),
+    evaluator_version   INTEGER NOT NULL CHECK(evaluator_version > 0),
+    status              TEXT NOT NULL CHECK(status IN ('pass','warn','fail')),
+    checks_json         TEXT NOT NULL DEFAULT '{}',
+    metrics_json        TEXT NOT NULL DEFAULT '{}',
+    created_at          TEXT NOT NULL,
+    UNIQUE(trace_id, evaluator_version)
+);
+"""
+
+
+def _migrate_v23(conn: sqlite3.Connection) -> None:
+    """v23：增加派生 Agent turn telemetry 与 deterministic evaluations。"""
+    conn.executescript(_V23_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[23] = _migrate_v23
+
+
 def get_schema_version(conn) -> int:
     """读取当前数据库结构版本（PRAGMA user_version）。"""
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1504,7 +1571,7 @@ def migrate_stepwise(conn, target: int | None = None, on_step=None) -> int:
 # ============================================================
 #
 # 背景：普通测试每次都会新建一个空库。若走 `migrate()`，会在空库上
-# 逐级重放 v2..v22（共 21 步，每步都 commit/fsync），实测约 280ms，
+# 逐级重放 v2..v23（共 22 步，每步都 commit/fsync），实测约 280ms，
 # 而其中真正 CPU 只有十几毫秒。
 #
 # `initialize_fresh_database()` 用「当前 schema 快照」一次性建好 vN 结构，

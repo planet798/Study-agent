@@ -8,6 +8,7 @@
 Learning Route → Phase → Topic → Learning Component → Task
 → Agent Study Session → Task Context + Agent Skill + Session Memory
 → Agent Runtime → Native / MCP / Sandbox Tools
+→ structured Trace → deterministic Evaluation
 → Learning Interaction → Assessment / Evidence → Mastery / Capability
 ```
 
@@ -167,18 +168,36 @@ append-only full agent_messages
 - Runtime reloads rows after the fixed raw boundary on each tool round, so new current-turn assistant/tool protocol rows appear without moving the memory boundary. `AgentWorkspacePage` continues to load and render the complete original message history.
 - No memory UI, controls, cross-Session import, Mastery/Capability inference, or application writes.
 
+## Agent-8 — Content-free Trace / deterministic Evaluation
+
+```text
+accepted user message
+→ in-memory AgentTraceCollector
+→ Memory / Task Context / Skill / MCP / Sandbox / model/tool loop events
+→ completed trace + ordered events
+→ AgentTurnEvaluator (offline deterministic rules)
+→ pass / warn / fail
+```
+
+- `agent_turn_traces`, `agent_trace_events`, and `agent_turn_evaluations` (v23) are derived operational telemetry. They are in verifier growth/inventory only; immutable `agent_sessions` / `agent_messages` history and fingerprint v5 are unchanged.
+- `AgentTraceCollector` is pure Python and keeps only controlled identifiers, counts, durations, usage, result flags, memory boundary/flags, and static Skill key. It never copies prompts/messages, tool arguments/results, MCP descriptions/content, Sandbox paths/output, or API configuration. Event detail objects are allowlisted and capped at 4096 characters.
+- Each Agent and Memory-summarizer call is observed once; usage aliases are normalized without treating booleans as integers. Missing/invalid usage makes `usage_complete=false` while known token counts still accumulate. Tool events classify registered names as native/MCP/Sandbox and store only success/error code, never message bodies.
+- Trace writes and all events are one repository transaction. Completed traces are inserted once—there is no `running` row. Persistence and Evaluation are fail-open and cannot change the Agent result or mask the original failure.
+- `AgentTurnEvaluator` consumes only Trace/Event metadata, imports no model/database/conversation services, and emits stable checks plus pass/warn/fail. It performs no LLM judge, numeric answer/teaching score, learning inference, retry, prompt update, permission change, or Task/Mastery/Capability/Practice write.
+- The worker-owned connection is wired by `app/main.py::build_agent_runtime`; MainWindow and Workspace do not access or display Trace. Sidebar/navigation remains unchanged.
+- Implementation details and privacy invariants: `docs/AGENT_TRACE_EVAL.md`.
+
 ## Still not implemented
 
 - write tools, approvals, mutation policy
-- trace / evaluation
 
 ## Future roadmap
 
 | Stage | Scope |
 |---|---|
 | Agent-7 | Session Memory / context compaction — implemented |
-| Agent-8 | Trace / evaluation |
-| Later / separately designed | write tools + approval policy |
+| Agent-8 | Trace / deterministic Evaluation — implemented |
+| Agent-9 | Write Tools + Approval Policy — next, separately designed |
 
 ## Tests
 
@@ -191,4 +210,5 @@ append-only full agent_messages
 - `tests/test_agent_mcp_config.py`, `test_agent_mcp_client.py`, `test_agent_mcp_discovery.py`, `test_agent_mcp_tools.py`, `test_agent_mcp_runtime.py`: offline config, official SDK bridge lifecycle, dual authorization gate, bounded results, and Runtime composition.
 - `tests/test_agent_sandbox_config.py`, `test_agent_sandbox_workspace.py`, `test_agent_sandbox_permissions.py`, `test_agent_sandbox_tools.py`, `test_agent_sandbox_backend.py`, `test_agent_sandbox_runtime.py`: config, isolation/path protections, scope authorization, Docker command constraints, and end-to-end tool history.
 - `tests/test_agent_memory_repository.py` / `test_agent_memory_compaction.py`: repository ownership/monotonicity, turn-safe rolling batches, short-session no-call behavior, tool protocol, bounded inputs, failure fallback, pass limit, hard budget, and Runtime tool-loop reuse.
+- `tests/test_agent_trace_repository.py`, `test_agent_trace_collector.py`, `test_agent_trace_runtime.py`, `test_agent_trace_privacy.py`, and `test_agent_evaluation.py`: atomic persistence/ownership/seq, timing/usage bounds, runtime success/failure/fail-open, private-data sentinels, and deterministic checks.
 - Agent-1 session/model/runtime and `tests/test_agent_architecture.py` continue to guard legacy boundaries.

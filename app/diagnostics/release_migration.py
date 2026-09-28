@@ -50,8 +50,11 @@ GROWTH_TABLES = (
     "practice_projects",
     "practice_topic_evidence",
     "practice_topic_requirements",
-    # Rolling summaries are derived state, not immutable Agent history.
+    # Rolling summaries and turn telemetry are derived state, not immutable history.
     "agent_session_memory",
+    "agent_turn_traces",
+    "agent_trace_events",
+    "agent_turn_evaluations",
 )
 
 
@@ -115,7 +118,8 @@ def inventory(conn: sqlite3.Connection) -> dict:
             "capability_evidence",
             "practice_projects", "practice_topic_evidence",
             "practice_topic_requirements", "agent_sessions", "agent_messages",
-            "agent_session_memory",
+            "agent_session_memory", "agent_turn_traces", "agent_trace_events",
+            "agent_turn_evaluations",
         )},
     }
     data["tasks_done"] = _scalar(

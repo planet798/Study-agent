@@ -1157,12 +1157,14 @@ def build_agent_runtime(
     import logging
 
     from app.agent.context import AgentTaskContextBuilder
+    from app.agent.eval.evaluator import AgentTurnEvaluator
     from app.agent.memory.compactor import AgentMemoryCompactor
     from app.agent.memory.policy import AgentMemoryPolicy
     from app.agent.mcp.config import MCPConfigError, load_mcp_config
     from app.agent.mcp.provider import MCPToolProvider
-    from app.agent.runtime import AgentRuntime
+    from app.agent.runtime import AgentRuntime, MAX_TOOL_ROUNDS
     from app.agent.sandbox.config import SandboxConfigError, load_sandbox_config
+    from app.agent.trace.service import AgentTraceService
     from app.agent.sandbox.provider import SandboxProvider
     from app.agent.session import AgentSessionService
     from app.agent.skills.learning import build_default_agent_skill_registry
@@ -1171,8 +1173,10 @@ def build_agent_runtime(
     from app.ai.agent_client import AdaptiveAgentModelClient
     from app.ai.client import AdaptiveAIClient
     from app.ai.config_service import AIConfigService
+    from app.database.agent_evaluation_repository import AgentEvaluationRepository
     from app.database.agent_memory_repository import AgentMemoryRepository
     from app.database.agent_repository import AgentRepository
+    from app.database.agent_trace_repository import AgentTraceRepository
     from app.database.assessment_repository import AssessmentRepository
     from app.database.capability_repository import CapabilityEvidenceRepository
     from app.database.learning_route_repository import LearningRouteRepository
@@ -1217,6 +1221,11 @@ def build_agent_runtime(
         agent_model_client,
         AgentMemoryPolicy(),
     )
+    trace_service = AgentTraceService(
+        AgentTraceRepository(fresh_conn),
+        AgentEvaluationRepository(fresh_conn),
+        AgentTurnEvaluator(max_tool_rounds=MAX_TOOL_ROUNDS),
+    )
     assessment_service = AssessmentService(
         AdaptiveAIClient(config_provider),
         assessment_repo=assessment_repo,
@@ -1260,6 +1269,7 @@ def build_agent_runtime(
         mcp_provider=mcp_provider,
         sandbox_provider=sandbox_provider,
         memory_compactor=memory_compactor,
+        trace_service=trace_service,
     )
 
 

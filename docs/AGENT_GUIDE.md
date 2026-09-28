@@ -91,13 +91,14 @@ full 失败                 → 只重跑失败测试，修复
 - Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除；历史表和字段只用于迁移与历史保全。未来 recall 是 Agent contextual learning 方向，不是已实现功能。
 - 测试：`tests/test_assessment_*.py`、`test_review_retirement.py`、`test_skill_service.py`
 
-### Agent core (Agent-1 through Agent-7)
-- production：`app/agent/context.py`、`app/agent/runtime.py`、`app/agent/memory/{policy,compactor}.py`、`app/database/agent_memory_repository.py`、`app/agent/skills/{base,registry,selector,learning}.py`、`app/agent/tools/{base,registry,learning}.py`、`app/agent/mcp/{config,client,tools,provider}.py`、`app/agent/sandbox/{config,workspace,backend,tools,provider}.py`、`app/ui/agent_workspace_page.py`、`app/ui/ai_worker.py::AgentTurnWorker`、`app/main.py::build_agent_runtime`。
-- tests：Agent-7 memory repository/compaction; Agent-4 skills/runtime、Agent-5 MCP config/client/discovery/tools/runtime、Agent-6 Sandbox config/workspace/permissions/tools/backend/runtime，以及 Agent-3 Workspace 与 Agent-1/2 regressions。
+### Agent core (Agent-1 through Agent-8)
+- production：`app/agent/context.py`、`app/agent/runtime.py`、`app/agent/memory/{policy,compactor}.py`、`app/agent/trace/{models,collector,service}.py`、`app/agent/eval/evaluator.py`、`app/database/agent_{memory,trace,evaluation}_repository.py`、`app/agent/skills/{base,registry,selector,learning}.py`、`app/agent/tools/{base,registry,learning}.py`、`app/agent/mcp/{config,client,tools,provider}.py`、`app/agent/sandbox/{config,workspace,backend,tools,provider}.py`、`app/ui/agent_workspace_page.py`、`app/ui/ai_worker.py::AgentTurnWorker`、`app/main.py::build_agent_runtime`。
+- tests：Agent-8 Trace repository/collector/runtime/privacy 与 deterministic Evaluation; Agent-7 Memory repository/compaction; Agent-4 skills/runtime、Agent-5 MCP config/client/discovery/tools/runtime、Agent-6 Sandbox config/workspace/permissions/tools/backend/runtime，以及 Agent-3 Workspace 与 Agent-1/2 regressions。
 - 不变式：每 user turn Memory window / Task Context / Skill 各准备一次；Memory before MCP/Sandbox；tool loop 固定边界、每轮 reload 边界之后的新消息；Skill 确定性选择一次；MCP scope 只在 worker turn 存活。
 - Memory 是 Session-scoped derived prefix summary；按 `role=user` 分组，只摘要连续完整旧 turns，当前 turn 永不 summary，默认保留最近 4 个完整历史 turns。原始 `agent_messages` append-only 且 UI 仍显示全部；summary failure fail-soft，当前 turn 超硬上限则受控失败且已保存 user 保留。
+- Trace/Evaluation 是 content-free derived operational telemetry：Trace 只存受控 metadata、时长、usage/counts/flags，绝不复制 prompt/message/tool/MCP/Sandbox 正文；Evaluation 只由 Trace + Events 确定性运行规则，无 LLM judge、质量分、学习推断或业务写入。Trace/Eval persistence failure fail-open。
 - Workspace 是 stack 内部页，不是 Sidebar/PageSpec；Worker 仅接收 db_path/runtime_factory/session_id/user_text，在线程内构造 fresh connection/runtime；离开 Workspace 不关闭 Session。Session task-bound；Native Tools 仍只读/Service-only；MCP 故障不禁用 Native Tools；legacy `AIClient.chat()` 与 Agent-1 no-tool 路径保持。
-- Agent Skills 是 `app/agent/skills/` 下的静态学习策略；严禁与 Career `SkillService` / `SkillRepository` / `skills` 表混用。Agent-5 MCP 是本地 exact allowlist + server `readOnlyHint=True` 双 gate，只读、不访问 SQLite。Agent-6 仅通过 `sandbox` mutation scope 改写 task workspace；默认 Registry 仍只读，无 host-shell fallback、无 Application/DB mutation scope。Memory 不读取 Task/Practice repositories、MCP client 或 Sandbox filesystem。详见 `docs/AGENT_MEMORY.md`、`docs/MCP.md` 与 `docs/SANDBOX.md`。
+- Agent Skills 是 `app/agent/skills/` 下的静态学习策略；严禁与 Career `SkillService` / `SkillRepository` / `skills` 表混用。Agent-5 MCP 是本地 exact allowlist + server `readOnlyHint=True` 双 gate，只读、不访问 SQLite。Agent-6 仅通过 `sandbox` mutation scope 改写 task workspace；默认 Registry 仍只读，无 host-shell fallback、无 Application/DB mutation scope。Memory 不读取 Task/Practice repositories、MCP client 或 Sandbox filesystem；Eval 不读 conversation/AI，Trace 不授予 Tool 权限。详见 `docs/AGENT_MEMORY.md`、`docs/AGENT_TRACE_EVAL.md`、`docs/MCP.md` 与 `docs/SANDBOX.md`。
 
 ### Migration / Schema（**高危，必须真实路径**）
 - production：`app/database/schema.py`、`app/database/connection.py`、
@@ -138,8 +139,8 @@ full 失败                 → 只重跑失败测试，修复
 
 ## 3. 测试基础设施（本轮新增）
 
-- `tests/conftest.py::conn` → `get_fresh_connection()`：直接建当前 v22 schema,
-  **不重放 v2..v22**（约 280ms → 个位数 ms）。与真实迁移在空库上的 schema 逐字一致。
+- `tests/conftest.py::conn` → `get_fresh_connection()`：直接建当前 v23 schema,
+  **不重放 v2..v23**（约 280ms → 个位数 ms）。与真实迁移在空库上的 schema 逐字一致。
 - `app/database/connection.py::get_connection()`：**production 真实路径**，仍走
   `migrate()`。改动它要非常谨慎。
 - markers：`slow` / `migration` / `ui` / `integration`，见 `pytest.ini`。

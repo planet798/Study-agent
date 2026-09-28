@@ -46,7 +46,7 @@ def isolated_qsettings(tmp_path):
 def conn(tmp_path):
     """每个测试使用独立的临时数据库文件。
 
-    使用 fast fresh path：直接建当前 schema，不重放 v2..v22 历史迁移。
+    使用 fast fresh path：直接建当前 schema，不重放 v2..v23 历史迁移。
     与 ``get_connection`` 在空库上的最终状态一致（含 learning_routes 种子）。
     迁移 / WAL / release 验证类测试请显式使用 ``get_connection``。
     """

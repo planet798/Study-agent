@@ -242,9 +242,13 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
     )
     from app.agent.skills import AgentSkillSelector
     from app.agent.memory.compactor import AgentMemoryCompactor
+    from app.agent.trace.service import AgentTraceService
 
     assert isinstance(runtime.context_builder, AgentTaskContextBuilder)
     assert isinstance(runtime.memory_compactor, AgentMemoryCompactor)
+    assert isinstance(runtime.trace_service, AgentTraceService)
+    assert runtime.trace_service.trace_repository.conn is conn
+    assert runtime.trace_service.evaluation_repository.conn is conn
     assert runtime.memory_compactor.session_service is runtime.session_service
     assert runtime.memory_compactor.memory_repository.conn is conn
     assert runtime.memory_compactor.model_client is runtime.model_client
