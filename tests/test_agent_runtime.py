@@ -191,3 +191,19 @@ def test_assistant_metadata_has_no_secret(runtime, session_service, task):
     assert "usage" in metadata
     for secret in ("api_key", "Authorization", "secret_ref", "sk-"):
         assert secret not in metadata
+
+
+def test_system_prompt_defines_interactive_progressive_teaching_policy():
+    from app.agent.runtime import AGENT_SYSTEM_PROMPT
+
+    for phrase in (
+        "交互式教学",
+        "一个主要知识块",
+        "最小例子",
+        "完整总结",
+        "HTML",
+    ):
+        assert phrase in AGENT_SYSTEM_PROMPT
+    # Behavioural guidance, not a hard token/character cap.
+    assert "300" not in AGENT_SYSTEM_PROMPT
+    assert "tokens" not in AGENT_SYSTEM_PROMPT

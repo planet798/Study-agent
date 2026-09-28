@@ -32,7 +32,9 @@ def build_default_agent_skill_registry() -> AgentSkillRegistry:
         description="围绕当前 Task 进行通用学习辅导；无明确学习方式时使用。",
         instruction=(
             "围绕当前 Task 推进学习；先理解用户此刻的目标，再用清晰的小步骤解释、"
-            "练习或排查问题。必要时使用只读工具查看真实学习状态。"
+            "练习或排查问题。默认一次推进一个明确的学习目标；对范围很大的问题，"
+            "先处理最核心的部分，再邀请用户继续，而不是一次倾倒整份课程笔记。"
+            "必要时使用只读工具查看真实学习状态。"
             "不要假设用户已经掌握，也不要把一次口头确认当成正式验收。"
             + _SANDBOX_CONDITIONAL + _NO_STATE_MUTATION
         ),
@@ -44,9 +46,11 @@ def build_default_agent_skill_registry() -> AgentSkillRegistry:
         title="概念讲解",
         description="帮助用户理解理论概念、机制和关系。",
         instruction=(
+            "概念教学默认采用渐进式展开：先给核心定义/机制，再给一个最小例子，"
+            "最后点出一个易错点或做一次理解检查。除非用户明确要求完整展开，"
+            "不要在首次回答同时覆盖整个 Topic 的所有子知识点。"
             "以理解为目标，围绕当前 Topic 解释概念、核心机制及其关系；"
-            "可用一个最小例子说明，并在合适时检查用户是否理解或邀请其复述/推导。"
-            "按用户问题灵活组织，不强制固定模板，不因用户说懂了就声称 Mastery 已更新。"
+            "按用户问题自然组织，不强制固定模板，不因用户说懂了就声称 Mastery 已更新。"
             + _NO_STATE_MUTATION
         ),
         activity_kinds=(ACTIVITY_THEORY,),

@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
 
 from ..agent.status import AgentCapabilityStatus
 from ..services.learning_activity import activity_label
+from .agent_message_widget import ASSISTANT_ROLE, USER_ROLE, AgentMessageWidget
 from .components.button import SAButton
+from .design import spacing
 from .task_widget import format_minutes
 
 
@@ -114,7 +116,7 @@ class AgentWorkspacePage(QWidget):
         self.conversation_body = QWidget()
         self.conversation_layout = QVBoxLayout(self.conversation_body)
         self.conversation_layout.setContentsMargins(0, 4, 0, 4)
-        self.conversation_layout.setSpacing(10)
+        self.conversation_layout.setSpacing(spacing.LG)
         self.conversation_layout.addStretch()
         self.conversation_scroll.setWidget(self.conversation_body)
         root.addWidget(self.conversation_scroll, stretch=1)
@@ -352,25 +354,13 @@ class AgentWorkspacePage(QWidget):
         self.conversation_layout.addStretch()
 
     def _add_bubble(self, speaker: str, text: str, role: str) -> None:
-        bubble = QFrame()
-        bubble.setObjectName("AgentMessageBubble")
-        bubble.setProperty("role", role)
-        layout = QVBoxLayout(bubble)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
-        speaker_label = QLabel(speaker)
-        speaker_label.setObjectName("AgentMessageSpeaker")
-        speaker_label.setTextFormat(Qt.TextFormat.PlainText)
-        body = QLabel(text)
-        body.setObjectName("AgentMessageText")
-        body.setTextFormat(Qt.TextFormat.PlainText)
-        body.setWordWrap(True)
-        body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(speaker_label)
-        layout.addWidget(body)
+        """Present one message. Rendering lives entirely in AgentMessageWidget."""
+        if role not in (USER_ROLE, ASSISTANT_ROLE):
+            return
+        widget = AgentMessageWidget(role=role, text=text, speaker=speaker)
         # Insert before the trailing stretch.
         self.conversation_layout.insertWidget(
-            max(0, self.conversation_layout.count() - 1), bubble
+            max(0, self.conversation_layout.count() - 1), widget
         )
 
     def _update_send_enabled(self) -> None:

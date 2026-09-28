@@ -128,3 +128,17 @@ def test_system_mode_falls_back_to_light():
 
 def test_singleton_identity():
     assert ThemeManager.instance() is ThemeManager.instance()
+
+
+def test_agent_conversation_selectors_present_in_both_themes():
+    for theme in ("light", "dark"):
+        rendered = render_theme(theme)
+        for selector in (
+            "QFrame#AgentMessageBubble[role=\"assistant\"]",
+            "QFrame#AgentMessageBubble[role=\"user\"]",
+            "QLabel#AgentMessageSpeaker",
+            "QTextBrowser#AgentUserMessageText",
+            "QTextBrowser#AgentAssistantMarkdown",
+            "QScrollArea#AgentConversationScroll",
+        ):
+            assert selector in rendered, (theme, selector)

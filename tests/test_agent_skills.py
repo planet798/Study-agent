@@ -165,3 +165,15 @@ def test_skill_package_does_not_import_career_skill_or_database_implementation()
         "from ..database", "AgentToolRegistry",
     ):
         assert forbidden not in sources
+
+
+def test_teach_concept_and_general_study_default_to_progressive_teaching():
+    by_key = {skill.key: skill for skill in build_default_agent_skill_registry().all()}
+
+    teach = by_key["teach-concept"].instruction
+    for phrase in ("渐进式展开", "核心定义", "最小例子", "明确要求完整展开"):
+        assert phrase in teach
+
+    general = by_key["general-study"].instruction
+    assert "一次推进一个明确的学习目标" in general
+    assert "一次倾倒整份课程笔记" in general

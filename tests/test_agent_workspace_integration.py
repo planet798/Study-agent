@@ -6,10 +6,18 @@ import json
 import threading
 
 import pytest
-from PySide6.QtWidgets import QLabel
 
 from app.agent.session import AgentSessionService
 from app.database.agent_repository import AgentRepository
+from app.ui.agent_message_widget import AgentMessageWidget
+
+
+def _message_widgets(page):
+    return page.findChildren(AgentMessageWidget)
+
+
+def _message_texts(page):
+    return [widget.raw_text for widget in _message_widgets(page)]
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +147,7 @@ def test_today_task_opens_internal_workspace_and_resumes_same_session(
     assert session_b["id"] != session_a["id"]
     assert window.agent_workspace_page.current_session_id == session_b["id"]
     assert window.agent_workspace_page.task_title_label.text() == "Task B"
-    assert window.agent_workspace_page.findChildren(QLabel, "AgentMessageText") == []
+    assert _message_widgets(window.agent_workspace_page) == []
 
     window.agent_workspace_page.back_button.click()
     assert window.stack.currentWidget() is window.today_page
@@ -231,8 +239,8 @@ def test_existing_history_shows_continue_and_manual_learning_is_eligible(
     assert widget.start_study_btn.text() == "继续学习"
     widget.start_study_btn.click()
     assert window.agent_workspace_page.current_session_id == existing["id"]
-    body = window.agent_workspace_page.findChildren(QLabel, "AgentMessageText")
-    assert [label.text() for label in body] == ["already started"]
+    body = _message_widgets(window.agent_workspace_page)
+    assert [widget.raw_text for widget in body] == ["already started"]
     window.close()
 
 
@@ -256,8 +264,7 @@ def test_worker_failure_reloads_persisted_user_message_and_shows_error(
         and sessions.count_messages(page.current_session_id) == 1,
         timeout=5000,
     )
-    bubbles = page.findChildren(QLabel, "AgentMessageText")
-    assert [bubble.text() for bubble in bubbles] == ["Keep this on failure"]
+    assert _message_texts(page) == ["Keep this on failure"]
     assert not page.error_label.isHidden()
     assert "secret" not in page.error_label.text()
     assert page.busy_label.isHidden()
@@ -290,7 +297,7 @@ def test_stale_worker_completion_never_renders_into_another_session(
     qtbot.waitUntil(lambda: not window._agent_inflight_sessions, timeout=5000)
     assert page.current_session_id == session_b
     assert page.task_title_label.text() == "B"
-    assert page.findChildren(QLabel, "AgentMessageText") == []
+    assert _message_widgets(page) == []
     window.close()
 
 
@@ -344,7 +351,7 @@ def test_workspace_status_and_optional_config_degradation_are_nonblocking(
     page.input_edit.setPlainText("native question")
     page.send_button.click()
     qtbot.waitUntil(lambda: not window._agent_inflight_sessions, timeout=5000)
-    assert "native answer" in [b.text() for b in page.findChildren(QLabel, "AgentMessageText")]
+    assert "native answer" in _message_texts(page)
     window.close()
 
 
@@ -501,7 +508,7 @@ def test_full_workspace_worker_context_tool_loop_and_verifier_growth(
     assert sessions.count_messages(session_id) == 4, (page.error_label.text(), factory_errors)
     rows = sessions.messages(session_id)
     assert [row["role"] for row in rows] == ["user", "assistant", "tool", "assistant"]
-    assert [label.text() for label in page.findChildren(QLabel, "AgentMessageText")] == [
+    assert _message_texts(page) == [
         "What is this task?", "Task context loaded",
     ]
     assert "BEGIN_TASK_CONTEXT_JSON" in model_requests[0].messages[0].content

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel
 
 from app.database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_DONE, STATUS_NOT_DONE
+from app.ui.agent_message_widget import ASSISTANT_ROLE, USER_ROLE, AgentMessageWidget
 from app.ui.agent_workspace_page import AgentWorkspacePage
 from app.ui.app_shell import PAGE_SPECS, PageKey
 from app.ui.task_widget import TaskWidget
@@ -17,6 +17,14 @@ def _restore_theme(qapp):
     yield
     from app.ui.design.theme_manager import ThemeManager
     ThemeManager.instance().set_theme("light")
+
+
+def _message_widgets(page):
+    return page.findChildren(AgentMessageWidget)
+
+
+def _message_texts(page):
+    return [widget.raw_text for widget in _message_widgets(page)]
 
 
 def _task(repo, *, status=STATUS_ACTIVE, **kwargs):
@@ -60,12 +68,15 @@ def test_workspace_loads_task_history_and_hides_tool_protocol(qtbot, repo):
     assert page.task_title_label.text() == "Learn attention"
     assert page.task_description_label.text() == "Understand attention"
     assert page.task_meta_label.text() == "R1 Route · 理论 · 35 分钟"
-    bodies = page.findChildren(QLabel, "AgentMessageText")
-    assert [label.text() for label in bodies] == [
+    widgets = _message_widgets(page)
+    assert [widget.raw_text for widget in widgets] == [
         "Explain this", "<script>plain response</script>",
     ]
-    assert all(label.textFormat() == Qt.TextFormat.PlainText for label in bodies)
-    assert "internal" not in " ".join(label.text() for label in bodies)
+    assert [widget.role for widget in widgets] == [USER_ROLE, ASSISTANT_ROLE]
+    user_body = widgets[0].plain_view
+    assert user_body.toPlainText() == "Explain this"
+    assert widgets[1].markdown_view is not None
+    assert "internal" not in " ".join(widget.raw_text for widget in widgets)
     assert page.empty_hint.isHidden()
     assert page.input_edit.isEnabled()
 
@@ -95,7 +106,7 @@ def test_workspace_still_renders_full_history_when_session_memory_exists(
         task=task, route_name=None, model_configured=True,
     )
 
-    assert [label.text() for label in page.findChildren(QLabel, "AgentMessageText")] == [
+    assert _message_texts(page) == [
         "early question", "early answer", "latest question",
     ]
     assert first["id"] < final["id"]
@@ -178,7 +189,7 @@ def test_workspace_ctrl_enter_length_limit_and_clear(qtbot, repo):
     page.clear_session("安全错误")
     assert page.current_session_id is None
     assert page.task_title_label.text() == ""
-    assert page.findChildren(QLabel, "AgentMessageText") == []
+    assert _message_widgets(page) == []
     assert page.error_label.text() == "安全错误"
 
 

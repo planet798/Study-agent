@@ -687,3 +687,38 @@ QWidget#SATodayListContainer {
 QWidget#SACareerSection {
     background: transparent;
 }
+
+/* ---- Agent Workspace conversation (UX-1) ---- */
+QScrollArea#AgentConversationScroll {
+    background: transparent;
+    border: none;
+}
+QWidget#AgentMessageRow {
+    background: transparent;
+}
+QFrame#AgentMessageBubble {
+    border-radius: {{radius_medium}};
+}
+QFrame#AgentMessageBubble[role="assistant"] {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+}
+QFrame#AgentMessageBubble[role="user"] {
+    background-color: {{surface_selected}};
+    border: 1px solid {{border}};
+}
+QLabel#AgentMessageSpeaker {
+    color: {{text_secondary}};
+    font-size: {{font_size_caption}}px;
+    font-weight: 600;
+}
+QTextBrowser#AgentUserMessageText {
+    background: transparent;
+    border: none;
+    color: {{text_primary}};
+}
+QTextBrowser#AgentAssistantMarkdown {
+    background: transparent;
+    border: none;
+    color: {{text_primary}};
+}
