@@ -6,7 +6,7 @@ Repository, Agent Runtime or Tool Registry, and it never mutates persistence:
     AgentWorkspacePage
         └── AgentMessageWidget
                 ├── AgentMessageSpeaker  (QLabel)
-                ├── AgentUserMessageText (QLabel, PlainText)   role=user
+                ├── AgentUserMessageText (QTextBrowser, PlainText) role=user
                 └── AgentAssistantMarkdown (AgentMarkdownView) role=assistant
 
 Design boundaries:
@@ -24,7 +24,9 @@ Design boundaries:
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+import math
+
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -56,8 +58,12 @@ USER_SPEAKER = "你"
 ASSISTANT_SPEAKER = "学习助手"
 
 # Assistant body may breathe wider than the user's own messages.
-ASSISTANT_MAX_WIDTH = 800
+ASSISTANT_MAX_WIDTH = 960
 USER_MAX_WIDTH = 680
+ASSISTANT_VIEWPORT_FRACTION = 0.90
+USER_VIEWPORT_FRACTION = 0.78
+# QTextEdit reserves an internal ~6px gutter per edge even without a frame.
+BODY_HEIGHT_SLACK = 20
 
 # Qt-native Markdown with raw HTML disabled. ``MarkdownDialectGitHub`` enables the
 # common GFM subset (tables, fenced code, task lists). ``MarkdownNoHTML`` keeps
@@ -144,7 +150,7 @@ class _MessageBodyView(QTextBrowser):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMinimumWidth(0)
-        self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
         self.viewport().setAutoFillBackground(False)
 
         document = self.document()
@@ -158,12 +164,22 @@ class _MessageBodyView(QTextBrowser):
         return None
 
     def _sync_height(self, *_args) -> None:
-        height = self.document().size().height()
-        self.setFixedHeight(max(1, int(height) + 2))
+        # Qt returns a fractional QSizeF; flooring it clips descenders on Windows
+        # DPI scales. The slack covers viewport/document rounding and rich blocks.
+        chrome = max(0, min(64, self.height() - self.viewport().height()))
+        required = math.ceil(self.document().size().height()) + BODY_HEIGHT_SLACK + chrome
+        height = max(BODY_HEIGHT_SLACK + chrome, required)
+        if self.height() != height:
+            self.setFixedHeight(height)
+
+    def _schedule_height(self) -> None:
+        QTimer.singleShot(0, self, self._sync_height)
 
     def resizeEvent(self, event):  # noqa: N802 - Qt API
         super().resizeEvent(event)
         self._sync_height()
+        if event.size().width() != event.oldSize().width():
+            self._schedule_height()
 
 
 class AgentPlainTextView(_MessageBodyView):
@@ -181,6 +197,7 @@ class AgentPlainTextView(_MessageBodyView):
         self._text = text if isinstance(text, str) else str(text or "")
         self.document().setPlainText(self._text)
         self._sync_height()
+        self._schedule_height()
         self.updateGeometry()
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt API
@@ -234,6 +251,7 @@ class AgentMarkdownView(_MessageBodyView):
             document.setPlainText(self._markdown)
             self._plaintext_fallback = True
         self._sync_height()
+        self._schedule_height()
 
     def _theme_tokens(self) -> dict[str, str]:
         try:
@@ -366,6 +384,7 @@ class AgentMarkdownView(_MessageBodyView):
             block_format.setBackground(background)
         block_format.setLeftMargin(_CODE_BLOCK_MARGIN)
         block_format.setRightMargin(_CODE_BLOCK_MARGIN)
+        block_format.setNonBreakableLines(False)
         block_format.setTopMargin(_CODE_BLOCK_PADDING)
         block_format.setBottomMargin(_CODE_BLOCK_PADDING)
         cursor = QTextCursor(self.document())
@@ -406,11 +425,13 @@ class AgentMessageWidget(QWidget):
         text: str,
         speaker: str | None = None,
         parent: QWidget | None = None,
+        message_id: int | None = None,
     ):
         super().__init__(parent)
         if role not in (USER_ROLE, ASSISTANT_ROLE):
             raise ValueError(f"unknown agent message role: {role!r}")
         self.role = role
+        self.message_id = message_id
         self.raw_text = text if isinstance(text, str) else str(text or "")
         self.speaker = speaker or (
             USER_SPEAKER if role == USER_ROLE else ASSISTANT_SPEAKER
@@ -465,3 +486,10 @@ class AgentMessageWidget(QWidget):
             # bubble's maximum width.
             row.addWidget(self.bubble, 1)
             row.addStretch(0)
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        cap = USER_MAX_WIDTH if self.role == USER_ROLE else ASSISTANT_MAX_WIDTH
+        fraction = (USER_VIEWPORT_FRACTION if self.role == USER_ROLE
+                    else ASSISTANT_VIEWPORT_FRACTION)
+        self.bubble.setMaximumWidth(min(cap, max(1, int(self.width() * fraction))))

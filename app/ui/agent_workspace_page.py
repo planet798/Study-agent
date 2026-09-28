@@ -18,7 +18,7 @@ is the SAPageHeader subtitle, so the Workspace never duplicates it.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -93,8 +93,13 @@ class AgentWorkspacePage(QWidget):
         self._model_configured = False
         self._busy = False
         self._approval_busy: set[int] = set()
-        self._last_message_signature = None
+        self._visible_messages: tuple = ()
         self._pending_scroll_handler = None
+        self._scroll_epoch = 0
+        self._programmatic_scroll = False
+        self._rebuilding = False
+        self._scrolled_away_during_busy = False
+        self._unseen_reply = False
         self._build_ui()
 
     # ---------------------------------------------------------------- UI
@@ -117,7 +122,6 @@ class AgentWorkspacePage(QWidget):
             description="请先在设置中配置当前模型，然后继续当前学习任务。",
             variant="warning",
         )
-        self.settings_button = SAButton("前往设置", variant="subtle", size="small")
         self.settings_button = SAButton("前往设置", variant="subtle", size="small")
         self.settings_button.setObjectName("AgentGoToSettings")
         self.settings_button.clicked.connect(self.settings_requested.emit)
@@ -153,6 +157,15 @@ class AgentWorkspacePage(QWidget):
         self.conversation_layout.addStretch()
         self.conversation_scroll.setWidget(self.conversation_body)
         root.addWidget(self.conversation_scroll, stretch=1)
+        self.latest_button = SAButton("↓ 最新", variant="secondary", size="small",
+                                      parent=self.conversation_scroll.viewport())
+        self.latest_button.setObjectName("AgentLatestButton")
+        self.latest_button.clicked.connect(self._on_latest_clicked)
+        self.latest_button.hide()
+        self.conversation_scroll.viewport().installEventFilter(self)
+        bar = self.conversation_scroll.verticalScrollBar()
+        bar.valueChanged.connect(self._on_scroll_value_changed)
+        bar.rangeChanged.connect(self._update_latest_button)
 
         root.addWidget(self._build_approvals())
 
@@ -235,21 +248,33 @@ class AgentWorkspacePage(QWidget):
         new_session_id = int(session["id"])
         session_changed = previous_session_id != new_session_id
         previous_scroll = self.conversation_scroll.verticalScrollBar().value()
+        previous_messages = self._visible_messages
+        reading_history = self._scrolled_away_during_busy or (
+            self._busy and self._distance_from_bottom() > 48)
+        self._clear_pending_scroll()
+        self._rebuilding = True
+        if session_changed:
+            self._unseen_reply = False
+            self._scrolled_away_during_busy = False
 
         self._bind_task_context(task, route_name)
         self.task_context_card.setVisible(True)
 
         self._clear_conversation()
         visible_count = 0
+        assistant_widgets: dict[int, AgentMessageWidget] = {}
         for message in messages:
             role = message.get("role")
             if role == "user":
-                self._add_bubble("你", str(message.get("content") or ""), "user")
+                self._add_bubble("你", str(message.get("content") or ""), "user",
+                                 message_id=message.get("id"))
                 visible_count += 1
             elif role == "assistant" and not message.get("tool_calls_json"):
                 text = str(message.get("content") or "")
                 if text.strip():
-                    self._add_bubble("学习助手", text, "assistant")
+                    widget = self._add_bubble("学习助手", text, "assistant",
+                                              message_id=message.get("id"))
+                    assistant_widgets[visible_count] = widget
                     visible_count += 1
         self.empty_hint.setVisible(visible_count == 0)
 
@@ -264,14 +289,32 @@ class AgentWorkspacePage(QWidget):
         self.current_session_id = new_session_id
         self.set_error("")
         self.set_busy(turn_busy)
+        if session_changed:
+            self._scrolled_away_during_busy = False
 
-        signature = self._visible_message_signature(messages)
-        should_scroll = session_changed or signature != self._last_message_signature
-        self._last_message_signature = signature
-        if should_scroll:
-            QTimer.singleShot(0, self._scroll_bottom)
+        current = self._visible_message_signature(messages)
+        new_assistant = None
+        if (not session_changed and len(current) > len(previous_messages)
+                and current[:len(previous_messages)] == previous_messages):
+            for index in range(len(previous_messages), len(current)):
+                if current[index][0] == "assistant":
+                    new_assistant = assistant_widgets.get(index)
+                    break
+        self._visible_messages = current
+        if session_changed:
+            self._schedule_scroll(to_bottom=True)
+        elif new_assistant is not None and reading_history:
+            self._unseen_reply = True
+            self._restore_scroll(previous_scroll)
+        elif new_assistant is not None:
+            self._unseen_reply = False
+            self._schedule_scroll(widget=new_assistant)
+        elif len(current) > len(previous_messages):
+            self._schedule_scroll(to_bottom=True)
         else:
             self._restore_scroll(previous_scroll)
+        self._rebuilding = False
+        self._update_latest_button()
 
     def _bind_task_context(self, task, route_name: str | None) -> None:
         activity = getattr(task, "learning_activity_kind", None)
@@ -410,78 +453,111 @@ class AgentWorkspacePage(QWidget):
         return preview
 
     # ------------------------------------------------------- interaction
+    def _distance_from_bottom(self) -> int:
+        bar = self.conversation_scroll.verticalScrollBar()
+        return bar.maximum() - bar.value()
+
+    def _on_scroll_value_changed(self, _value: int) -> None:
+        if self._busy and not self._programmatic_scroll and not self._rebuilding:
+            self._scrolled_away_during_busy = self._distance_from_bottom() > 48
+        if self._distance_from_bottom() <= 48:
+            self._unseen_reply = False
+        self._update_latest_button()
+
+    def _update_latest_button(self, *_args) -> None:
+        away = self._distance_from_bottom() > 48
+        self.latest_button.setText("新回复 ↓" if self._unseen_reply else "↓ 最新")
+        self.latest_button.setVisible(away and self.current_session_id is not None)
+        if away:
+            viewport = self.conversation_scroll.viewport()
+            self.latest_button.adjustSize()
+            self.latest_button.move(max(0, viewport.width() - self.latest_button.width() - 12),
+                                    max(0, viewport.height() - self.latest_button.height() - 12))
+            self.latest_button.raise_()
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt API
+        if watched is self.conversation_scroll.viewport() and event.type() == QEvent.Type.Resize:
+            QTimer.singleShot(0, self, self._update_latest_button)
+        return super().eventFilter(watched, event)
+
+    def _on_latest_clicked(self) -> None:
+        self._unseen_reply = False
+        self._schedule_scroll(to_bottom=True)
+
     def _scroll_bottom(self) -> None:
         self._schedule_scroll(to_bottom=True)
 
     def _restore_scroll(self, value: int) -> None:
-        """Restore a previous scroll offset without forcing a jump to bottom."""
-        if int(value) <= 0:
-            self._clear_pending_scroll()
-            self.conversation_scroll.verticalScrollBar().setValue(0)
-            return
-        self._schedule_scroll(to_bottom=False, value=max(0, int(value)))
+        self._schedule_scroll(value=max(0, int(value)))
 
     def _clear_pending_scroll(self) -> None:
-        handler = getattr(self, "_pending_scroll_handler", None)
-        if handler is None:
-            return
-        try:
-            self.conversation_scroll.verticalScrollBar().rangeChanged.disconnect(handler)
-        except (RuntimeError, TypeError):
-            pass
+        self._scroll_epoch += 1
+        handler = self._pending_scroll_handler
+        if handler is not None:
+            try:
+                self.conversation_scroll.verticalScrollBar().rangeChanged.disconnect(handler)
+            except (RuntimeError, TypeError):
+                pass
         self._pending_scroll_handler = None
 
-    def _schedule_scroll(self, *, to_bottom: bool, value: int = 0) -> None:
-        """Apply a scroll target now and again once the rebuilt layout lands.
-
-        Only one pending handler can exist, so a status/approval-only refresh can
-        never leave a stale handler that later fights a real scroll-to-bottom.
-        """
-        bar = self.conversation_scroll.verticalScrollBar()
+    def _schedule_scroll(self, *, to_bottom: bool = False, value: int = 0,
+                         widget: AgentMessageWidget | None = None) -> None:
+        """Resolve targets only after layout; superseded Session targets are inert."""
         self._clear_pending_scroll()
+        epoch = self._scroll_epoch
+        session_id = self.current_session_id
+        bar = self.conversation_scroll.verticalScrollBar()
 
         def _apply(*_args):
-            target = bar.maximum() if to_bottom else min(value, bar.maximum())
-            bar.setValue(target)
+            if epoch != self._scroll_epoch or session_id != self.current_session_id:
+                return
+            self.conversation_body.layout().activate()
+            if widget is not None:
+                if widget.parent() is not self.conversation_body:
+                    return
+                top = widget.mapTo(self.conversation_body, QPoint(0, 0)).y()
+                target = min(max(0, top - 16), bar.maximum())
+            else:
+                target = bar.maximum() if to_bottom else min(value, bar.maximum())
+            self._programmatic_scroll = True
+            try:
+                bar.setValue(target)
+            finally:
+                self._programmatic_scroll = False
+            self._update_latest_button()
 
         self._pending_scroll_handler = _apply
         bar.rangeChanged.connect(_apply)
-        _apply()
-        QTimer.singleShot(0, _apply)
-        QTimer.singleShot(250, lambda: self._release_pending_scroll(_apply))
+        QTimer.singleShot(0, self, _apply)
+        QTimer.singleShot(40, self, _apply)
+        QTimer.singleShot(160, self, lambda: self._release_pending_scroll(_apply, epoch))
 
-    def _release_pending_scroll(self, handler) -> None:
-        if self._pending_scroll_handler is not handler:
+    def _release_pending_scroll(self, handler, epoch: int) -> None:
+        if epoch != self._scroll_epoch or self._pending_scroll_handler is not handler:
             return
-        try:
-            self.conversation_scroll.verticalScrollBar().rangeChanged.disconnect(handler)
-        except (RuntimeError, TypeError):
-            pass
-        self._pending_scroll_handler = None
+        self._clear_pending_scroll()
 
     @staticmethod
     def _visible_message_signature(messages: list[dict]) -> tuple:
-        """Signature of the visible conversation tail (works with or without ids)."""
-        visible: list[dict] = []
+        """Only public user/assistant content participates in append detection."""
+        visible = []
         for message in messages:
             role = message.get("role")
-            if role == "user":
-                visible.append(message)
-            elif role == "assistant" and not message.get("tool_calls_json"):
-                if str(message.get("content") or "").strip():
-                    visible.append(message)
-        if not visible:
-            return (0, None, "")
-        last = visible[-1]
-        return (len(visible), last.get("id"), str(last.get("content") or ""))
+            if role == "user" or (role == "assistant" and not message.get("tool_calls_json")
+                                   and str(message.get("content") or "").strip()):
+                visible.append((role, message.get("id"), str(message.get("content") or "")))
+        return tuple(visible)
 
     def clear_session(self, error: str = "") -> None:
         self.current_session_id = None
         self._approval_busy.clear()
         self._busy = False
         self._model_configured = False
-        self._last_message_signature = None
+        self._visible_messages = ()
+        self._unseen_reply = False
+        self._scrolled_away_during_busy = False
         self._clear_pending_scroll()
+        self.latest_button.hide()
         self.task_context_card.set_metadata("", "", "")
         self.task_context_card.set_description("")
         self.task_context_card.setVisible(False)
@@ -518,6 +594,8 @@ class AgentWorkspacePage(QWidget):
                                    else button.property("normal_text"))
 
     def set_busy(self, busy: bool) -> None:
+        if busy and not self._busy:
+            self._scrolled_away_during_busy = self._distance_from_bottom() > 48
         self._busy = bool(busy)
         self._update_approval_buttons()
         self._update_interaction_status()
@@ -546,15 +624,18 @@ class AgentWorkspacePage(QWidget):
                 widget.deleteLater()
         self.conversation_layout.addStretch()
 
-    def _add_bubble(self, speaker: str, text: str, role: str) -> None:
+    def _add_bubble(self, speaker: str, text: str, role: str,
+                    message_id: int | None = None) -> AgentMessageWidget | None:
         """Present one message. Rendering lives entirely in AgentMessageWidget."""
         if role not in (USER_ROLE, ASSISTANT_ROLE):
             return
-        widget = AgentMessageWidget(role=role, text=text, speaker=speaker)
+        widget = AgentMessageWidget(role=role, text=text, speaker=speaker,
+                                    message_id=message_id)
         # Insert before the trailing stretch.
         self.conversation_layout.insertWidget(
             max(0, self.conversation_layout.count() - 1), widget
         )
+        return widget
 
     def _update_send_enabled(self) -> None:
         text = self.composer.text()

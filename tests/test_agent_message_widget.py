@@ -340,3 +340,80 @@ def test_markdown_view_restyles_on_theme_change(qtbot, qapp):
     assert light_html != dark_html
     assert "#2d2d31" in dark_html.lower()  # dark surface_alt code surface
     assert "#eef2f6" in light_html.lower()  # light surface_alt code surface
+
+
+def test_markdown_height_covers_fractional_layout_and_theme_resize(qtbot, qapp):
+    import math
+    from app.ui.agent_message_widget import BODY_HEIGHT_SLACK
+    from app.ui.design.theme_manager import ThemeManager
+
+    view = AgentMarkdownView()
+    qtbot.addWidget(view)
+    view.resize(377, 100)
+    view.show()
+    markdown = (
+        "## SFT 基础\n\n中文段落：**监督微调**与 *训练*。\n\n"
+        "- instruction\n- input\n\n1. 首先\n2. 然后\n\n"
+        "`loss`\n\n```json\n{\"input\":\"hello\"}\n```\n\n"
+        "| 字段 | 内容 |\n| --- | --- |\n| SFT | 示例 |\n\n\n\n最后一行。"
+    )
+    view.set_markdown(markdown)
+    for theme in ("light", "dark"):
+        ThemeManager.instance().set_theme(theme)
+        ThemeManager.instance().apply(qapp)
+        for width in (377, 501, 298):
+            view.resize(width, view.height())
+            qtbot.waitUntil(lambda: view.document().size().width() == view.viewport().width())
+            qtbot.waitUntil(lambda: view.height() >= math.ceil(view.document().size().height())
+                            + BODY_HEIGHT_SLACK)
+            assert view.verticalScrollBar().maximum() == 0
+            assert view.horizontalScrollBar().maximum() == 0
+
+
+def test_long_pre_table_and_tokens_wrap_without_horizontal_loss(qtbot):
+    view = AgentMarkdownView()
+    qtbot.addWidget(view)
+    view.resize(340, 100)
+    view.show()
+    md = (
+        "中文" * 220 + "\n\n" + "x" * 400 + "\n\n"
+        "```python\nprint('" + "a" * 500 + "')\n```\n\n"
+        "```json\n{\"key\":\"" + "v" * 450 + "\"}\n```\n\n"
+        "```\n<|im_start|>system" + "z" * 360 + "\n```\n\n"
+        "| 列A | 列B |\n| --- | --- |\n| " + "t" * 300 + " | " + "u" * 300 + " |\n"
+    )
+    view.set_markdown(md)
+    qtbot.waitUntil(lambda: view.document().size().height() > 200)
+    assert view.document().idealWidth() <= view.viewport().width() + 2
+    assert view.horizontalScrollBar().maximum() == 0
+    block = view.document().begin()
+    long_blocks = 0
+    while block.isValid():
+        if len(block.text()) >= 300:
+            long_blocks += 1
+            assert block.layout().lineCount() > 1, block.text()[:30]
+        block = block.next()
+    assert long_blocks >= 6
+
+
+def test_message_identity_and_responsive_width(qtbot, repo):
+    from app.ui.agent_workspace_page import AgentWorkspacePage
+    task = repo.create(title="SFT", scheduled_date="2026-01-05", source="generated")
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.show()
+    for width in (1200, 700, 380):
+        page.resize(width, 640)
+        page.load_session({"id": 1}, [
+            {"id": 7, "role": "user", "content": "u" * 500},
+            {"id": 8, "role": "assistant", "content": "正文" * 450},
+            {"id": 9, "role": "assistant", "content": "", "tool_calls_json": '[{"id":"x"}]'},
+            {"id": 10, "role": "tool", "content": "secret"},
+        ], task, None, True)
+        rows = page.findChildren(AgentMessageWidget)
+        qtbot.waitUntil(lambda: rows[1].width() == page.conversation_scroll.viewport().width())
+        viewport = page.conversation_scroll.viewport().width()
+        assert [w.message_id for w in rows] == [7, 8]
+        assert rows[0].bubble.width() <= min(USER_MAX_WIDTH, viewport * .80 + 2)
+        assert rows[1].bubble.width() <= min(ASSISTANT_MAX_WIDTH, viewport * .90 + 2)
+        assert not page.conversation_scroll.horizontalScrollBar().isVisible()

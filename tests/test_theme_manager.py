@@ -154,6 +154,7 @@ def test_agent_conversation_selectors_present_in_both_themes():
             "QLabel#AgentApprovalNoteCaption",
             "QLabel#AgentApprovalNoteValue",
             "QLabel#AgentApprovalNotePreview",
+            "QPushButton#AgentLatestButton",
         ):
             assert selector in rendered, (theme, selector)
 

@@ -789,3 +789,15 @@ QLabel#AgentInputWarning {
     color: {{danger}};
     font-size: {{font_size_caption}};
 }
+
+/* UX-3 latest / unread conversation affordance */
+QPushButton#AgentLatestButton {
+    background-color: {{surface}};
+    color: {{accent}};
+    border: 1px solid {{border}};
+    border-radius: {{radius_small}};
+    padding: 4px 10px;
+}
+QPushButton#AgentLatestButton:hover {
+    background-color: {{surface_hover}};
+}
