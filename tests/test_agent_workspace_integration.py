@@ -134,7 +134,7 @@ def test_today_task_opens_internal_workspace_and_resumes_same_session(
     assert window.page_header.title() == "学习会话"
     assert window.page_header.subtitle() == "Task A"
     assert window.sidebar.current_key() == PageKey.TODAY.value
-    assert window.agent_workspace_page.task_title_label.text() == "Task A"
+    assert not hasattr(window.agent_workspace_page, "task_title_label")
     assert not window.agent_workspace_page.input_edit.isEnabled()
     window._on_start_study(task_a.id)
     assert sessions.get_active_for_task(task_a.id)["id"] == session_a["id"]
@@ -146,11 +146,14 @@ def test_today_task_opens_internal_workspace_and_resumes_same_session(
     session_b = sessions.get_active_for_task(task_b.id)
     assert session_b["id"] != session_a["id"]
     assert window.agent_workspace_page.current_session_id == session_b["id"]
-    assert window.agent_workspace_page.task_title_label.text() == "Task B"
+    assert window.page_header.subtitle() == "Task B"
     assert _message_widgets(window.agent_workspace_page) == []
 
     window.agent_workspace_page.back_button.click()
     assert window.stack.currentWidget() is window.today_page
+    # Returning restores the Today header contract (no stale Workspace title).
+    assert window.page_header.title() == "今日"
+    assert window.page_header.subtitle() == "2026-01-05"
     assert sessions.get(session_a["id"])["status"] == "active"
     window.close()
 
@@ -176,7 +179,7 @@ def test_workspace_switch_clears_stale_approvals_errors_and_input(
     page.set_error("old error")
     page.input_edit.setPlainText("old unsent input")
     window._on_start_study(task_b.id)
-    assert page.task_title_label.text() == "B"
+    assert window.page_header.subtitle() == "B"
     assert page.approvals_layout.count() == 0
     assert not page.error_label.text() and not page.input_edit.toPlainText()
     window._on_start_study(task_a.id)
@@ -198,7 +201,7 @@ def test_missing_session_reload_clears_previous_task_content(
     monkeypatch.setattr(sessions, "get", lambda _sid: (_ for _ in ()).throw(RuntimeError("db error")))
     window._reload_agent_session(sid)
     assert page.current_session_id is None
-    assert page.task_title_label.text() == ""
+    assert page.current_session_id is None
     assert not page.approvals_container.isVisible()
     assert "无法重新加载" in page.error_label.text()
     window.close()
@@ -267,7 +270,7 @@ def test_worker_failure_reloads_persisted_user_message_and_shows_error(
     assert _message_texts(page) == ["Keep this on failure"]
     assert not page.error_label.isHidden()
     assert "secret" not in page.error_label.text()
-    assert page.busy_label.isHidden()
+    assert page.interaction_status_label.isHidden()
     window.close()
 
 
@@ -291,12 +294,12 @@ def test_stale_worker_completion_never_renders_into_another_session(
     assert entered.wait(3)
     next(w for w in window._task_widgets if w.task().id == task_b.id).start_study_btn.click()
     session_b = page.current_session_id
-    assert page.task_title_label.text() == "B"
+    assert window.page_header.subtitle() == "B"
     release.set()
 
     qtbot.waitUntil(lambda: not window._agent_inflight_sessions, timeout=5000)
     assert page.current_session_id == session_b
-    assert page.task_title_label.text() == "B"
+    assert window.page_header.subtitle() == "B"
     assert _message_widgets(page) == []
     window.close()
 
@@ -320,7 +323,7 @@ def test_reenter_inflight_session_keeps_busy_until_worker_finishes(
     window._on_start_study(task.id)
     assert page.current_session_id == sid
     assert not page.send_button.isEnabled() and not page.input_edit.isEnabled()
-    assert not page.busy_label.isHidden()
+    assert not page.interaction_status_label.isHidden()
     window._on_agent_send(sid, "must not start a second turn")
     assert len(window._agent_inflight_sessions) == 1
     release.set()
@@ -345,9 +348,9 @@ def test_workspace_status_and_optional_config_degradation_are_nonblocking(
     qtbot.addWidget(window)
     window._on_start_study(task.id)
     page = window.agent_workspace_page
-    assert "MCP 配置无效" in page.capability_warning_label.text()
-    assert "Sandbox 配置无效" in page.capability_warning_label.text()
-    assert "SECRET_MCP_URL" not in page.capability_warning_label.text()
+    assert "MCP 配置无效" in page.capability_warning_banner.description()
+    assert "Sandbox 配置无效" in page.capability_warning_banner.description()
+    assert "SECRET_MCP_URL" not in page.capability_warning_banner.description()
     page.input_edit.setPlainText("native question")
     page.send_button.click()
     qtbot.waitUntil(lambda: not window._agent_inflight_sessions, timeout=5000)
@@ -520,4 +523,29 @@ def test_full_workspace_worker_context_tool_loop_and_verifier_growth(
     verified = rm.verify(conn, before=before)
     assert verified["ok"] is True, verified
     assert verified["history_new_rows"]["agent_messages"] == 4
+    window.close()
+
+
+def test_reload_preserves_unsent_draft_and_switch_clears_it(
+    qtbot, conn, repo, task_service, date_service
+):
+    task_a = repo.create(title="Draft A", scheduled_date="2026-01-05", source="generated")
+    task_b = repo.create(title="Draft B", scheduled_date="2026-01-05", source="generated")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    window = _make_window(conn, task_service, date_service, sessions, lambda _c: None)
+    qtbot.addWidget(window)
+
+    window._on_start_study(task_a.id)
+    page = window.agent_workspace_page
+    session_a = page.current_session_id
+    page.input_edit.setPlainText("unsent draft for A")
+
+    # A status / approval-style reload of the same Session must not drop the draft.
+    window._reload_agent_session(session_a)
+    assert page.current_session_id == session_a
+    assert page.input_edit.toPlainText() == "unsent draft for A"
+
+    # A real Session switch clears the draft so it never leaks into B.
+    window._on_start_study(task_b.id)
+    assert page.input_edit.toPlainText() == ""
     window.close()

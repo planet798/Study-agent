@@ -18,4 +18,5 @@ __all__ = [
     "info_banner",
     "navigation",
     "page_header",
+    "flow_layout",
 ]

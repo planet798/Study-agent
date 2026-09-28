@@ -140,6 +140,20 @@ def test_agent_conversation_selectors_present_in_both_themes():
             "QTextBrowser#AgentUserMessageText",
             "QTextBrowser#AgentAssistantMarkdown",
             "QScrollArea#AgentConversationScroll",
+            "QFrame#AgentComposer",
+            "QPlainTextEdit#AgentMessageInput",
+            "QLabel#AgentComposerHint",
+            "QLabel#AgentComposerCounter",
+            "QLabel#AgentInputWarning",
+            "QLabel#AgentInteractionStatus",
+            "QLabel#AgentErrorBanner",
+            "QLabel#AgentTaskDescription",
+            "QFrame#AgentApprovalCard",
+            "QLabel#AgentApprovalSectionTitle",
+            "QLabel#AgentApprovalActionTitle",
+            "QLabel#AgentApprovalNoteCaption",
+            "QLabel#AgentApprovalNoteValue",
+            "QLabel#AgentApprovalNotePreview",
         ):
             assert selector in rendered, (theme, selector)
 

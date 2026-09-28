@@ -1,13 +1,28 @@
-"""Task-driven internal Agent Workspace (not a Sidebar / PageSpec page)."""
+"""Task-driven internal Agent Workspace (not a Sidebar / PageSpec page).
+
+UX-2 information hierarchy::
+
+    Global SAPageHeader   title=学习会话  subtitle=Task title
+    Workspace
+        Toolbar           [← 返回今日]  + capability chips (wrap)
+        Task Context Card route / activity / duration tags + description
+        Warning / error / model-unavailable surfaces (only when relevant)
+        Empty hint        (only when no visible messages)
+        Conversation      (UX-1 AgentMessageWidget, single outer scroll)
+        Pending approvals (only when pending)
+        Composer          (AgentComposer, independent surface)
+
+The Task title is intentionally **not** rendered here: its single primary home
+is the SAPageHeader subtitle, so the Workspace never duplicates it.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QEvent, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -15,23 +30,55 @@ from PySide6.QtWidgets import (
 
 from ..agent.status import AgentCapabilityStatus
 from ..services.learning_activity import activity_label
+from .agent_composer import MAX_AGENT_INPUT_CHARS, AgentComposer
 from .agent_message_widget import ASSISTANT_ROLE, USER_ROLE, AgentMessageWidget
+from .agent_task_context_card import AgentTaskContextCard
 from .components.button import SAButton
+from .components.empty_state import SAEmptyState
+from .components.flow_layout import FlowWidget
+from .components.info_banner import SAInfoBanner
+from .components.tag import SATag
 from .design import spacing
 from .task_widget import format_minutes
 
 
-MAX_AGENT_INPUT_CHARS = 20_000
-
 STATUS_WARNINGS = {
     "mcp_config_invalid": "MCP 配置无效，本次仅使用内置能力。",
-    "sandbox_config_invalid": "Sandbox 配置无效，文件与执行能力已禁用。",
+    "sandbox_config_invalid": "Sandbox 配置无效，相关能力已禁用。",
     "sandbox_execution_unavailable": "Sandbox 文件能力可用，但代码执行环境不可用。",
+}
+
+# Static, application-owned approval copy. Model output can never set these.
+APPROVAL_ACTIONS = {
+    "request_complete_current_task": {
+        "title": "完成任务",
+        "description": (
+            "批准后按现有任务完成流程把当前任务标记为完成；"
+            "不代表通过验收或提高 Mastery。"
+        ),
+        "approve": "批准",
+        "reject": "拒绝",
+    },
+    "request_start_assessment": {
+        "title": "开始正式验收",
+        "description": (
+            "批准后会生成或恢复验收题。你仍需亲自回答，"
+            "只有提交并判题后才可能更新 Mastery。"
+        ),
+        "approve": "批准并开始验收",
+        "reject": "拒绝",
+    },
+    "request_save_learning_note": {
+        "title": "保存学习笔记",
+        "description": "批准后保存这次的学习笔记。笔记不是 Mastery 或任务完成证据。",
+        "approve": "批准保存",
+        "reject": "拒绝",
+    },
 }
 
 
 class AgentWorkspacePage(QWidget):
-    """Plain-text conversation view for one task-bound Agent Session."""
+    """Task-bound conversation Workspace with a product-grade interaction shell."""
 
     back_requested = Signal()
     send_requested = Signal(int, str)
@@ -46,61 +93,37 @@ class AgentWorkspacePage(QWidget):
         self._model_configured = False
         self._busy = False
         self._approval_busy: set[int] = set()
+        self._last_message_signature = None
+        self._pending_scroll_handler = None
         self._build_ui()
 
+    # ---------------------------------------------------------------- UI
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 16, 24, 20)
-        root.setSpacing(12)
+        root.setContentsMargins(spacing.XXL, spacing.LG, spacing.XXL, spacing.XL)
+        root.setSpacing(spacing.LG)
 
-        self.back_button = SAButton("← 返回今日", variant="subtle", size="small")
-        self.back_button.clicked.connect(self.back_requested.emit)
-        root.addWidget(self.back_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        root.addLayout(self._build_toolbar())
 
-        self.task_title_label = QLabel("")
-        self.task_title_label.setObjectName("AgentTaskTitle")
-        self.task_title_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.task_title_label.setWordWrap(True)
-        root.addWidget(self.task_title_label)
+        self.task_context_card = AgentTaskContextCard()
+        root.addWidget(self.task_context_card)
 
-        self.task_meta_label = QLabel("")
-        self.task_meta_label.setObjectName("TaskMeta")
-        self.task_meta_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.task_meta_label.setWordWrap(True)
-        root.addWidget(self.task_meta_label)
+        self.capability_warning_banner = SAInfoBanner(variant="warning")
+        self.capability_warning_banner.hide()
+        root.addWidget(self.capability_warning_banner)
 
-        self.task_description_label = QLabel("")
-        self.task_description_label.setObjectName("AgentTaskDescription")
-        self.task_description_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.task_description_label.setWordWrap(True)
-        self.task_description_label.setVisible(False)
-        root.addWidget(self.task_description_label)
-
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("AgentStatusRow")
-        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.status_label.setWordWrap(True)
-        root.addWidget(self.status_label)
-        self.capability_warning_label = QLabel("")
-        self.capability_warning_label.setObjectName("AgentCapabilityWarning")
-        self.capability_warning_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.capability_warning_label.setWordWrap(True)
-        self.capability_warning_label.hide()
-        root.addWidget(self.capability_warning_label)
-
-        self.model_unavailable_label = QLabel(
-            "AI 模型尚未配置，请先在设置中配置当前模型。"
+        self.model_unavailable_banner = SAInfoBanner(
+            title="AI 模型尚未配置",
+            description="请先在设置中配置当前模型，然后继续当前学习任务。",
+            variant="warning",
         )
-        self.model_unavailable_label.setObjectName("AgentModelUnavailable")
-        self.model_unavailable_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.model_unavailable_label.setWordWrap(True)
-        self.model_unavailable_label.setVisible(False)
-        root.addWidget(self.model_unavailable_label)
+        self.settings_button = SAButton("前往设置", variant="subtle", size="small")
         self.settings_button = SAButton("前往设置", variant="subtle", size="small")
         self.settings_button.setObjectName("AgentGoToSettings")
         self.settings_button.clicked.connect(self.settings_requested.emit)
-        self.settings_button.hide()
-        root.addWidget(self.settings_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.model_unavailable_banner.set_action(self.settings_button)
+        self.model_unavailable_banner.hide()
+        root.addWidget(self.model_unavailable_banner)
 
         self.error_label = QLabel("")
         self.error_label.setObjectName("AgentErrorBanner")
@@ -108,6 +131,16 @@ class AgentWorkspacePage(QWidget):
         self.error_label.setWordWrap(True)
         self.error_label.setVisible(False)
         root.addWidget(self.error_label)
+
+        self.empty_hint = SAEmptyState(
+            title="从当前任务开始学习",
+            description=(
+                "你可以让我解释核心概念、分析代码或实验结果，"
+                "也可以在准备好后发起正式验收。"
+            ),
+        )
+        self.empty_hint.setObjectName("AgentEmptyHint")
+        root.addWidget(self.empty_hint)
 
         self.conversation_scroll = QScrollArea()
         self.conversation_scroll.setObjectName("AgentConversationScroll")
@@ -121,47 +154,65 @@ class AgentWorkspacePage(QWidget):
         self.conversation_scroll.setWidget(self.conversation_body)
         root.addWidget(self.conversation_scroll, stretch=1)
 
+        root.addWidget(self._build_approvals())
+
+        self.interaction_status_label = QLabel("")
+        self.interaction_status_label.setObjectName("AgentInteractionStatus")
+        self.interaction_status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.interaction_status_label.setVisible(False)
+        root.addWidget(self.interaction_status_label)
+
+        self.composer = AgentComposer()
+        self.composer.send_clicked.connect(self._send_current)
+        self.composer.input_edit.textChanged.connect(self._update_send_enabled)
+        root.addWidget(self.composer)
+
+    def _build_toolbar(self) -> QVBoxLayout:
+        toolbar = QVBoxLayout()
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(spacing.SM)
+
+        back_row = QHBoxLayout()
+        back_row.setContentsMargins(0, 0, 0, 0)
+        self.back_button = SAButton("← 返回今日", variant="subtle", size="small")
+        self.back_button.clicked.connect(self.back_requested.emit)
+        back_row.addWidget(self.back_button)
+        back_row.addStretch(1)
+        toolbar.addLayout(back_row)
+
+        self.capability_chips_widget = FlowWidget()
+        self.capability_chips: dict[str, SATag] = {}
+        for key in ("ai", "approval", "mcp", "sandbox", "sandbox_exec"):
+            tag = SATag("", "neutral")
+            self.capability_chips_widget.add_widget(tag)
+            self.capability_chips[key] = tag
+        toolbar.addWidget(self.capability_chips_widget)
+        return toolbar
+
+    def _build_approvals(self) -> QWidget:
         self.approvals_container = QWidget()
         self.approvals_container.setObjectName("AgentPendingApprovals")
-        self.approvals_layout = QVBoxLayout(self.approvals_container)
+        container = QVBoxLayout(self.approvals_container)
+        container.setContentsMargins(0, 0, 0, 0)
+        container.setSpacing(spacing.SM)
+
+        self.approval_section_title = QLabel("待确认操作")
+        self.approval_section_title.setObjectName("AgentApprovalSectionTitle")
+        self.approval_section_title.setTextFormat(Qt.TextFormat.PlainText)
+        container.addWidget(self.approval_section_title)
+        self.approval_section_caption = QLabel("这些操作只有在你确认后才会执行。")
+        self.approval_section_caption.setObjectName("AgentApprovalSectionCaption")
+        self.approval_section_caption.setTextFormat(Qt.TextFormat.PlainText)
+        container.addWidget(self.approval_section_caption)
+
+        self.approvals_layout = QVBoxLayout()
+        self.approvals_layout.setContentsMargins(0, 0, 0, 0)
+        self.approvals_layout.setSpacing(spacing.SM)
+        container.addLayout(self.approvals_layout)
         self.approvals_container.hide()
-        root.addWidget(self.approvals_container)
+        return self.approvals_container
 
-        self.empty_hint = QLabel(
-            "围绕这个任务开始学习。你可以让我讲解概念、分析代码、"
-            "设计练习，或询问当前学习状态。"
-        )
-        self.empty_hint.setObjectName("AgentEmptyHint")
-        self.empty_hint.setTextFormat(Qt.TextFormat.PlainText)
-        self.empty_hint.setWordWrap(True)
-        root.addWidget(self.empty_hint)
-
-        self.busy_label = QLabel("Agent 正在思考…")
-        self.busy_label.setObjectName("AgentBusyLabel")
-        self.busy_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.busy_label.setVisible(False)
-        root.addWidget(self.busy_label)
-        self.input_warning_label = QLabel("单条消息过长，请拆分后发送。")
-        self.input_warning_label.setObjectName("AgentInputWarning")
-        self.input_warning_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.input_warning_label.hide()
-        root.addWidget(self.input_warning_label)
-
-        input_row = QHBoxLayout()
-        input_row.setSpacing(10)
-        self.input_edit = QPlainTextEdit()
-        self.input_edit.setObjectName("AgentMessageInput")
-        self.input_edit.setPlaceholderText("围绕当前学习任务提问…")
-        self.input_edit.setFixedHeight(88)
-        self.input_edit.textChanged.connect(self._update_send_enabled)
-        self.input_edit.installEventFilter(self)
-        input_row.addWidget(self.input_edit, stretch=1)
-        self.send_button = SAButton("发送", variant="primary", size="medium")
-        self.send_button.setObjectName("AgentSendButton")
-        self.send_button.clicked.connect(self._send_current)
-        input_row.addWidget(self.send_button, alignment=Qt.AlignmentFlag.AlignBottom)
-        root.addLayout(input_row)
-
+    # ------------------------------------------------------------- state
     def load_session(
         self,
         session: dict,
@@ -175,23 +226,18 @@ class AgentWorkspacePage(QWidget):
         turn_busy: bool = False,
         approval_busy: tuple[int, ...] = (),
     ) -> None:
-        """Replace all Task/Session state; never leaves previous Session content."""
-        self.current_session_id = int(session["id"])
-        self.task_title_label.setText(task.title or "")
-        activity = getattr(task, "learning_activity_kind", None)
-        if activity:
-            activity_text = activity_label(activity)
-        elif task.knowledge_point_id is not None or task.topic_id is not None:
-            activity_text = "知识学习"
-        else:
-            activity_text = "学习活动"
-        route_text = route_name or ("未分类" if task.route_id is None else "学习路线")
-        self.task_meta_label.setText(
-            f"{route_text} · {activity_text} · {format_minutes(task.estimated_minutes)}"
-        )
-        description = (task.description or "").strip()
-        self.task_description_label.setText(description)
-        self.task_description_label.setVisible(bool(description))
+        """Replace Task/Session state without leaking content across Sessions.
+
+        Same-Session reloads (status / approval / error refresh) preserve the
+        user's unsent composer draft; a real Session switch clears it.
+        """
+        previous_session_id = self.current_session_id
+        new_session_id = int(session["id"])
+        session_changed = previous_session_id != new_session_id
+        previous_scroll = self.conversation_scroll.verticalScrollBar().value()
+
+        self._bind_task_context(task, route_name)
+        self.task_context_card.setVisible(True)
 
         self._clear_conversation()
         visible_count = 0
@@ -206,112 +252,249 @@ class AgentWorkspacePage(QWidget):
                     self._add_bubble("学习助手", text, "assistant")
                     visible_count += 1
         self.empty_hint.setVisible(visible_count == 0)
+
         self._approval_busy = set(approval_busy)
         self._render_approvals(approvals)
         status = capability_status or AgentCapabilityStatus(model_configured=bool(model_configured))
         self._model_configured = bool(status.model_configured)
-        parts = ["AI 已配置" if self._model_configured else "AI 未配置", "应用数据只读"]
-        if status.approvals_enabled:
-            parts.append("写操作需批准")
-        if status.mcp_configured:
-            parts.append("MCP 已配置")
-        if status.sandbox_configured:
-            parts.append("Sandbox 已启用")
-        if status.sandbox_execution_configured:
-            parts.append("Sandbox 执行已配置")
-        self.status_label.setText(" · ".join(parts))
-        warnings = [STATUS_WARNINGS[code] for code in status.warnings if code in STATUS_WARNINGS]
-        self.capability_warning_label.setText("\n".join(warnings))
-        self.capability_warning_label.setVisible(bool(warnings))
-        self.model_unavailable_label.setVisible(not self._model_configured)
-        self.settings_button.setVisible(not self._model_configured)
-        self.input_edit.clear()
+        self._apply_capability_status(status)
+
+        if session_changed:
+            self.composer.clear()
+        self.current_session_id = new_session_id
         self.set_error("")
         self.set_busy(turn_busy)
-        QTimer.singleShot(0, self._scroll_bottom)
 
+        signature = self._visible_message_signature(messages)
+        should_scroll = session_changed or signature != self._last_message_signature
+        self._last_message_signature = signature
+        if should_scroll:
+            QTimer.singleShot(0, self._scroll_bottom)
+        else:
+            self._restore_scroll(previous_scroll)
+
+    def _bind_task_context(self, task, route_name: str | None) -> None:
+        activity = getattr(task, "learning_activity_kind", None)
+        if activity:
+            activity_text = activity_label(activity)
+        elif task.knowledge_point_id is not None or task.topic_id is not None:
+            activity_text = "知识学习"
+        else:
+            activity_text = "学习活动"
+        route_fallback = route_name is None
+        route_text = route_name or ("未分类" if task.route_id is None else "学习路线")
+        self.task_context_card.set_metadata(
+            route_text,
+            activity_text,
+            format_minutes(task.estimated_minutes),
+            route_is_fallback=route_fallback,
+        )
+        self.task_context_card.set_description(task.description)
+
+    def _apply_capability_status(self, status: AgentCapabilityStatus) -> None:
+        ai = self.capability_chips["ai"]
+        ai.setText("AI 已配置" if self._model_configured else "AI 未配置")
+        ai.set_variant("info" if self._model_configured else "warning")
+        ai.setVisible(True)
+
+        approval = self.capability_chips["approval"]
+        approval.setText("写操作需确认")
+        approval.set_variant("neutral")
+        approval.setVisible(bool(status.approvals_enabled))
+
+        mcp = self.capability_chips["mcp"]
+        mcp.setText("MCP 已配置")
+        mcp.set_variant("neutral")
+        mcp.setVisible(bool(status.mcp_configured))
+
+        sandbox = self.capability_chips["sandbox"]
+        sandbox.setText("Sandbox 已启用")
+        sandbox.set_variant("neutral")
+        sandbox.setVisible(bool(status.sandbox_configured))
+
+        sandbox_exec = self.capability_chips["sandbox_exec"]
+        sandbox_exec.setText("Sandbox 执行已配置")
+        sandbox_exec.set_variant("neutral")
+        sandbox_exec.setVisible(bool(status.sandbox_execution_configured))
+
+        warnings = [STATUS_WARNINGS[code] for code in status.warnings if code in STATUS_WARNINGS]
+        self.capability_warning_banner.set_description("\n".join(warnings))
+        self.capability_warning_banner.setVisible(bool(warnings))
+        self.model_unavailable_banner.setVisible(not self._model_configured)
+
+    # --------------------------------------------------------- approvals
     def _render_approvals(self, approvals) -> None:
         while self.approvals_layout.count():
             item = self.approvals_layout.takeAt(0)
             if item.widget() is not None:
                 item.widget().deleteLater()
         count = 0
-        descriptions = {
-            "request_complete_current_task": (
-                "待批准操作：Agent 请求完成当前学习任务。批准后执行现有任务完成流程；"
-                "不代表通过验收或提高 Mastery。", "批准",
-            ),
-            "request_start_assessment": (
-                "Agent 请求开始当前任务的正式学习验收。批准后系统会生成或恢复题目；"
-                "你仍需亲自回答，只有提交并判题后才可能更新 Mastery。", "批准并开始验收",
-            ),
-            "request_save_learning_note": (
-                "Agent 请求保存学习笔记。笔记不是 Mastery 或任务完成证据。", "批准保存",
-            ),
-        }
         for row in sorted(approvals, key=lambda item: int(item["id"])):
             name = row.get("tool_name")
-            if row.get("status") != "pending" or name not in descriptions:
+            action = APPROVAL_ACTIONS.get(name)
+            if row.get("status") != "pending" or action is None:
                 continue
-            approval_id = int(row["id"])
-            card = QFrame()
-            card.setObjectName("AgentApprovalCard")
-            card.setProperty("approval_id", approval_id)
-            layout = QVBoxLayout(card)
-            text, approve_text = descriptions[name]
-            label = QLabel(text)
-            label.setTextFormat(Qt.TextFormat.PlainText)
-            label.setWordWrap(True)
-            layout.addWidget(label)
-            if name == "request_save_learning_note":
-                preview = QLabel(
-                    f"标题：{row.get('note_title', '')}\n内容预览：{row.get('note_preview', '')}"
-                )
-                preview.setObjectName("AgentApprovalNotePreview")
-                preview.setTextFormat(Qt.TextFormat.PlainText)
-                preview.setWordWrap(True)
-                layout.addWidget(preview)
-            buttons = QHBoxLayout()
-            reject = SAButton("拒绝", variant="subtle", size="small")
-            reject.setObjectName("AgentApprovalReject")
-            reject.clicked.connect(lambda _checked=False, aid=approval_id: self.approval_reject_requested.emit(aid))
-            approve = SAButton(approve_text, variant="primary", size="small")
-            approve.setObjectName("AgentApprovalApprove")
-            approve.setProperty("normal_text", approve_text)
-            approve.clicked.connect(lambda _checked=False, aid=approval_id: self.approval_approve_requested.emit(aid))
-            buttons.addWidget(reject)
-            buttons.addWidget(approve)
-            layout.addLayout(buttons)
-            for button in (reject, approve):
-                button.setEnabled(not self._approval_busy)
-            if self._approval_busy:
-                approve.setText("正在执行…")
-            self.approvals_layout.addWidget(card)
+            self.approvals_layout.addWidget(self._build_approval_card(row, action))
             count += 1
         self.approvals_container.setVisible(count > 0)
 
+    def _build_approval_card(self, row, action: dict) -> QFrame:
+        approval_id = int(row["id"])
+        card = QFrame()
+        card.setObjectName("AgentApprovalCard")
+        card.setProperty("approval_id", approval_id)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(spacing.LG, spacing.MD, spacing.LG, spacing.MD)
+        layout.setSpacing(spacing.SM)
+
+        title = QLabel(action["title"])
+        title.setObjectName("AgentApprovalActionTitle")
+        title.setTextFormat(Qt.TextFormat.PlainText)
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        description = QLabel(action["description"])
+        description.setObjectName("AgentApprovalDescription")
+        description.setTextFormat(Qt.TextFormat.PlainText)
+        description.setWordWrap(True)
+        layout.addWidget(description)
+
+        if row.get("tool_name") == "request_save_learning_note":
+            layout.addLayout(self._build_note_preview(row))
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(spacing.SM)
+        reject = SAButton(action["reject"], variant="subtle", size="small")
+        reject.setObjectName("AgentApprovalReject")
+        reject.setAutoDefault(False)
+        reject.setDefault(False)
+        reject.clicked.connect(
+            lambda _checked=False, aid=approval_id: self.approval_reject_requested.emit(aid)
+        )
+        approve = SAButton(action["approve"], variant="primary", size="small")
+        approve.setObjectName("AgentApprovalApprove")
+        approve.setProperty("normal_text", action["approve"])
+        approve.setAutoDefault(False)
+        approve.setDefault(False)
+        approve.clicked.connect(
+            lambda _checked=False, aid=approval_id: self.approval_approve_requested.emit(aid)
+        )
+        buttons.addWidget(reject)
+        buttons.addWidget(approve)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+
+        for button in (reject, approve):
+            button.setEnabled(not self._approval_busy)
+        if self._approval_busy:
+            approve.setText("正在执行…")
+        return card
+
+    def _build_note_preview(self, row) -> QVBoxLayout:
+        preview = QVBoxLayout()
+        preview.setContentsMargins(spacing.MD, spacing.SM, spacing.MD, spacing.SM)
+        preview.setSpacing(spacing.XS)
+        for caption_text, value_text, value_name in (
+            ("笔记标题", str(row.get("note_title", "")), "AgentApprovalNoteValue"),
+            ("内容预览", str(row.get("note_preview", "")), "AgentApprovalNotePreview"),
+        ):
+            caption = QLabel(caption_text)
+            caption.setObjectName("AgentApprovalNoteCaption")
+            caption.setTextFormat(Qt.TextFormat.PlainText)
+            preview.addWidget(caption)
+            value = QLabel(value_text)
+            value.setObjectName(value_name)
+            value.setTextFormat(Qt.TextFormat.PlainText)
+            value.setWordWrap(True)
+            preview.addWidget(value)
+        return preview
+
+    # ------------------------------------------------------- interaction
     def _scroll_bottom(self) -> None:
+        self._schedule_scroll(to_bottom=True)
+
+    def _restore_scroll(self, value: int) -> None:
+        """Restore a previous scroll offset without forcing a jump to bottom."""
+        if int(value) <= 0:
+            self._clear_pending_scroll()
+            self.conversation_scroll.verticalScrollBar().setValue(0)
+            return
+        self._schedule_scroll(to_bottom=False, value=max(0, int(value)))
+
+    def _clear_pending_scroll(self) -> None:
+        handler = getattr(self, "_pending_scroll_handler", None)
+        if handler is None:
+            return
+        try:
+            self.conversation_scroll.verticalScrollBar().rangeChanged.disconnect(handler)
+        except (RuntimeError, TypeError):
+            pass
+        self._pending_scroll_handler = None
+
+    def _schedule_scroll(self, *, to_bottom: bool, value: int = 0) -> None:
+        """Apply a scroll target now and again once the rebuilt layout lands.
+
+        Only one pending handler can exist, so a status/approval-only refresh can
+        never leave a stale handler that later fights a real scroll-to-bottom.
+        """
         bar = self.conversation_scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        self._clear_pending_scroll()
+
+        def _apply(*_args):
+            target = bar.maximum() if to_bottom else min(value, bar.maximum())
+            bar.setValue(target)
+
+        self._pending_scroll_handler = _apply
+        bar.rangeChanged.connect(_apply)
+        _apply()
+        QTimer.singleShot(0, _apply)
+        QTimer.singleShot(250, lambda: self._release_pending_scroll(_apply))
+
+    def _release_pending_scroll(self, handler) -> None:
+        if self._pending_scroll_handler is not handler:
+            return
+        try:
+            self.conversation_scroll.verticalScrollBar().rangeChanged.disconnect(handler)
+        except (RuntimeError, TypeError):
+            pass
+        self._pending_scroll_handler = None
+
+    @staticmethod
+    def _visible_message_signature(messages: list[dict]) -> tuple:
+        """Signature of the visible conversation tail (works with or without ids)."""
+        visible: list[dict] = []
+        for message in messages:
+            role = message.get("role")
+            if role == "user":
+                visible.append(message)
+            elif role == "assistant" and not message.get("tool_calls_json"):
+                if str(message.get("content") or "").strip():
+                    visible.append(message)
+        if not visible:
+            return (0, None, "")
+        last = visible[-1]
+        return (len(visible), last.get("id"), str(last.get("content") or ""))
 
     def clear_session(self, error: str = "") -> None:
         self.current_session_id = None
         self._approval_busy.clear()
         self._busy = False
         self._model_configured = False
-        for label in (self.task_title_label, self.task_meta_label,
-                      self.task_description_label, self.status_label,
-                      self.capability_warning_label):
-            label.clear()
-        self.capability_warning_label.hide()
-        self.task_description_label.hide()
-        self.model_unavailable_label.hide()
-        self.settings_button.hide()
+        self._last_message_signature = None
+        self._clear_pending_scroll()
+        self.task_context_card.set_metadata("", "", "")
+        self.task_context_card.set_description("")
+        self.task_context_card.setVisible(False)
+        for key in self.capability_chips:
+            self.capability_chips[key].setVisible(False)
+        self.capability_warning_banner.set_description("")
+        self.capability_warning_banner.hide()
+        self.model_unavailable_banner.hide()
         self._clear_conversation()
         self._render_approvals(())
-        self.input_edit.clear()
-        self.input_warning_label.hide()
-        self.busy_label.hide()
+        self.composer.clear()
+        self.composer.set_warning_visible(False)
+        self._update_interaction_status()
         self.empty_hint.show()
         self.set_error(error)
         self._update_send_enabled()
@@ -322,6 +505,7 @@ class AgentWorkspacePage(QWidget):
         else:
             self._approval_busy.discard(int(approval_id))
         self._update_approval_buttons()
+        self._update_interaction_status()
         self._update_send_enabled()
 
     def _update_approval_buttons(self) -> None:
@@ -335,10 +519,19 @@ class AgentWorkspacePage(QWidget):
 
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)
-        self.busy_label.setText("Agent 正在思考…" if self._busy else "")
-        self.busy_label.setVisible(self._busy)
         self._update_approval_buttons()
+        self._update_interaction_status()
         self._update_send_enabled()
+
+    def _update_interaction_status(self) -> None:
+        if self._approval_busy:
+            text = "正在执行已确认操作…"
+        elif self._busy:
+            text = "学习助手正在思考…"
+        else:
+            text = ""
+        self.interaction_status_label.setText(text)
+        self.interaction_status_label.setVisible(bool(text))
 
     def set_error(self, message: str) -> None:
         self.error_label.setText(message or "")
@@ -364,28 +557,34 @@ class AgentWorkspacePage(QWidget):
         )
 
     def _update_send_enabled(self) -> None:
-        text = self.input_edit.toPlainText()
+        text = self.composer.text()
         too_long = len(text) > MAX_AGENT_INPUT_CHARS
-        self.input_warning_label.setVisible(too_long)
+        self.composer.set_warning_visible(too_long)
+        self.composer.update_counter()
         enabled = (self.current_session_id is not None and self._model_configured
                    and not self._busy and not self._approval_busy)
-        self.input_edit.setEnabled(enabled)
-        self.send_button.setEnabled(enabled and bool(text.strip()) and not too_long)
-
-    def eventFilter(self, watched, event):  # noqa: N802 - Qt API
-        if (watched is self.input_edit and event.type() == QEvent.Type.KeyPress
-                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
-                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            self._send_current()
-            return True
-        return super().eventFilter(watched, event)
+        self.composer.set_input_enabled(enabled)
+        self.composer.set_send_enabled(enabled and bool(text.strip()) and not too_long)
 
     def _send_current(self) -> None:
         if self.current_session_id is None:
             return
-        text = self.input_edit.toPlainText()
+        text = self.composer.text()
         if (not text.strip() or len(text) > MAX_AGENT_INPUT_CHARS
                 or self._busy or self._approval_busy or not self._model_configured):
             return
-        self.input_edit.clear()
+        self.composer.clear()
         self.send_requested.emit(self.current_session_id, text)
+
+    # ----------------------------------------------------- compatibility
+    @property
+    def input_edit(self):
+        return self.composer.input_edit
+
+    @property
+    def send_button(self):
+        return self.composer.send_button
+
+    @property
+    def input_warning_label(self):
+        return self.composer.warning_label

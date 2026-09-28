@@ -722,3 +722,70 @@ QTextBrowser#AgentAssistantMarkdown {
     border: none;
     color: {{text_primary}};
 }
+
+/* ---- Agent Workspace shell (UX-2) ---- */
+QLabel#AgentTaskDescription {
+    color: {{text_secondary}};
+}
+QLabel#AgentErrorBanner {
+    background-color: {{danger_background}};
+    border: 1px solid {{danger}};
+    border-radius: {{radius_medium}};
+    color: {{danger}};
+    padding: 10px 12px;
+}
+QLabel#AgentInteractionStatus {
+    color: {{text_secondary}};
+    font-size: {{font_size_caption}};
+}
+QFrame#AgentApprovalCard {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_medium}};
+}
+QLabel#AgentApprovalSectionTitle {
+    color: {{text_primary}};
+    font-size: {{font_size_body}};
+    font-weight: 600;
+}
+QLabel#AgentApprovalSectionCaption {
+    color: {{text_tertiary}};
+    font-size: {{font_size_caption}};
+}
+QLabel#AgentApprovalActionTitle {
+    color: {{text_primary}};
+    font-weight: 600;
+}
+QLabel#AgentApprovalDescription {
+    color: {{text_secondary}};
+}
+QLabel#AgentApprovalNoteCaption {
+    color: {{text_tertiary}};
+    font-size: {{font_size_caption}};
+}
+QLabel#AgentApprovalNoteValue,
+QLabel#AgentApprovalNotePreview {
+    color: {{text_primary}};
+    background-color: {{surface_alt}};
+    border-radius: {{radius_small}};
+    padding: 6px 8px;
+}
+QFrame#AgentComposer {
+    background-color: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_medium}};
+}
+QPlainTextEdit#AgentMessageInput {
+    background: transparent;
+    border: none;
+    color: {{text_primary}};
+}
+QLabel#AgentComposerHint,
+QLabel#AgentComposerCounter {
+    color: {{text_tertiary}};
+    font-size: {{font_size_caption}};
+}
+QLabel#AgentInputWarning {
+    color: {{danger}};
+    font-size: {{font_size_caption}};
+}

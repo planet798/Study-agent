@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QLabel
 
 from app.database.schema import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_DONE, STATUS_NOT_DONE
 from app.ui.agent_message_widget import ASSISTANT_ROLE, USER_ROLE, AgentMessageWidget
@@ -65,9 +66,9 @@ def test_workspace_loads_task_history_and_hides_tool_protocol(qtbot, repo):
     )
 
     assert page.current_session_id == 8
-    assert page.task_title_label.text() == "Learn attention"
-    assert page.task_description_label.text() == "Understand attention"
-    assert page.task_meta_label.text() == "R1 Route · 理论 · 35 分钟"
+    assert not hasattr(page, "task_title_label")  # no duplicate title in Workspace
+    assert page.task_context_card.tag_texts() == ("R1 Route", "理论", "35 分钟")
+    assert page.task_context_card.description_label.text() == "Understand attention"
     widgets = _message_widgets(page)
     assert [widget.raw_text for widget in widgets] == [
         "Explain this", "<script>plain response</script>",
@@ -121,7 +122,7 @@ def test_workspace_empty_history_does_not_send_automatically(qtbot, repo):
     page.load_session({"id": 1}, [], task, None, model_configured=True)
     assert not page.empty_hint.isHidden()
     assert sent == []
-    assert page.task_meta_label.text() == "未分类 · 学习活动 · 35 分钟"
+    assert page.task_context_card.tag_texts() == ("未分类", "学习活动", "35 分钟")
 
 
 def test_workspace_busy_and_model_unavailable_states(qtbot, repo):
@@ -129,7 +130,7 @@ def test_workspace_busy_and_model_unavailable_states(qtbot, repo):
     page = AgentWorkspacePage()
     qtbot.addWidget(page)
     page.load_session({"id": 1}, [], task, None, model_configured=False)
-    assert not page.model_unavailable_label.isHidden()
+    assert not page.model_unavailable_banner.isHidden()
     assert not page.input_edit.isEnabled()
     assert not page.send_button.isEnabled()
 
@@ -137,10 +138,12 @@ def test_workspace_busy_and_model_unavailable_states(qtbot, repo):
     page.input_edit.setPlainText("hello")
     assert page.send_button.isEnabled()
     page.set_busy(True)
-    assert not page.busy_label.isHidden()
+    assert not page.interaction_status_label.isHidden()
+    assert "学习助手正在思考" in page.interaction_status_label.text()
     assert not page.input_edit.isEnabled()
     assert not page.send_button.isEnabled()
     page.set_busy(False)
+    assert page.interaction_status_label.isHidden()
     assert page.input_edit.isEnabled()
     assert page.send_button.isEnabled()
 
@@ -188,7 +191,8 @@ def test_workspace_ctrl_enter_length_limit_and_clear(qtbot, repo):
     assert not page.send_button.isEnabled()
     page.clear_session("安全错误")
     assert page.current_session_id is None
-    assert page.task_title_label.text() == ""
+    assert not page.task_context_card.description_label.isVisible()
+    assert not page.composer.input_edit.toPlainText()
     assert _message_widgets(page) == []
     assert page.error_label.text() == "安全错误"
 
@@ -211,9 +215,11 @@ def test_workspace_status_row_scroll_and_busy_persistence(qtbot, repo):
                       approvals=[{"id": 7, "status": "pending", "tool_name": "request_complete_current_task"}])
     qtbot.waitUntil(lambda: page.conversation_scroll.verticalScrollBar().value() ==
                     page.conversation_scroll.verticalScrollBar().maximum(), timeout=2000)
-    assert "MCP 已配置" in page.status_label.text()
-    assert "写操作需批准" in page.status_label.text()
-    assert "配置无效" in page.capability_warning_label.text()
+    assert page.capability_chips["mcp"].isVisible()
+    assert page.capability_chips["mcp"].text() == "MCP 已配置"
+    assert page.capability_chips["approval"].isVisible()
+    assert page.capability_chips["approval"].text() == "写操作需确认"
+    assert "配置无效" in page.capability_warning_banner.description()
     assert not page.input_edit.isEnabled()
     assert not page.findChild(type(page.send_button), "AgentApprovalApprove").isEnabled()
     page.load_session({"id": 12}, messages, task, None, True,
@@ -249,3 +255,198 @@ def test_done_cancelled_and_not_done_tasks_get_no_agent_entry(qtbot, repo):
         widget = TaskWidget(task, agent_enabled=True)
         qtbot.addWidget(widget)
         assert not hasattr(widget, "start_study_btn")
+
+
+# ---------------------------------------------------------------- UX-2 ----
+
+
+def test_workspace_does_not_duplicate_task_title(qtbot, repo):
+    from PySide6.QtWidgets import QLabel
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], task, "R1 Route", True)
+    assert not hasattr(page, "task_title_label")
+    assert all(label.text() != task.title for label in page.findChildren(QLabel))
+
+
+def test_task_context_card_tags_and_optional_description(qtbot, repo):
+    task = _task(repo, learning_activity_kind="theory")
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], task, "R2 LLM Post-Training", True)
+    assert page.task_context_card.tag_texts() == ("R2 LLM Post-Training", "理论", "35 分钟")
+    assert page.task_context_card.description_label.text() == "Understand attention"
+    assert not page.task_context_card.description_label.isHidden()
+
+    empty = repo.create(
+        title="No description", scheduled_date="2026-01-05", source="generated",
+        estimated_minutes=20,
+    )
+    page.load_session({"id": 2}, [], empty, None, True)
+    assert page.task_context_card.tag_texts() == ("未分类", "学习活动", "20 分钟")
+    assert page.task_context_card.description_label.isHidden()
+    # Card itself is still present (metadata is always useful).
+    assert not page.task_context_card.isHidden()
+
+
+def test_capability_chips_are_truthful_and_drop_architecture_jargon(qtbot, repo):
+    from app.agent.status import AgentCapabilityStatus
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    status = AgentCapabilityStatus(
+        True, mcp_configured=True, sandbox_configured=True,
+        sandbox_execution_configured=True, approvals_enabled=True,
+    )
+    page.load_session({"id": 1}, [], task, None, True, capability_status=status)
+    chips = page.capability_chips
+    assert chips["ai"].text() == "AI 已配置"
+    assert chips["approval"].text() == "写操作需确认"
+    assert chips["mcp"].text() == "MCP 已配置"
+    assert chips["sandbox"].text() == "Sandbox 已启用"
+    assert chips["sandbox_exec"].text() == "Sandbox 执行已配置"
+    assert all(not chip.isHidden() for chip in chips.values())
+    joined = " ".join(chip.text() for chip in chips.values())
+    assert "在线" not in joined
+    assert "应用数据只读" not in joined
+
+
+def test_capability_chips_hide_unconfigured_optional_features(qtbot, repo):
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], task, None, True)
+    assert page.capability_chips["ai"].isHidden() is False
+    assert page.capability_chips["mcp"].isHidden() is True
+    assert page.capability_chips["sandbox"].isHidden() is True
+    assert page.capability_chips["approval"].isHidden() is True
+
+
+def test_same_session_reload_preserves_unsent_draft(qtbot, repo):
+    from app.agent.status import AgentCapabilityStatus
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], task, None, True)
+    page.input_edit.setPlainText("draft that must survive a status refresh")
+    page.load_session(
+        {"id": 1}, [], task, None, True,
+        capability_status=AgentCapabilityStatus(True, mcp_configured=True),
+        approvals=[{"id": 5, "status": "pending", "tool_name": "request_complete_current_task"}],
+    )
+    assert page.input_edit.toPlainText() == "draft that must survive a status refresh"
+    assert page.capability_chips["mcp"].isHidden() is False
+
+
+def test_session_switch_clears_unsent_draft(qtbot, repo):
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], task, None, True)
+    page.input_edit.setPlainText("session A draft")
+    page.load_session({"id": 2}, [], task, None, True)
+    assert page.input_edit.toPlainText() == ""
+    page.input_edit.setPlainText("session B draft")
+    page.load_session({"id": 1}, [], task, None, True)
+    assert page.input_edit.toPlainText() == ""
+
+
+def test_approval_section_hidden_until_pending(qtbot, repo):
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], task, None, True)
+    assert page.approvals_container.isHidden()
+    assert page.approvals_layout.count() == 0
+
+    page.load_session(
+        {"id": 1}, [], task, None, True,
+        approvals=[{"id": 7, "status": "pending", "tool_name": "request_complete_current_task"}],
+    )
+    assert not page.approvals_container.isHidden()
+    assert page.approval_section_title.text() == "待确认操作"
+    assert "确认后才会执行" in page.approval_section_caption.text()
+    card = page.findChild(QFrame, "AgentApprovalCard")
+    assert card is not None
+    assert card.findChild(QLabel, "AgentApprovalActionTitle").text() == "完成任务"
+    assert card.findChild(type(page.send_button), "AgentApprovalApprove").text() == "批准"
+
+
+def test_unified_busy_status_for_turn_and_approval(qtbot, repo):
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], task, None, True)
+    assert page.interaction_status_label.isHidden()
+    page.set_busy(True)
+    assert page.interaction_status_label.text() == "学习助手正在思考…"
+    page.set_busy(False)
+    page.set_approval_busy(9, True)
+    assert page.interaction_status_label.text() == "正在执行已确认操作…"
+    page.set_approval_busy(9, False)
+    assert page.interaction_status_label.isHidden()
+
+
+def test_narrow_viewport_has_no_horizontal_overflow(qtbot, repo):
+    from app.agent.status import AgentCapabilityStatus
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.resize(380, 640)
+    page.show()
+    status = AgentCapabilityStatus(
+        True, mcp_configured=True, sandbox_configured=True,
+        sandbox_execution_configured=True, approvals_enabled=True,
+    )
+    page.load_session(
+        {"id": 1},
+        [{"role": "user", "content": "question " + "x" * 200, "tool_calls_json": ""},
+         {"role": "assistant", "content": "## Answer\\n\\n" + "y" * 400, "tool_calls_json": ""}],
+        task,
+        "R2 LLM Post-Training / a very long route name that must wrap",
+        True,
+        capability_status=status,
+        approvals=[{"id": 7, "status": "pending", "tool_name": "request_save_learning_note",
+                    "note_title": "n" * 200, "note_preview": "p" * 400}],
+    )
+    qtbot.waitExposed(page)
+    qtbot.waitUntil(lambda: page.conversation_scroll.viewport().width() > 0)
+    assert not page.conversation_scroll.horizontalScrollBar().isVisible()
+    assert page.composer.send_button.isVisible()
+    assert page.composer.width() <= page.width()
+    assert page.capability_chips_widget.width() <= page.width()
+    card = page.findChild(QFrame, "AgentApprovalCard")
+    assert card.width() <= page.conversation_scroll.viewport().width() + 40
+
+
+def test_same_session_message_refresh_keeps_scroll_position(qtbot, repo):
+    task = _task(repo)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    messages = []
+    for index in range(40):
+        messages.append({"role": "user", "content": f"question {index}", "tool_calls_json": ""})
+        messages.append({"role": "assistant", "content": f"answer {index}", "tool_calls_json": ""})
+    page.resize(720, 480)
+    page.show()
+    page.load_session({"id": 1}, messages, task, None, True)
+    bar = page.conversation_scroll.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 0)
+    target = bar.maximum() // 2
+    bar.setValue(target)
+
+    page.load_session(
+        {"id": 1}, messages, task, None, True,
+        approvals=[{"id": 1, "status": "pending", "tool_name": "request_complete_current_task"}],
+    )
+    qtbot.waitUntil(lambda: abs(bar.value() - target) <= 2)
+    assert abs(bar.value() - target) <= 2
+    # A genuinely new message still scrolls to the bottom.
+    page.load_session(
+        {"id": 1},
+        messages + [{"role": "user", "content": "newest", "tool_calls_json": ""}],
+        task, None, True,
+    )
+    qtbot.waitUntil(lambda: bar.value() == bar.maximum())
+    assert bar.value() == bar.maximum()
