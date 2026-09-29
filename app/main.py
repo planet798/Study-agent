@@ -1200,6 +1200,8 @@ def build_agent_runtime(
     from app.database.capability_repository import CapabilityEvidenceRepository
     from app.database.learning_route_repository import LearningRouteRepository
     from app.database.repository import TaskRepository
+    from app.database.task_workspace_repository import TaskWorkspaceRepository
+    from app.services.workspace_service import TaskWorkspaceService
     from app.database.study_plan_repository import StudyPlanRepository
     from app.database.topic_learning_repository import TopicLearningComponentRepository
     from app.services.assessment_service import AssessmentService
@@ -1211,6 +1213,7 @@ def build_agent_runtime(
 
     task_repo = TaskRepository(fresh_conn)
     task_service = TaskService(task_repo)
+    workspace_service = TaskWorkspaceService(TaskWorkspaceRepository(fresh_conn), task_service)
     session_service = AgentSessionService(
         AgentRepository(fresh_conn), task_service
     )
@@ -1271,14 +1274,13 @@ def build_agent_runtime(
         mcp_provider = None
     try:
         sandbox_config = load_sandbox_config(sandbox_config_path)
-        sandbox_provider = (
-            SandboxProvider(sandbox_config) if sandbox_config.enabled else None
-        )
     except SandboxConfigError:
         logging.getLogger(__name__).warning(
-            "Sandbox configuration invalid; Sandbox tools are disabled for this turn."
+            "Sandbox execution configuration invalid; file Workspace remains available."
         )
-        sandbox_provider = None
+        from app.agent.sandbox.config import SandboxConfig
+        sandbox_config = SandboxConfig()
+    sandbox_provider = SandboxProvider(sandbox_config)
     return AgentRuntime(
         session_service,
         agent_model_client,
@@ -1287,6 +1289,7 @@ def build_agent_runtime(
         skill_selector=AgentSkillSelector(skill_registry),
         mcp_provider=mcp_provider,
         sandbox_provider=sandbox_provider,
+        workspace_service=workspace_service,
         memory_compactor=memory_compactor,
         trace_service=trace_service,
         approval_provider=AgentApprovalProvider(AgentApprovalService(
@@ -1414,6 +1417,9 @@ def main() -> int:
         repo, outcome_service=outcome_service,
         capability_service=capability_service,
     )
+    from app.database.task_workspace_repository import TaskWorkspaceRepository
+    from app.services.workspace_service import TaskWorkspaceService
+    task_workspace_service = TaskWorkspaceService(TaskWorkspaceRepository(conn), task_service)
     # Main-thread Session service is only for start/resume and history reads;
     # model turns receive a separate worker-owned Runtime/connection.
     from app.agent.session import AgentSessionService
@@ -1804,6 +1810,7 @@ def main() -> int:
         practice_service=practice_service,
         agent_session_service=agent_session_service,
         agent_runtime_factory=agent_runtime_factory,
+        task_workspace_service=task_workspace_service,
         agent_approval_service=agent_approval_service,
         agent_approval_service_factory=agent_approval_service_factory,
         practice_capability_service=practice_capability_service,

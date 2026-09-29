@@ -139,10 +139,16 @@ def test_assessment_approval_opens_existing_dialog_without_mastery_change(qtbot,
     window.close()
 
 
-def test_note_approval_shows_safe_preview_then_creates_only_note_outcome(qtbot, conn, repo, task_service, date_service):
+def test_note_approval_shows_safe_preview_then_creates_only_note_outcome(qtbot, conn, repo, task_service, date_service, tmp_path, monkeypatch):
     import json
     from app.database.skill_repository import LearningOutcomeRepository
+    from app.database.task_workspace_repository import TaskWorkspaceRepository
+    from app.services import workspace_service as workspace_module
+    from app.services.workspace_service import TaskWorkspaceService
+    root = tmp_path / "agent_workspaces"
+    monkeypatch.setattr(workspace_module, "default_sandbox_workspace_root", lambda: root)
     task = repo.create(title="Note task", scheduled_date="2026-01-05", source="generated")
+    TaskWorkspaceService(TaskWorkspaceRepository(conn), task_service).use_managed(task.id)
     sessions = AgentSessionService(AgentRepository(conn), task_service)
     class NoteModel(AgentModelClient):
         calls = 0
@@ -173,6 +179,7 @@ def test_note_approval_shows_safe_preview_then_creates_only_note_outcome(qtbot, 
     assert task_service.get_status(task.id) == "active"
     assert conn.execute("SELECT COUNT(*) FROM capability_evidence").fetchone()[0] == 0
     assert model.calls == 2
+    assert not (root / f"task_{task.id}").exists()  # a Learning Note is SQLite, never a .md file
     window.close()
 
 

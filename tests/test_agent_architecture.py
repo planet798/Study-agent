@@ -100,7 +100,7 @@ def test_agent_tables_are_protected_history_not_growth():
         assert table in HISTORY_TABLES
         assert table not in GROWTH_TABLES
         assert table in FINGERPRINT_COLUMNS
-    assert FINGERPRINT_VERSION == 6
+    assert FINGERPRINT_VERSION == 7
 
 
 def test_agent_trace_and_eval_are_separate_pure_observability_modules():
@@ -260,12 +260,12 @@ def test_approval_domain_keeps_request_tool_separate_from_canonical_executor():
     assert "approval" not in inspect.getsource(sandbox_tools_for_task)
 
 
-def test_agent9_schema_v24_and_fingerprint_v6():
+def test_workspace_schema_v25_and_fingerprint_v7():
     from app.database.schema import SCHEMA_VERSION
     from app.diagnostics.release_migration import FINGERPRINT_VERSION
 
-    assert SCHEMA_VERSION == 24
-    assert FINGERPRINT_VERSION == 6
+    assert SCHEMA_VERSION == 25
+    assert FINGERPRINT_VERSION == 7
 
 
 def test_vertical_slice_task_to_runtime(conn, repo):

@@ -408,7 +408,8 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
     assert isinstance(runtime.model_client, AdaptiveAgentModelClient)
     assert isinstance(runtime.skill_selector, AgentSkillSelector)
     assert runtime.mcp_provider is None  # explicit empty config keeps Agent-4 behavior
-    assert runtime.sandbox_provider is None
+    assert runtime.sandbox_provider is not None  # file Workspace needs no advanced config
+    assert runtime.workspace_service is not None
     assert runtime.approval_provider.service.repository.conn is conn
     assert runtime.approval_provider.service.task_service.repo.conn is conn
     assert runtime.session_service.repo.conn is conn
@@ -436,7 +437,7 @@ def test_production_invalid_optional_configs_keep_native_agent_turn(
     session = sessions.start_or_resume(task.id)
     runtime = build_agent_runtime(conn, db_path=_db_path(conn),
                                   mcp_config_path=mcp, sandbox_config_path=sandbox)
-    assert runtime.mcp_provider is None and runtime.sandbox_provider is None
+    assert runtime.mcp_provider is None and runtime.sandbox_provider is not None
     class FakeModel:
         def is_configured(self): return True
         def complete(self, request):

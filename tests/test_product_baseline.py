@@ -71,8 +71,8 @@ def test_historical_schema_and_verifier_remain(conn):
         FINGERPRINT_COLUMNS, FINGERPRINT_VERSION, HISTORY_TABLES,
     )
 
-    assert SCHEMA_VERSION == 24
-    assert FINGERPRINT_VERSION == 6
+    assert SCHEMA_VERSION == 25
+    assert FINGERPRINT_VERSION == 7
     for table in ("review_schedule", "weekly_summaries", "monthly_summaries"):
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",

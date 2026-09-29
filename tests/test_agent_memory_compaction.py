@@ -652,7 +652,7 @@ def test_memory_preparation_precedes_context_skill_mcp_and_sandbox(conn):
 
     class SandboxProvider:
         @contextmanager
-        def open_turn(self, context, base_registry):
+        def open_turn(self, context, base_registry, workspace_spec=None):
             events.append("sandbox")
             yield SimpleNamespace(registry=base_registry)
 

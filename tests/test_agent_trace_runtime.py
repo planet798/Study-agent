@@ -85,7 +85,7 @@ class FakeSandboxProvider:
         self.registry = registry
 
     @contextmanager
-    def open_turn(self, context, base_registry=None):
+    def open_turn(self, context, base_registry=None, workspace_spec=None):
         report = SimpleNamespace(
             enabled=True, execution_available=False,
             exposed_tools=("sandbox_list_files",),

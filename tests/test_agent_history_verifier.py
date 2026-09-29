@@ -48,7 +48,7 @@ def test_agent_tables_are_history_not_growth_and_have_v5_fingerprints():
         assert table in rm.GROWTH_TABLES
         assert table not in rm.HISTORY_TABLES
         assert table not in rm.FINGERPRINT_COLUMNS
-    assert rm.FINGERPRINT_VERSION == 6
+    assert rm.FINGERPRINT_VERSION == 7
     assert rm.FINGERPRINT_COLUMNS["agent_sessions"] == EXPECTED_SESSION_FINGERPRINT
     assert rm.FINGERPRINT_COLUMNS["agent_messages"] == EXPECTED_MESSAGE_FINGERPRINT
 
@@ -114,7 +114,7 @@ def test_v20_before_inventory_uses_none_then_v24_migration_verifies(tmp_path):
 
         migrate_stepwise(conn)
         after = rm.inventory(conn)
-        assert after["schema_version"] == 24
+        assert after["schema_version"] == 25
         assert after["counts"]["agent_sessions"] >= 0
         assert after["counts"]["agent_messages"] >= 0
         assert after["counts"]["agent_session_memory"] == 0
