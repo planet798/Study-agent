@@ -165,8 +165,8 @@ class TaskService:
     ) -> dict[str, list[int]]:
         """Prepare only the requested route scope for a user-confirmed replan.
 
-        Referenced tasks become cancelled old plan items, not 'not_done'
-        learning attempts. Neither Sessions nor Workspace bindings are touched.
+        Referenced tasks remain active and unchanged so learning and approval
+        actions still work; they also count as existing planner commitments.
         The repository applies the entire selected set in one savepoint.
         """
         return self.repo.prepare_replan_tasks(

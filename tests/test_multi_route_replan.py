@@ -357,7 +357,7 @@ class TestReplanSafety:
         qtbot.addWidget(w)
         monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
         w._on_replan()
-        assert env["repo"].get(task.id).status == "cancelled"
+        assert env["repo"].get(task.id) == task
         assert env["repo"].get(unrelated.id).status == "active"
         assert sessions.get(sid)["task_id"] == task.id
         assert [m["content"] for m in sessions.messages(sid)] == ["old question", "old answer"]
@@ -367,6 +367,77 @@ class TestReplanSafety:
         sessions.append_user_message(sid, "follow-up")
         assert sessions.messages(sid)[-1]["content"] == "follow-up"
         w.close()
+
+    @pytest.mark.parametrize("action", ["request_complete_current_task",
+                                        "request_start_assessment",
+                                        "request_save_learning_note"])
+    def test_formal_approval_still_available_after_replan(self, env, action):
+        import json
+        from app.agent.approval.service import AgentApprovalService
+        from app.agent.session import AgentSessionService
+        from app.database.agent_approval_repository import AgentApprovalRepository
+        from app.database.agent_repository import AgentRepository
+
+        kp_id = None
+        if action == "request_start_assessment":
+            kp_id = env["arepo"].create_knowledge_point("Replan KP")["id"]
+        task = env["repo"].create("study", scheduled_date=TODAY,
+                                   source="generated", task_type="new",
+                                   route_id=env["default"].id, knowledge_point_id=kp_id)
+        agent_repo = AgentRepository(env["conn"])
+        sessions = AgentSessionService(agent_repo, env["ts"])
+        sid = sessions.start_or_resume(task.id)["id"]
+        args = ({"title": "note", "content": "learning"}
+                if action == "request_save_learning_note" else {})
+        call_id = "replan-call"
+        assistant = agent_repo.add_message(
+            sid, "assistant", "",
+            tool_calls_json=json.dumps([{"id": call_id, "name": action,
+                                         "arguments": json.dumps(args)}]),
+        )
+        assert env["ts"].prepare_replan(TODAY, route_ids=(task.route_id,)) == {
+            "removed_ids": [], "preserved_ids": [task.id],
+        }
+        assert env["repo"].get(task.id) == task
+        approval = AgentApprovalService(AgentApprovalRepository(env["conn"]), env["ts"])
+        requested = getattr(approval, action)(sid, task.id, assistant["id"], call_id,
+                                               *([args] if args else []))
+        assert requested["status"] == "pending"
+        if action == "request_complete_current_task":
+            executed = approval.approve_and_execute(requested["approval_id"])
+            assert executed["status"] == "executed"
+            assert env["ts"].get_status(task.id) == "done"
+            assert sessions.get(sid)["status"] == "active"
+
+    def test_assessment_reference_keeps_active_task(self, env):
+        kp = env["arepo"].create_knowledge_point("Referenced KP")
+        task = env["repo"].create("assessment task", scheduled_date=TODAY,
+                                   source="generated", task_type="new",
+                                   route_id=env["default"].id,
+                                   knowledge_point_id=kp["id"])
+        attempt = env["arepo"].create_attempt(kp["id"], "{}", task_id=task.id)
+        result = env["ts"].prepare_replan(TODAY, route_ids=(task.route_id,))
+        assert result == {"removed_ids": [], "preserved_ids": [task.id]}
+        assert env["repo"].get(task.id) == task
+        assert env["arepo"].get_attempt(attempt["id"])["task_id"] == task.id
+
+    def test_preserved_topic_is_existing_commitment(self, env):
+        from app.agent.session import AgentSessionService
+        from app.database.agent_repository import AgentRepository
+        env["route_service"].pause_planning(env["default"].id)
+        route, _ = _add_route(env, "Topic route", ["Only topic"])
+        topic = env["plan_repo"].list_topics_by_route(route.id)[0]
+        task = env["repo"].create("studied topic", scheduled_date=TODAY,
+                                   source="generated", task_type="new",
+                                   route_id=route.id, topic_id=topic.id)
+        AgentSessionService(AgentRepository(env["conn"]), env["ts"]).start_or_resume(task.id)
+        prepared = env["ts"].prepare_replan(TODAY, route_ids=(route.id,))
+        assert prepared["preserved_ids"] == [task.id]
+        env["sched"].generate(TODAY, force=True)
+        equivalent = [t for t in env["repo"].list_by_date(TODAY)
+                      if t.topic_id == topic.id and t.route_id == route.id]
+        assert [t.id for t in equivalent] == [task.id]
+        assert env["repo"].get(task.id).status == "active"
 
     @pytest.mark.parametrize("kind", ["managed", "local"])
     def test_workspace_binding_and_contents_survive(self, env, tmp_path, monkeypatch, kind):
@@ -389,7 +460,7 @@ class TestReplanSafety:
         before = service.get(task.id)
         result = env["ts"].prepare_replan(TODAY, route_ids=(env["default"].id,))
         assert result["preserved_ids"] == [task.id]
-        assert env["repo"].get(task.id).status == "cancelled"
+        assert env["repo"].get(task.id) == task
         assert service.get(task.id) == before
         assert (folder / "keep.txt").read_text(encoding="utf-8") == "unchanged"
 
@@ -410,8 +481,9 @@ class TestReplanSafety:
     def test_preparation_is_atomic_on_failure(self, env):
         import sqlite3
         route = env["default"].id
-        protected = self._generated(env, "first protected", route)
+        first = self._generated(env, "first delete", route)
         doomed = self._generated(env, "second delete", route)
+        protected = self._generated(env, "third protected", route)
         from app.agent.session import AgentSessionService
         from app.database.agent_repository import AgentRepository
         AgentSessionService(AgentRepository(env["conn"]), env["ts"]).start_or_resume(protected.id)
@@ -421,5 +493,6 @@ class TestReplanSafety:
         )
         with pytest.raises(sqlite3.IntegrityError, match="injected"):
             env["ts"].prepare_replan(TODAY, route_ids=(route,))
-        assert env["repo"].get(protected.id).status == "active"
+        assert env["repo"].get(first.id).status == "active"
         assert env["repo"].get(doomed.id).status == "active"
+        assert env["repo"].get(protected.id).status == "active"

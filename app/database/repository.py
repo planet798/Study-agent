@@ -407,12 +407,12 @@ class TaskRepository:
         self, date_str: str, route_ids: tuple[int, ...], *,
         include_unassigned: bool = False,
     ) -> dict[str, list[int]]:
-        """Atomically retire eligible generated Tasks without losing linked history.
+        """Atomically replace only unreferenced generated Tasks.
 
-        A user-confirmed replan cancels referenced old plan items; unlike
-        not_done, cancellation does not claim the learner attempted the task.
-        Unreferenced/unbound items retain the original physical replacement
-        behavior. The savepoint also works inside an existing transaction.
+        Referenced Tasks keep their original active state and timestamps: their
+        learning/approval actions and existing planner commitment remain valid.
+        Unreferenced/unbound items retain physical replacement behavior. The
+        savepoint also works inside an existing transaction.
         """
         routes = tuple(sorted(set(int(route_id) for route_id in route_ids)))
         scopes = []
@@ -444,16 +444,12 @@ class TaskRepository:
                     (task_id, task_id, task_id),
                 ).fetchone()[0]
                 if protected:
-                    cur = self.conn.execute(
-                        "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-                        (STATUS_CANCELLED, now_iso(), task_id),
-                    )
                     preserved.append(task_id)
-                else:
-                    cur = self.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-                    removed.append(task_id)
+                    continue
+                cur = self.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
                 if cur.rowcount != 1:
                     raise RuntimeError(f"Replan Task changed during preparation: {task_id}")
+                removed.append(task_id)
             self.conn.execute("RELEASE SAVEPOINT replan_preparation")
             return {"removed_ids": removed, "preserved_ids": preserved}
         except BaseException:
