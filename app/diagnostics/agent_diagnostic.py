@@ -44,6 +44,8 @@ def run_agent_diagnostic(db_path=None, *, ai_config_service=None,
             file_tools = sandbox.enabled and sandbox.file_tools
         except (SandboxConfigError, OSError):
             file_tools = False
+        from ..database.task_workspace_repository import TaskWorkspaceRepository
+        workspace_counts = TaskWorkspaceRepository(conn).count_by_kind()
         report = {
             "database": "ok", "schema": version, "fingerprint": FINGERPRINT_VERSION,
             "ai": "configured" if status.model_configured else "unconfigured",
@@ -54,6 +56,8 @@ def run_agent_diagnostic(db_path=None, *, ai_config_service=None,
             "mcp_allowed_tools": allowed_count,
             "sandbox_file_tools": file_tools,
             "sandbox_execution_configured": status.sandbox_execution_configured,
+            "managed_workspaces": workspace_counts["managed"],
+            "local_workspaces": workspace_counts["local"],
             "sessions": conn.execute("SELECT COUNT(*) FROM agent_sessions").fetchone()[0],
             "messages": conn.execute("SELECT COUNT(*) FROM agent_messages").fetchone()[0],
             "pending_approvals": conn.execute(
@@ -84,6 +88,8 @@ def format_agent_diagnostic(data: dict) -> str:
                   f"  approval actions: {data['approval_actions']}",
                   "MCP", f"  configured servers: {data['mcp_enabled_servers']}",
                   f"  allowlisted tools: {data['mcp_allowed_tools']}",
+                  "Workspace", f"  managed bindings: {data['managed_workspaces']}",
+                  f"  local bindings: {data['local_workspaces']}",
                   "Sandbox", f"  file tools: {'enabled' if data['sandbox_file_tools'] else 'disabled'}",
                   f"  execution configured: {'yes' if data['sandbox_execution_configured'] else 'no'}",
                   "Storage", f"  sessions: {data['sessions']}",

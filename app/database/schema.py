@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1539,6 +1539,33 @@ def _migrate_v24(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[24] = _migrate_v24
+
+
+_V25_SQL = """
+CREATE TABLE IF NOT EXISTS task_workspaces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('managed', 'local')),
+    local_path TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK(
+        (kind = 'managed' AND local_path = '')
+        OR
+        (kind = 'local' AND length(trim(local_path)) > 0)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_task_workspaces_kind ON task_workspaces(kind);
+"""
+
+
+def _migrate_v25(conn: sqlite3.Connection) -> None:
+    """Persist explicit Task-scoped Workspace bindings without moving files."""
+    conn.executescript(_V25_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[25] = _migrate_v25
 
 
 def get_schema_version(conn) -> int:

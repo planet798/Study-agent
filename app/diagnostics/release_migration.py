@@ -39,6 +39,7 @@ HISTORY_TABLES = (
     "agent_messages",
     "agent_approval_requests",
     "agent_approval_events",
+    "task_workspaces",
 )
 
 # 允许增加的 canonical / 派生表
@@ -122,7 +123,7 @@ def inventory(conn: sqlite3.Connection) -> dict:
             "practice_topic_requirements", "agent_sessions", "agent_messages",
             "agent_session_memory", "agent_turn_traces", "agent_trace_events",
             "agent_turn_evaluations", "agent_approval_requests",
-            "agent_approval_events",
+            "agent_approval_events", "task_workspaces",
         )},
     }
     data["tasks_done"] = _scalar(
@@ -229,6 +230,9 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
     "agent_approval_events": (
         "id", "approval_id", "event_type", "actor", "code", "created_at",
     ),
+    "task_workspaces": (
+        "id", "task_id", "kind", "local_path", "created_at",
+    ),
 }
 # 说明：以下 **migration-owned** 字段有意不入 tasks fingerprint：
 #   - route_id：v15 canonical MOVE 会合法更新 topic 所属 route；
@@ -243,9 +247,10 @@ FINGERPRINT_COLUMNS: dict[str, tuple[str, ...]] = {
 #     迁移前已有行必须保留且不可被非法修改，迁移后允许正常新增新行。
 # v5：protect immutable Agent Session/Message history；Session lifecycle 可变字段不入指纹。
 # v6：protect immutable approval request identity and append-only user authorization events.
-# v1–v5 旧 snapshot 仍可读；旧 snapshot 缺少新表/字段时只比较其已有 fingerprints，
+# v7 protects Task Workspace bindings across migrations; updated_at is mutable.
+# v1–v6 旧 snapshot 仍可读；旧 snapshot 缺少新表/字段时只比较其已有 fingerprints，
 #     不要求 fingerprint_version_match=True 才成功。
-FINGERPRINT_VERSION = 6
+FINGERPRINT_VERSION = 7
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
