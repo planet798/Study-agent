@@ -163,18 +163,13 @@ def sandbox_tools_for_task(
     config: SandboxConfig,
     workspace: SandboxWorkspace,
     backend: DockerSandboxBackend | None,
+    *,
+    writable: bool,
 ) -> tuple[AgentTool, ...]:
-    """Build only the fixed, configured Sandbox tools for a Session Task."""
-    if not config.enabled:
-        return ()
-    tools: list[AgentTool] = []
-    if config.file_tools:
-        tools.extend((
-            SandboxListFilesTool(workspace),
-            SandboxReadFileTool(workspace),
-            SandboxWriteFileTool(workspace),
-            SandboxMakeDirectoryTool(workspace),
-        ))
-    if (config.execution.enabled and backend is not None and backend.available):
-        tools.append(SandboxRunTool(workspace, backend))
+    """Workspace binding grants files; advanced config only controls execution/limits."""
+    tools: list[AgentTool] = [SandboxListFilesTool(workspace), SandboxReadFileTool(workspace)]
+    if writable:
+        tools.extend((SandboxWriteFileTool(workspace), SandboxMakeDirectoryTool(workspace)))
+        if config.enabled and config.execution.enabled and backend is not None and backend.available:
+            tools.append(SandboxRunTool(workspace, backend))
     return tuple(tools)

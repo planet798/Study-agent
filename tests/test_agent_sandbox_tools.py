@@ -6,6 +6,11 @@ import json
 from app.agent.sandbox.config import SandboxConfig
 from app.agent.sandbox.provider import SandboxProvider
 from app.agent.sandbox.workspace import SandboxWorkspace
+from app.agent.workspace import AgentWorkspaceSpec
+
+
+def _managed(root, task_id):
+    return AgentWorkspaceSpec("managed", root / f"task_{task_id}", True, True, True)
 from app.agent.tools.base import AgentToolContext
 
 
@@ -15,7 +20,7 @@ def test_file_tools_are_task_scoped_and_json_safe(tmp_path):
         workspace_root=tmp_path / "agent_workspaces",
     )
     context_a = AgentToolContext(session_id=1, task_id=42)
-    with provider.open_turn(context_a) as scope:
+    with provider.open_turn(context_a, workspace_spec=_managed(tmp_path / "agent_workspaces", 42)) as scope:
         assert scope.registry.names() == (
             "sandbox_list_files", "sandbox_read_file", "sandbox_write_file",
             "sandbox_make_directory",
@@ -43,7 +48,7 @@ def test_file_tools_are_task_scoped_and_json_safe(tmp_path):
             json.dumps(scope.registry.execute_raw(name, context_a, "{}"), allow_nan=False)
 
     context_b = AgentToolContext(session_id=2, task_id=43)
-    with provider.open_turn(context_b) as scope_b:
+    with provider.open_turn(context_b, workspace_spec=_managed(tmp_path / "agent_workspaces", 43)) as scope_b:
         listing_b = scope_b.registry.execute_raw(
             "sandbox_list_files", context_b, '{"path":"."}'
         )
@@ -57,7 +62,7 @@ def test_overwrite_is_explicit_and_no_delete_tool_exists(tmp_path):
         SandboxConfig(enabled=True), workspace_root=tmp_path / "ws"
     )
     ctx = AgentToolContext(1, 10)
-    with provider.open_turn(ctx) as scope:
+    with provider.open_turn(ctx, workspace_spec=_managed(tmp_path / "ws", ctx.task_id)) as scope:
         scope.registry.execute_raw(
             "sandbox_write_file", ctx, '{"path":"a.txt","content":"one"}'
         )
@@ -81,7 +86,7 @@ def test_model_cannot_select_task_id_or_workspace_root(tmp_path):
         SandboxConfig(enabled=True), workspace_root=tmp_path / "ws"
     )
     ctx = AgentToolContext(1, 12)
-    with provider.open_turn(ctx) as scope:
+    with provider.open_turn(ctx, workspace_spec=_managed(tmp_path / "ws", ctx.task_id)) as scope:
         result = scope.registry.execute_raw(
             "sandbox_write_file",
             ctx,
@@ -97,7 +102,7 @@ def test_path_escape_is_controlled_tool_result(tmp_path):
         SandboxConfig(enabled=True), workspace_root=tmp_path / "ws"
     )
     ctx = AgentToolContext(1, 12)
-    with provider.open_turn(ctx) as scope:
+    with provider.open_turn(ctx, workspace_spec=_managed(tmp_path / "ws", ctx.task_id)) as scope:
         result = scope.registry.execute_raw(
             "sandbox_read_file", ctx, '{"path":"../../etc/passwd"}'
         )
@@ -110,7 +115,7 @@ def test_file_tool_limits_are_enforced_and_output_stays_bounded(tmp_path):
     config = SandboxConfig(enabled=True, max_file_chars=8)
     provider = SandboxProvider(config, workspace_root=tmp_path / "ws")
     ctx = AgentToolContext(1, 12)
-    with provider.open_turn(ctx) as scope:
+    with provider.open_turn(ctx, workspace_spec=_managed(tmp_path / "ws", ctx.task_id)) as scope:
         too_large = scope.registry.execute_raw(
             "sandbox_write_file", ctx,
             json.dumps({"path": "large.txt", "content": "x" * 9}),

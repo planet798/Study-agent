@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Iterator
 
 from ..tools.registry import AgentToolRegistry
+from ..workspace import AgentWorkspaceSpec
 from .backend import DockerSandboxBackend
 from .config import SandboxConfig
 from .tools import sandbox_tools_for_task
-from .workspace import SandboxWorkspace
+from .workspace import LocalProjectWorkspace, SandboxWorkspace
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ class SandboxProvider:
         self,
         context,
         base_registry: AgentToolRegistry | None = None,
+        workspace_spec: AgentWorkspaceSpec | None = None,
     ) -> Iterator[SandboxTurnScope]:
         """Build a fresh effective Registry without touching workspace files."""
         effective = AgentToolRegistry(allowed_mutation_scopes=("sandbox",))
@@ -74,23 +76,34 @@ class SandboxProvider:
 
         workspace = None
         sandbox_tools = ()
-        if self.config.enabled and (self.config.file_tools or self.config.execution.enabled):
-            workspace = SandboxWorkspace(
-                task_id=context.task_id,
-                base_root=self.workspace_root,
-                max_file_chars=self.config.max_file_chars,
-            )
-            backend = self.backend
-            if self.config.execution.enabled and backend is not None:
-                probe = getattr(backend, "probe", None)
-                if callable(probe):
-                    try:
-                        probe()
-                    except Exception:  # noqa: BLE001 - Sandbox execution is optional
-                        setattr(backend, "available", False)
-            sandbox_tools = sandbox_tools_for_task(
-                self.config, workspace, backend
-            )
+        if workspace_spec is not None and workspace_spec.readable and workspace_spec.root is not None:
+            if workspace_spec.kind == "managed" and workspace_spec.writable:
+                # Managed physical root is fixed by the service, not a model argument.
+                workspace = SandboxWorkspace(
+                    task_id=context.task_id,
+                    base_root=workspace_spec.root.parent,
+                    max_file_chars=self.config.max_file_chars,
+                )
+                if workspace.task_root != workspace_spec.root:
+                    raise ValueError("Managed workspace identity is invalid.")
+            elif workspace_spec.kind == "local" and not workspace_spec.writable:
+                workspace = LocalProjectWorkspace(
+                    workspace_spec.root, max_file_chars=self.config.max_file_chars,
+                )
+            if workspace is not None:
+                backend = self.backend if (workspace_spec.kind == "managed"
+                    and workspace_spec.execution_allowed) else None
+                if self.config.enabled and self.config.execution.enabled and backend is not None:
+                    probe = getattr(backend, "probe", None)
+                    if callable(probe):
+                        try:
+                            probe()
+                        except Exception:  # noqa: BLE001 - optional Docker execution
+                            setattr(backend, "available", False)
+                sandbox_tools = sandbox_tools_for_task(
+                    self.config, workspace, backend,
+                    writable=workspace_spec.kind == "managed",
+                )
 
         exposed: list[str] = []
         for tool in sandbox_tools:
@@ -102,8 +115,8 @@ class SandboxProvider:
             exposed.append(tool.spec.name)
 
         report = SandboxTurnReport(
-            enabled=self.config.enabled,
-            execution_available=bool(self.backend and self.backend.available),
+            enabled=bool(sandbox_tools),
+            execution_available="sandbox_run" in exposed,
             exposed_tools=tuple(exposed),
         )
         yield SandboxTurnScope(effective, report)

@@ -18,6 +18,10 @@ class AgentCapabilityStatus:
     sandbox_configured: bool = False
     sandbox_execution_configured: bool = False
     approvals_enabled: bool = False
+    workspace_bound: bool = False
+    workspace_kind: str = "none"
+    workspace_readable: bool = False
+    workspace_writable: bool = False
     warnings: tuple[str, ...] = ()
 
 

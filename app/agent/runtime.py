@@ -32,6 +32,7 @@ from .skills.base import AgentSkill
 from .skills.selector import AgentSkillSelector
 from .tools.base import AgentToolContext
 from .tools.registry import AgentToolRegistry
+from .workspace import AgentWorkspaceSpec
 
 AGENT_SYSTEM_PROMPT = (
     "你是 Study-Agent 的任务型学习助手。\n"
@@ -91,6 +92,7 @@ class AgentRuntime:
         memory_compactor=None,
         trace_service=None,
         approval_provider: AgentApprovalProvider | None = None,
+        workspace_service=None,
     ):
         self.session_service = session_service
         self.model_client = model_client
@@ -103,6 +105,7 @@ class AgentRuntime:
         self.memory_compactor = memory_compactor
         self.trace_service = trace_service
         self.approval_provider = approval_provider
+        self.workspace_service = workspace_service
         if isinstance(max_tool_rounds, bool) or int(max_tool_rounds) < 1:
             raise ValueError("max_tool_rounds must be a positive integer")
         self.max_tool_rounds = int(max_tool_rounds)
@@ -119,6 +122,7 @@ class AgentRuntime:
         mcp_unavailable_servers: tuple[str, ...] = (),
         session_memory: str = "",
         memory_omitted_earlier: bool = False,
+        workspace_spec: AgentWorkspaceSpec | None = None,
     ) -> ModelMessage:
         """Task title, optional bounded snapshot, and accurate tool availability."""
         title = (session.get("title") or "").strip()
@@ -143,19 +147,36 @@ class AgentRuntime:
             name for name in effective_registry.names()
             if name.startswith("sandbox_")
         ) if effective_registry is not None else ()
-        if sandbox_names:
+        if workspace_spec is not None and workspace_spec.kind == "managed" and sandbox_names:
             content += (
-                "\n\nSandbox 是当前 Task 的隔离工作目录。sandbox_* 工具只能操作该目录，"
-                "不是宿主机文件系统或 Study-Agent application state。"
-                "文件变化、代码运行结果不代表 Task 完成、Assessment 通过、Mastery 变化、"
-                "Capability Evidence 创建或 Practice Evidence 创建。"
+                "\n\nA user-selected managed Workspace is available. "
+                "Paths passed to sandbox tools are relative to that Workspace. "
+                "Read/write file tools may be used for explicit file tasks. "
+                "Workspace files are not Study-Agent application state. "
             )
-            if "sandbox_run" in sandbox_names:
-                content += "本轮提供了 sandbox_run 时，只能在该隔离 workspace 内执行。"
-            else:
-                content += "本轮没有 sandbox_run，不能声称执行了代码或命令。"
+        elif workspace_spec is not None and workspace_spec.kind == "local" and sandbox_names:
+            content += (
+                "\n\nA user-selected local project Workspace is available in read-only mode. "
+                "You may inspect files with the available read tools. "
+                "Do not claim that you can modify project files. "
+                "All sandbox tool paths are relative to this Workspace. "
+            )
         else:
-            content += "\n\n本轮未提供 Sandbox 工具；不得声称访问文件系统或执行代码/命令。"
+            content += (
+                "\n\nNo file workspace is currently available. "
+                "If the user asks to create or inspect files, tell them to select a Workspace in the UI. "
+            )
+        content += (
+            "When the user asks to save a Study-Agent learning note, use "
+            "request_save_learning_note (which requires approval and stores a SQLite learning outcome, "
+            "not a file). When the user explicitly asks to create/export a file such as "
+            ".md, .py, .json, README or a report file, use Workspace file tools when writable. "
+            "Do not treat those two actions as equivalent. "
+        )
+        if "sandbox_run" in sandbox_names:
+            content += "sandbox_run executes only inside the managed Workspace. "
+        else:
+            content += "No code or command execution tool is available this turn. "
         if effective_registry is not None and "request_complete_current_task" in effective_registry.names():
             content += (
                 "\n\nrequest_complete_current_task、request_start_assessment、"
@@ -241,6 +262,7 @@ class AgentRuntime:
         mcp_unavailable_servers: tuple[str, ...] = (),
         conversation_window: ConversationWindow | None = None,
         trace_collector: AgentTraceCollector | None = None,
+        workspace_spec: AgentWorkspaceSpec | None = None,
     ) -> ModelRequest:
         """Rebuild the request from immutable persisted rows and one fixed window."""
         summary = ""
@@ -282,6 +304,7 @@ class AgentRuntime:
             mcp_unavailable_servers=mcp_unavailable_servers,
             session_memory=summary,
             memory_omitted_earlier=memory_omitted,
+            workspace_spec=workspace_spec,
         )]
         messages.extend(self._to_model_message(row) for row in history)
         tools = registry.model_tools() if registry and registry.names() else ()
@@ -327,6 +350,12 @@ class AgentRuntime:
     ) -> AgentTurnResult:
         context = AgentToolContext(
             session_id=session_id, task_id=int(session["task_id"])
+        )
+        # Capture the current Task binding once for the entire turn. Never expose
+        # its physical path to prompts, traces, or model-visible tool metadata.
+        workspace_spec = (
+            self.workspace_service.runtime_spec(context.task_id)
+            if self.workspace_service is not None else None
         )
         memory_started = self._timer_start(trace_collector)
         conversation_window = None
@@ -419,6 +448,7 @@ class AgentRuntime:
                 base_registry=self.tool_registry,
                 conversation_window=conversation_window,
                 trace_collector=trace_collector,
+                workspace_spec=workspace_spec,
             )
 
         # MCP scope remains alive through the complete model/tool loop. Sandbox
@@ -452,6 +482,7 @@ class AgentRuntime:
                 mcp_enabled=True,
                 mcp_unavailable_servers=unavailable,
                 trace_collector=trace_collector,
+                workspace_spec=workspace_spec,
             )
 
     def _new_trace_collector(self, session: dict, user_message: dict):
@@ -533,6 +564,7 @@ class AgentRuntime:
         mcp_enabled: bool = False,
         mcp_unavailable_servers: tuple[str, ...] = (),
         trace_collector: AgentTraceCollector | None = None,
+        workspace_spec: AgentWorkspaceSpec | None = None,
     ) -> AgentTurnResult:
         if self.sandbox_provider is None:
             base_registry = self._with_approval(base_registry)
@@ -547,10 +579,11 @@ class AgentRuntime:
                 mcp_enabled=mcp_enabled,
                 mcp_unavailable_servers=mcp_unavailable_servers,
                 trace_collector=trace_collector,
+                workspace_spec=workspace_spec,
             )
         sandbox_started = self._timer_start(trace_collector)
         with self.sandbox_provider.open_turn(
-            context, base_registry=base_registry
+            context, base_registry=base_registry, workspace_spec=workspace_spec
         ) as sandbox_scope:
             if trace_collector is not None:
                 report = getattr(sandbox_scope, "report", None)
@@ -558,12 +591,7 @@ class AgentRuntime:
                     trace_collector, "sandbox", "scope", "ok",
                     self._elapsed(trace_collector, sandbox_started),
                     {
-                        "file_tools": bool(
-                            getattr(report, "enabled", True) and getattr(
-                                getattr(self.sandbox_provider, "config", None),
-                                "file_tools", False,
-                            )
-                        ),
+                        "file_tools": bool(getattr(report, "enabled", False)),
                         "execution_available": bool(
                             getattr(report, "execution_available", False)
                         ),
@@ -577,6 +605,7 @@ class AgentRuntime:
                 conversation_window=conversation_window, mcp_enabled=mcp_enabled,
                 mcp_unavailable_servers=mcp_unavailable_servers,
                 trace_collector=trace_collector,
+                workspace_spec=workspace_spec,
             )
 
     def _with_approval(self, base_registry):
@@ -598,6 +627,7 @@ class AgentRuntime:
         mcp_enabled: bool = False,
         mcp_unavailable_servers: tuple[str, ...] = (),
         trace_collector: AgentTraceCollector | None = None,
+        workspace_spec: AgentWorkspaceSpec | None = None,
     ) -> AgentTurnResult:
         tool_rounds = 0
         tool_messages: list[dict] = []
@@ -611,6 +641,7 @@ class AgentRuntime:
                 mcp_unavailable_servers=mcp_unavailable_servers,
                 conversation_window=conversation_window,
                 trace_collector=trace_collector,
+                workspace_spec=workspace_spec,
             )
             response = self._complete_model(request, trace_collector)
             if not response.tool_calls:

@@ -272,6 +272,60 @@ class SandboxWorkspace:
         return {"path": normalized, "created": True}
 
 
+class LocalProjectWorkspace(SandboxWorkspace):
+    """Existing user-selected root; read-only and never creates directories."""
+
+    _SENSITIVE_NAMES = frozenset({
+        ".env", ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
+    })
+    _SENSITIVE_DIRS = frozenset({".git", ".ssh"})
+
+    def __init__(self, root: Path, max_file_chars: int):
+        # Base class owns the shared strictly-relative resolver and bounded reads.
+        super().__init__(1, root.parent, max_file_chars)
+        self.task_root = root
+
+    @classmethod
+    def _sensitive(cls, parts: tuple[str, ...]) -> bool:
+        return any(
+            name.lower() in cls._SENSITIVE_NAMES
+            or name.lower().startswith(".env.")
+            or name.lower().endswith((".pem", ".key"))
+            or name.lower() in cls._SENSITIVE_DIRS
+            for name in parts
+        )
+
+    def ensure_workspace(self) -> Path:
+        try:
+            if (_is_link_or_junction(self.task_root) or not self.task_root.is_dir()):
+                raise SandboxWorkspaceError("Local workspace is unavailable.")
+            self._resolved_root = self.task_root.resolve(strict=True)
+            return self.task_root
+        except OSError:
+            raise SandboxWorkspaceError("Local workspace is unavailable.") from None
+
+    def resolve_relative(self, raw_path: str, *, allow_root: bool = False,
+                         must_exist: bool = False) -> tuple[Path, str]:
+        if isinstance(raw_path, str) and self._sensitive(tuple(raw_path.split("/"))):
+            raise WorkspaceSensitivePathDenied()
+        return super().resolve_relative(
+            raw_path, allow_root=allow_root, must_exist=must_exist,
+        )
+
+    def list_files(self, raw_path: str = ".") -> dict[str, Any]:
+        listing = super().list_files(raw_path)
+        listing["entries"] = [entry for entry in listing["entries"]
+                              if not self._sensitive((entry["name"],))]
+        return listing
+
+
+class WorkspaceSensitivePathDenied(SandboxWorkspaceError):
+    code = "workspace_sensitive_path_denied"
+
+    def __init__(self):
+        super().__init__("Sensitive workspace path is not available to the Agent.")
+
+
 def _is_link_or_junction(path: Path) -> bool:
     try:
         if path.is_symlink():

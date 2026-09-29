@@ -5,6 +5,15 @@ from __future__ import annotations
 import json
 
 from app.agent.runtime import AgentRuntime
+from app.agent.workspace import AgentWorkspaceSpec
+
+
+class WorkspaceServiceStub:
+    def __init__(self, root):
+        self.root = root
+
+    def runtime_spec(self, task_id):
+        return AgentWorkspaceSpec("managed", self.root / f"task_{task_id}", True, True, True)
 from app.agent.session import AgentSessionService
 from app.agent.skills import AgentSkillSelector, build_default_agent_skill_registry
 from app.agent.tools.base import AgentTool, AgentToolContext, AgentToolSpec, EMPTY_OBJECT_SCHEMA
@@ -172,7 +181,7 @@ def test_native_mcp_and_sandbox_compose_with_sandbox_scope_only(
     runtime = AgentRuntime(
         sessions, model, tool_registry=native_mcp_registry,
         context_builder=context_builder, skill_selector=selector,
-        sandbox_provider=provider,
+        sandbox_provider=provider, workspace_service=WorkspaceServiceStub(tmp_path / "agent_workspaces"),
     )
     before_state = _business_state(
         conn, task_service, assessment_repo, task.id, kp["id"]
@@ -320,7 +329,7 @@ def test_actual_mcp_provider_and_sandbox_scope_compose_in_one_runtime_turn(
     runtime = AgentRuntime(
         sessions, model, tool_registry=native, context_builder=context,
         skill_selector=selector, mcp_provider=mcp_provider,
-        sandbox_provider=sandbox_provider,
+        sandbox_provider=sandbox_provider, workspace_service=WorkspaceServiceStub(tmp_path / "sandbox"),
     )
 
     result = runtime.send_message(session["id"], "Use approved external and task tools")
@@ -337,3 +346,72 @@ def test_actual_mcp_provider_and_sandbox_scope_compose_in_one_runtime_turn(
             if row["role"] == "tool"] == ["mcp_docs_search", "sandbox_write_file"]
     sandbox_root = tmp_path / "sandbox" / f"task_{task.id}"
     assert (sandbox_root / "note.txt").read_text(encoding="utf-8") == "ok"
+
+
+def test_workspace_tool_matrix_and_safe_defaults(tmp_path):
+    from app.agent.sandbox.config import SandboxConfig
+    from app.agent.sandbox.provider import SandboxProvider
+
+    provider = SandboxProvider(SandboxConfig(), workspace_root=tmp_path / "managed")
+    context = AgentToolContext(1, 5)
+    with provider.open_turn(context) as scope:
+        assert scope.registry.names() == ()
+        assert not (tmp_path / "managed").exists()
+
+    managed_root = tmp_path / "managed" / "task_5"
+    managed = AgentWorkspaceSpec("managed", managed_root, True, True, True)
+    with provider.open_turn(context, workspace_spec=managed) as scope:
+        assert scope.registry.names() == (
+            "sandbox_list_files", "sandbox_read_file", "sandbox_write_file",
+            "sandbox_make_directory",
+        )
+        assert scope.registry.execute_raw(
+            "sandbox_write_file", context, '{"path":"notes.md","content":"hello"}'
+        )["ok"] is True
+        assert "sandbox_run" not in scope.registry.names()
+    assert (managed_root / "notes.md").read_text() == "hello"
+
+    project = tmp_path / "PRIVATE_PROJECT_PATH_SENTINEL"
+    project.mkdir()
+    (project / "README.md").write_text("public", encoding="utf-8")
+    local = AgentWorkspaceSpec("local", project, True, False, False)
+    with provider.open_turn(context, workspace_spec=local) as scope:
+        assert scope.registry.names() == ("sandbox_list_files", "sandbox_read_file")
+        assert scope.registry.execute_raw(
+            "sandbox_read_file", context, '{"path":"README.md"}'
+        )["data"]["content"] == "public"
+        assert "sandbox_run" not in scope.registry.names()
+    assert not (project / "task_5").exists()
+
+
+def test_local_workspace_sensitive_paths_are_denied_without_leaking_root(tmp_path):
+    from app.agent.sandbox.config import SandboxConfig
+    from app.agent.sandbox.provider import SandboxProvider
+
+    project = tmp_path / "PRIVATE_PROJECT_PATH_SENTINEL"
+    project.mkdir()
+    for name in (".env", ".env.local", "secret.pem", "private.key", "id_rsa",
+                 "id_ed25519", ".npmrc", ".pypirc", ".netrc"):
+        (project / name).write_text("PRIVATE", encoding="utf-8")
+    for directory in (".git", ".ssh"):
+        (project / directory).mkdir()
+        (project / directory / "config").write_text("PRIVATE", encoding="utf-8")
+    (project / "src").mkdir()
+    (project / "src" / "train.py").write_text("print('ok')", encoding="utf-8")
+    (project / "README.md").write_text("public", encoding="utf-8")
+    context = AgentToolContext(1, 8)
+    provider = SandboxProvider(SandboxConfig())
+    spec = AgentWorkspaceSpec("local", project, True, False, False)
+    with provider.open_turn(context, workspace_spec=spec) as scope:
+        registry = scope.registry
+        for name in (".env", ".env.local", "secret.pem", "private.key", "id_rsa",
+                     "id_ed25519", ".npmrc", ".pypirc", ".netrc", ".git/config",
+                     ".ssh/config"):
+            envelope = registry.execute_raw("sandbox_read_file", context, json.dumps({"path": name}))
+            assert envelope["error"]["code"] == "workspace_sensitive_path_denied"
+            assert "PRIVATE_PROJECT_PATH_SENTINEL" not in json.dumps(envelope)
+            assert "PRIVATE" not in json.dumps(envelope)
+        assert registry.execute_raw("sandbox_read_file", context, '{"path":"src/train.py"}')["ok"]
+        assert registry.execute_raw("sandbox_read_file", context, '{"path":"README.md"}')["ok"]
+        listing = registry.execute_raw("sandbox_list_files", context, '{}')["data"]
+        assert {entry["name"] for entry in listing["entries"]} == {"README.md", "src"}

@@ -113,3 +113,56 @@ def test_private_prompt_user_tool_arguments_and_external_outputs_stay_out_of_tel
     assert "TOOL_ARGUMENT_SECRET" in raw_history
     assert "SANDBOX_OUTPUT_SECRET" in raw_history
     assert "MCP_OUTPUT_SECRET" in raw_history
+
+
+def test_local_workspace_host_path_never_enters_request_messages_or_telemetry(conn, tmp_path):
+    from app.agent.sandbox.config import SandboxConfig
+    from app.agent.sandbox.provider import SandboxProvider
+    from app.agent.workspace import AgentWorkspaceSpec
+
+    task_service = TaskService(TaskRepository(conn))
+    task = task_service.create_task(title="Workspace privacy", scheduled_date="2026-10-01", source="manual")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    session = sessions.start_or_resume(task.id)
+    project = tmp_path / "SECRET_PROJECT_PATH_SENTINEL"
+    project.mkdir()
+    (project / "README.md").write_text("public contents", encoding="utf-8")
+
+    class Workspace:
+        def runtime_spec(self, task_id):
+            assert task_id == task.id
+            return AgentWorkspaceSpec("local", project, True, False, False)
+
+    class ReadModel(AgentModelClient):
+        def __init__(self):
+            self.requests = []
+
+        def is_configured(self):
+            return True
+
+        def complete(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                return ModelResponse(content="", finish_reason="tool_calls", tool_calls=(
+                    ModelToolCall("read-1", "sandbox_read_file", '{"path":"README.md"}'),
+                ))
+            return ModelResponse(content="Read complete", finish_reason="stop")
+
+    model = ReadModel()
+    runtime = AgentRuntime(
+        sessions, model,
+        sandbox_provider=SandboxProvider(SandboxConfig()),
+        workspace_service=Workspace(),
+        trace_service=AgentTraceService(AgentTraceRepository(conn), AgentEvaluationRepository(conn)),
+    )
+    runtime.send_message(session["id"], "Read README")
+    assert len(model.requests) == 2
+    assert "read-only mode" in model.requests[0].messages[0].content
+    for request in model.requests:
+        assert str(project) not in repr(request)
+        assert "SECRET_PROJECT_PATH_SENTINEL" not in repr(request)
+    for table in ("agent_turn_traces", "agent_trace_events", "agent_turn_evaluations", "agent_messages"):
+        rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+        serialized = json.dumps([dict(row) for row in rows])
+        assert str(project) not in serialized
+        assert "SECRET_PROJECT_PATH_SENTINEL" not in serialized

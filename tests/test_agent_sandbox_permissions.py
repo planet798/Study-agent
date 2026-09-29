@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.agent.sandbox.config import SandboxConfig, SandboxExecutionConfig
 from app.agent.sandbox.provider import SandboxProvider
 from app.agent.sandbox.workspace import SandboxWorkspace
+from app.agent.workspace import AgentWorkspaceSpec
 from app.agent.sandbox.tools import sandbox_tools_for_task
 from app.agent.tools.base import AgentTool, AgentToolContext, AgentToolSpec, EMPTY_OBJECT_SCHEMA
 from app.agent.tools.registry import AgentToolRegistry
@@ -86,7 +87,7 @@ def test_application_scope_cannot_be_enabled_or_registered():
 def test_sandbox_tools_are_exact_and_scoped_by_operation(tmp_path):
     config = SandboxConfig(enabled=True, file_tools=True)
     workspace = SandboxWorkspace(17, tmp_path / "agent_workspaces", 1000)
-    tools = sandbox_tools_for_task(config, workspace, None)
+    tools = sandbox_tools_for_task(config, workspace, None, writable=True)
     by_name = {tool.spec.name: tool.spec for tool in tools}
     assert tuple(by_name) == (
         "sandbox_list_files", "sandbox_read_file", "sandbox_write_file",
@@ -108,11 +109,11 @@ def test_run_tool_only_appears_when_execution_is_enabled_and_backend_available(t
     )
     workspace = SandboxWorkspace(1, tmp_path / "ws", 1000)
     unavailable = Backend(config.execution, available=False)
-    tools = sandbox_tools_for_task(config, workspace, unavailable)
+    tools = sandbox_tools_for_task(config, workspace, unavailable, writable=True)
     assert "sandbox_run" not in {tool.spec.name for tool in tools}
 
     available = Backend(config.execution, available=True)
-    tools = sandbox_tools_for_task(config, workspace, available)
+    tools = sandbox_tools_for_task(config, workspace, available, writable=True)
     run_tool = next(t for t in tools if t.spec.name == "sandbox_run")
     assert run_tool.spec.read_only is False
     assert run_tool.spec.mutation_scope == "sandbox"
@@ -127,7 +128,7 @@ def test_provider_composes_native_then_sandbox_and_does_not_create_workspace_on_
     native.register(ReadOnlyTool())
     context = AgentToolContext(session_id=1, task_id=77)
 
-    with provider.open_turn(context, base_registry=native) as scope:
+    with provider.open_turn(context, base_registry=native, workspace_spec=AgentWorkspaceSpec("managed", tmp_path / "workspaces" / "task_77", True, True, True)) as scope:
         assert scope.registry.names() == (
             "native_read", "sandbox_list_files", "sandbox_read_file",
             "sandbox_write_file", "sandbox_make_directory",
