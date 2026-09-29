@@ -1511,6 +1511,11 @@ class MainWindow(QMainWindow):
         """退出前集中清理：托盘、AI 线程、打开的 AI 对话框。"""
         self._quit_requested = True
 
+        # Release page-owned scroll callbacks and any Workspace menu popup
+        # before the parent window (or QApplication) starts tearing down Qt.
+        if self.agent_workspace_page is not None:
+            self.agent_workspace_page.close()
+
         # 1) 清理托盘（隐藏 + 删除），不再驻留后台
         if self._tray is not None:
             self._tray.hide()

@@ -39,12 +39,13 @@ def _task(repo, *, status=STATUS_ACTIVE, **kwargs):
     return task
 
 
-def test_workspace_is_internal_not_a_sidebar_page():
+def test_workspace_is_internal_not_a_sidebar_page(qtbot):
     assert [spec.key for spec in PAGE_SPECS] == [
         PageKey.TODAY, PageKey.ROUTES, PageKey.PRACTICE, PageKey.SETTINGS,
     ]
     assert not any(str(spec.key).lower().find("agent") >= 0 for spec in PAGE_SPECS)
     page = AgentWorkspacePage()
+    qtbot.addWidget(page)
     assert page.objectName() == "AgentWorkspacePage"
 
 
@@ -223,9 +224,14 @@ def test_workspace_status_row_scroll_and_busy_persistence(qtbot, repo):
     assert not page.input_edit.isEnabled()
     assert not page.findChild(type(page.send_button), "AgentApprovalApprove").isEnabled()
     page.load_session({"id": 12}, messages, task, None, True,
-                      capability_status=status, approval_busy=(7,))
+                      capability_status=status, approval_busy=(7,),
+                      approvals=[{"id": 7, "status": "pending",
+                                  "tool_name": "request_complete_current_task"}])
     assert not page.input_edit.isEnabled()
-    assert page.findChild(type(page.send_button), "AgentApprovalApprove").text() == "正在执行…"
+    button = page.findChild(type(page.send_button), "AgentApprovalApprove")
+    assert button is not None, (page.approvals_layout.count(),
+                                page.approvals_container.findChildren(type(page.send_button)))
+    assert button.text() == "正在执行…"
     page.set_approval_busy(7, False)
     assert page.input_edit.isEnabled()
 

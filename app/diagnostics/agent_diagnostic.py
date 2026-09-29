@@ -86,7 +86,7 @@ def format_agent_diagnostic(data: dict) -> str:
                   f"  allowlisted tools: {data['mcp_allowed_tools']}",
                   "Workspace", f"  managed bindings: {data['managed_workspaces']}",
                   f"  local bindings: {data['local_workspaces']}",
-                  "Sandbox", f"  file tools: {'enabled' if data['sandbox_file_tools'] else 'disabled'}",
+                  "Sandbox", f"  file tools: {'bound on at least one Task' if data['sandbox_file_tools'] else 'no Task bindings'}",
                   f"  execution configured: {'yes' if data['sandbox_execution_configured'] else 'no'}",
                   "Storage", f"  sessions: {data['sessions']}",
                   f"  messages: {data['messages']}",

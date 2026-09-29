@@ -301,16 +301,16 @@ class TestModificationDetected:
 
 
 class TestSnapshotFormat:
-    """3/14/15. fingerprint v6 + legacy 兼容。"""
+    """3/14/15. fingerprint v7 + legacy 兼容。"""
 
-    def test_inventory_is_v6_with_row_level_hashes(self, tmp_path):
+    def test_inventory_is_v7_with_row_level_hashes(self, tmp_path):
         from app.diagnostics import release_migration as rm
 
         conn = _make_v20(tmp_path / "f.db")
         try:
             _seed(conn, tasks=3)
             inv = rm.inventory(conn)
-            assert inv["fingerprint_version"] == 6
+            assert inv["fingerprint_version"] == 7
             fp = inv["fingerprints"]["tasks"]
             assert fp["row_level"] is True
             assert len(fp["rows"]) == 3

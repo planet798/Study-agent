@@ -122,6 +122,14 @@ class AgentWorkspaceCard(SACard):
         self.clear_button.setVisible(kind != "none")
         self._update_enabled()
 
+    def closeEvent(self, event):  # noqa: N802 - Qt API
+        # A popup is a top-level Qt window even though its QObject parent is
+        # the button. Never leave one open across a page/test teardown.
+        menu = self.replace_button.menu()
+        if menu is not None:
+            menu.close()
+        super().closeEvent(event)
+
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)
         self._update_enabled()

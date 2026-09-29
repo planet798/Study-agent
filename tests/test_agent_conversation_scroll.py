@@ -103,6 +103,36 @@ def test_session_switch_cancels_old_assistant_target(qtbot, repo):
     assert not any(w.message_id == 31 for w in page.findChildren(AgentMessageWidget))
 
 
+def test_conversation_reload_leaves_no_orphan_top_level_bubbles(qtbot, repo):
+    from PySide6.QtWidgets import QApplication
+
+    page, task = _page(qtbot, repo)
+    history = _history()
+    for _ in range(12):
+        page.load_session({"id": 1}, history, task, None, True)
+    QApplication.processEvents()
+    assert not [widget for widget in QApplication.topLevelWidgets()
+                if isinstance(widget, AgentMessageWidget)]
+    page.close()
+
+
+def test_scroll_restore_tracks_late_layout_range_and_clears_on_close(qtbot, repo):
+    page, task = _page(qtbot, repo)
+    page.load_session({"id": 1}, _history(), task, None, True)
+    bar = page.conversation_scroll.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 300)
+    page._restore_scroll(180)
+    qtbot.waitUntil(lambda: bar.value() == 180)
+    # A second layout change must not lose the pending restore target.
+    bar.setValue(0)
+    bar.setRange(0, bar.maximum() + 20)
+    qtbot.waitUntil(lambda: bar.value() == 180)
+    page.close()
+    assert page._pending_scroll_handler is None
+    bar.setRange(0, bar.maximum() + 20)  # no stale callback after close
+    assert bar.value() == 180
+
+
 def test_new_assistant_after_user_and_hidden_tool_targets_assistant(qtbot, repo):
     page, task = _page(qtbot, repo)
     history = _history()

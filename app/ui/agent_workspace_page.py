@@ -18,7 +18,7 @@ is the SAPageHeader subtitle, so the Workspace never duplicates it.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, Qt, Signal, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -178,6 +178,7 @@ class AgentWorkspacePage(QWidget):
         self.conversation_scroll.viewport().installEventFilter(self)
         bar = self.conversation_scroll.verticalScrollBar()
         bar.valueChanged.connect(self._on_scroll_value_changed)
+        bar.sliderPressed.connect(self._clear_pending_scroll)
         bar.rangeChanged.connect(self._update_latest_button)
 
         root.addWidget(self._build_approvals())
@@ -389,7 +390,10 @@ class AgentWorkspacePage(QWidget):
         while self.approvals_layout.count():
             item = self.approvals_layout.takeAt(0)
             if item.widget() is not None:
-                item.widget().deleteLater()
+                stale = item.widget()
+                stale.hide()
+                stale.deleteLater()
+                QCoreApplication.sendPostedEvents(stale, QEvent.Type.DeferredDelete)
         count = 0
         for row in sorted(approvals, key=lambda item: int(item["id"])):
             name = row.get("tool_name")
@@ -495,8 +499,12 @@ class AgentWorkspacePage(QWidget):
             self.latest_button.raise_()
 
     def eventFilter(self, watched, event):  # noqa: N802 - Qt API
-        if watched is self.conversation_scroll.viewport() and event.type() == QEvent.Type.Resize:
-            QTimer.singleShot(0, self, self._update_latest_button)
+        if watched is self.conversation_scroll.viewport():
+            if event.type() == QEvent.Type.Resize:
+                QTimer.singleShot(0, self, self._update_latest_button)
+            elif event.type() in (QEvent.Type.Wheel, QEvent.Type.TouchBegin,
+                                  QEvent.Type.MouseButtonPress):
+                self._clear_pending_scroll()
         return super().eventFilter(watched, event)
 
     def _on_latest_clicked(self) -> None:
@@ -508,6 +516,13 @@ class AgentWorkspacePage(QWidget):
 
     def _restore_scroll(self, value: int) -> None:
         self._schedule_scroll(value=max(0, int(value)))
+
+    def closeEvent(self, event):  # noqa: N802 - Qt API
+        # rangeChanged retains the Python handler and pending singleShots until
+        # they fire. Disconnect before the widget/scrollbar is torn down.
+        self._clear_pending_scroll()
+        self.workspace_card.close()
+        super().closeEvent(event)
 
     def _clear_pending_scroll(self) -> None:
         self._scroll_epoch += 1
@@ -546,17 +561,12 @@ class AgentWorkspacePage(QWidget):
             self._update_latest_button()
 
         self._pending_scroll_handler = _apply
+        # Range changes are the actual layout-completion signal. A fixed timer
+        # can disconnect before a large conversation finishes relayout, leaving
+        # a restore stuck at zero. The next turn/session switch or close clears
+        # this handler; user scroll input clears it immediately below.
         bar.rangeChanged.connect(_apply)
         QTimer.singleShot(0, self, _apply)
-        QTimer.singleShot(40, self, _apply)
-        QTimer.singleShot(160, self, lambda: self._release_pending_scroll(_apply, epoch))
-
-    def _release_pending_scroll(self, handler, epoch: int) -> None:
-        if epoch != self._scroll_epoch or self._pending_scroll_handler is not handler:
-            return
-        # Qt may relayout after the first two timers when approvals change height.
-        handler()
-        self._clear_pending_scroll()
 
     @staticmethod
     def _visible_message_signature(messages: list[dict]) -> tuple:
@@ -646,8 +656,14 @@ class AgentWorkspacePage(QWidget):
             item = self.conversation_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
-                widget.setParent(None)
+                # Keep QObject parent ownership until DeferredDelete is delivered.
+                # Detaching here creates an orphan top-level QWidget while scroll
+                # callbacks/layout events may still be queued.
+                widget.hide()
                 widget.deleteLater()
+                # This UI rebuild must not expose stale children to findChild or
+                # leave deferred top-level widgets alive until test teardown.
+                QCoreApplication.sendPostedEvents(widget, QEvent.Type.DeferredDelete)
         self.conversation_layout.addStretch()
 
     def _add_bubble(self, speaker: str, text: str, role: str,

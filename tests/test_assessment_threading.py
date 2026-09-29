@@ -12,6 +12,7 @@ import json
 import threading
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QLabel
 
 from app.database.assessment_repository import AssessmentRepository
@@ -111,7 +112,10 @@ def _run(qtbot, worker, signal_name):
     worker.failed.connect(lambda m: result.setdefault("err", m))
     worker.start()
     qtbot.waitUntil(lambda: bool(result), timeout=10000)
-    worker.wait(10000)
+    assert worker.wait(10000)
+    # Drain the queued finished signal while this QThread wrapper is still
+    # owned by the test, before pytest-qt's next-test event flush.
+    QCoreApplication.processEvents()
     if signal_name == "failed":
         assert "err" in result, "expected failure but worker succeeded"
         return result["err"]
@@ -334,6 +338,15 @@ def _build_window(qtbot, main_conn, db_path, ai, monkeypatch, dialog_recorder):
     )
 
 
+def _close_assessment_window(qtbot, window):
+    """Wait for QThread.finished delivery before tearing down its parent."""
+    qtbot.waitUntil(lambda: not window._ai_workers and not window._assessment_inflight,
+                    timeout=10000)
+    window.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QCoreApplication.processEvents()
+
+
 class TestMainWindowIntegration:
     def test_click_start_assessment_no_thread_error(
         self, qtbot, main_conn, db_path, monkeypatch
@@ -350,6 +363,7 @@ class TestMainWindowIntegration:
         qtbot.waitUntil(lambda: len(recorded) == 1, timeout=10000)
         assert "验收启动失败" not in (w.statusBar().currentMessage() or "")
         assert len(AssessmentRepository(main_conn).list_attempts()) == 1
+        _close_assessment_window(qtbot, w)
 
     def test_double_click_creates_one_attempt(
         self, qtbot, main_conn, db_path, monkeypatch
@@ -366,6 +380,7 @@ class TestMainWindowIntegration:
         w._on_start_assessment(task.id)  # 连续双击
         qtbot.waitUntil(lambda: len(recorded) >= 1, timeout=10000)
         assert len(AssessmentRepository(main_conn).list_attempts()) == 1
+        _close_assessment_window(qtbot, w)
 
     def test_factory_error_shows_message_no_crash(
         self, qtbot, main_conn, db_path, monkeypatch
@@ -388,6 +403,7 @@ class TestMainWindowIntegration:
             lambda: "验收启动失败" in (w.statusBar().currentMessage() or ""),
             timeout=10000,
         )
+        _close_assessment_window(qtbot, w)
 
     def test_done_new_and_extra_assessable(self, qtbot, main_conn, db_path,
                                            monkeypatch):
@@ -411,3 +427,4 @@ class TestMainWindowIntegration:
         w._on_start_assessment(extra.id)
         qtbot.waitUntil(lambda: len(recorded) >= 2, timeout=10000)
         assert len(recorded) == 2
+        _close_assessment_window(qtbot, w)

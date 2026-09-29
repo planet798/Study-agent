@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QPoint, Qt, QUrl
 
 from app.agent.session import AgentSessionService
 from app.database.agent_repository import AgentRepository
@@ -69,6 +69,18 @@ def test_card_signals_and_busy_disable(qtbot):
     card.set_view(_view(task_id=19, kind="managed", available=True))
     card.replace_button.menu().actions()[1].trigger()
     assert actions[-1] == ("local", 19)
+
+
+def test_replace_popup_is_closed_with_card(qtbot):
+    card = AgentWorkspaceCard()
+    qtbot.addWidget(card)
+    card.set_view(_view(kind="managed", available=True))
+    card.show()
+    menu = card.replace_button.menu()
+    menu.popup(card.mapToGlobal(QPoint(0, 0)))
+    qtbot.waitUntil(menu.isVisible)
+    card.close()
+    assert not menu.isVisible()
 
 
 def test_long_path_is_wrapped_selectable_plain_text(qtbot):
@@ -158,6 +170,7 @@ def test_main_window_binding_dialog_open_and_clear(
     assert (tmp_path / f"task_{task.id}").is_dir()
     window._on_start_study(task.id)
     assert card.workspace_kind == "none"
+    window.close()
 
 
 def test_busy_and_approval_busy_lock_workspace_controls(qtbot, repo):
