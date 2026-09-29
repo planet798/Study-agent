@@ -299,13 +299,17 @@ def test_capability_chips_are_truthful_and_drop_architecture_jargon(qtbot, repo)
         True, mcp_configured=True, sandbox_configured=True,
         sandbox_execution_configured=True, approvals_enabled=True,
     )
-    page.load_session({"id": 1}, [], task, None, True, capability_status=status)
+    from types import SimpleNamespace
+    view = SimpleNamespace(task_id=task.id, kind="managed", label="Study-Agent 托管工作区",
+                           display_path="/tmp/task_1", available=True)
+    page.load_session({"id": 1}, [], task, None, True,
+                      capability_status=status, workspace_view=view)
     chips = page.capability_chips
     assert chips["ai"].text() == "AI 已配置"
     assert chips["approval"].text() == "写操作需确认"
     assert chips["mcp"].text() == "MCP 已配置"
-    assert chips["sandbox"].text() == "Sandbox 已启用"
-    assert chips["sandbox_exec"].text() == "Sandbox 执行已配置"
+    assert chips["sandbox"].text() == "Workspace 可读写"
+    assert chips["sandbox_exec"].text() == "代码执行已配置"
     assert all(not chip.isHidden() for chip in chips.values())
     joined = " ".join(chip.text() for chip in chips.values())
     assert "在线" not in joined

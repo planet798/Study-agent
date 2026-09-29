@@ -15,17 +15,19 @@ import json
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtCore import QThread, Qt, QTimer
+from PySide6.QtCore import QThread, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QIcon,
     QPixmap,
+    QDesktopServices,
 )
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QFileDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -122,6 +124,7 @@ class MainWindow(QMainWindow):
         agent_runtime_factory=None,
         agent_approval_service=None,
         agent_approval_service_factory=None,
+        task_workspace_service=None,
     ):
         super().__init__()
         # 主题偏好（QSettings；测试可注入隔离实例）；UI-2 runtime，不改 DB。
@@ -131,6 +134,7 @@ class MainWindow(QMainWindow):
         self.agent_runtime_factory = agent_runtime_factory
         self.agent_approval_service = agent_approval_service
         self.agent_approval_service_factory = agent_approval_service_factory
+        self.task_workspace_service = task_workspace_service
         self.date_service = date_service
         self.today_provider = today_provider or _default_today
         # AI 复核服务：可选，未配置/未传时本地功能完全正常
@@ -332,6 +336,10 @@ class MainWindow(QMainWindow):
             self.agent_workspace_page.settings_requested.connect(self._switch_to_ai_settings)
             self.agent_workspace_page.approval_approve_requested.connect(self._on_agent_approval_approve)
             self.agent_workspace_page.approval_reject_requested.connect(self._on_agent_approval_reject)
+            self.agent_workspace_page.workspace_managed_requested.connect(self._on_workspace_managed)
+            self.agent_workspace_page.workspace_local_requested.connect(self._on_workspace_local)
+            self.agent_workspace_page.workspace_open_requested.connect(self._on_workspace_open)
+            self.agent_workspace_page.workspace_clear_requested.connect(self._on_workspace_clear)
             self.stack.addWidget(self.agent_workspace_page)
             self.agent_workspace_page_index = self.stack.count() - 1
 
@@ -444,6 +452,7 @@ class MainWindow(QMainWindow):
                 model_configured=self._agent_model_is_configured(),
                 approvals=self._pending_approvals(session["id"]),
                 capability_status=self._agent_capability_status(),
+                workspace_view=self._workspace_view(task.id),
                 turn_busy=session["id"] in self._agent_inflight_sessions,
                 approval_busy=tuple(self._approval_inflight),
             )
@@ -456,6 +465,76 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - a failed Session open must not break Today
             page.clear_session("无法打开学习会话，请稍后重试。")
             self.statusBar().showMessage("无法打开学习会话，请稍后重试。", 4000)
+
+    def _workspace_view(self, task_id: int):
+        if self.task_workspace_service is None:
+            return None
+        return self.task_workspace_service.get_view(task_id)
+
+    def _workspace_action_allowed(self, task_id: int) -> bool:
+        page = self.agent_workspace_page
+        return bool(
+            self.task_workspace_service is not None and page is not None
+            and page.current_task_id == int(task_id)
+            and page.current_session_id is not None
+            and page.current_session_id not in self._agent_inflight_sessions
+            and not self._approval_inflight
+        )
+
+    def _refresh_workspace_binding(self) -> None:
+        page = self.agent_workspace_page
+        if page is not None and page.current_session_id is not None:
+            self._reload_agent_session(page.current_session_id)
+
+    def _on_workspace_managed(self, task_id: int) -> None:
+        if not self._workspace_action_allowed(task_id):
+            return
+        try:
+            self.task_workspace_service.use_managed(task_id)
+            self._refresh_workspace_binding()
+        except (ValueError, OSError, LookupError):
+            self.statusBar().showMessage("无法设置托管工作区，请重试。", 4000)
+
+    def _on_workspace_local(self, task_id: int) -> None:
+        if not self._workspace_action_allowed(task_id):
+            return
+        path = QFileDialog.getExistingDirectory(self, "选择本地项目工作区")
+        if not path:  # Cancel never changes the binding.
+            return
+        if not self._workspace_action_allowed(task_id):
+            return
+        try:
+            self.task_workspace_service.bind_local(task_id, path)
+            self._refresh_workspace_binding()
+        except (ValueError, OSError, LookupError):
+            self.statusBar().showMessage("无法绑定该目录，请选择有效的项目目录。", 4000)
+
+    def _on_workspace_open(self, task_id: int) -> None:
+        if not self._workspace_action_allowed(task_id):
+            return
+        try:
+            view = self.task_workspace_service.get_view(task_id)
+            if view.kind == "managed":
+                # Opening is an explicit user action; just viewing the session is not.
+                self.task_workspace_service.ensure_managed_directory(task_id)
+            elif view.kind != "local" or not view.available:
+                self._refresh_workspace_binding()
+                return
+            path = self.task_workspace_service.resolve_open_path(task_id)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+                self.statusBar().showMessage("无法打开工作区文件夹。", 4000)
+        except (ValueError, OSError, LookupError):
+            self._refresh_workspace_binding()
+            self.statusBar().showMessage("工作区目录不存在，请重新选择。", 4000)
+
+    def _on_workspace_clear(self, task_id: int) -> None:
+        if not self._workspace_action_allowed(task_id):
+            return
+        try:
+            self.task_workspace_service.clear(task_id)
+            self._refresh_workspace_binding()
+        except (ValueError, OSError, LookupError):
+            self.statusBar().showMessage("无法解除工作区绑定，请重试。", 4000)
 
     def _pending_approvals(self, session_id: int):
         if self.agent_approval_service is None:
@@ -487,6 +566,7 @@ class MainWindow(QMainWindow):
                 model_configured=self._agent_model_is_configured(),
                 approvals=self._pending_approvals(session["id"]),
                 capability_status=self._agent_capability_status(),
+                workspace_view=self._workspace_view(task.id),
                 turn_busy=int(session_id) in self._agent_inflight_sessions,
                 approval_busy=tuple(self._approval_inflight),
             )

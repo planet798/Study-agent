@@ -349,7 +349,7 @@ def test_workspace_status_and_optional_config_degradation_are_nonblocking(
     window._on_start_study(task.id)
     page = window.agent_workspace_page
     assert "MCP 配置无效" in page.capability_warning_banner.description()
-    assert "Sandbox 配置无效" in page.capability_warning_banner.description()
+    assert "Sandbox 执行配置无效，文件工作区仍可使用" in page.capability_warning_banner.description()
     assert "SECRET_MCP_URL" not in page.capability_warning_banner.description()
     page.input_edit.setPlainText("native question")
     page.send_button.click()

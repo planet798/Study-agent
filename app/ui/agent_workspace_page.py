@@ -33,6 +33,7 @@ from ..services.learning_activity import activity_label
 from .agent_composer import MAX_AGENT_INPUT_CHARS, AgentComposer
 from .agent_message_widget import ASSISTANT_ROLE, USER_ROLE, AgentMessageWidget
 from .agent_task_context_card import AgentTaskContextCard
+from .agent_workspace_card import AgentWorkspaceCard
 from .components.button import SAButton
 from .components.empty_state import SAEmptyState
 from .components.flow_layout import FlowWidget
@@ -44,7 +45,7 @@ from .task_widget import format_minutes
 
 STATUS_WARNINGS = {
     "mcp_config_invalid": "MCP 配置无效，本次仅使用内置能力。",
-    "sandbox_config_invalid": "Sandbox 配置无效，相关能力已禁用。",
+    "sandbox_config_invalid": "Sandbox 执行配置无效，文件工作区仍可使用。",
     "sandbox_execution_unavailable": "Sandbox 文件能力可用，但代码执行环境不可用。",
 }
 
@@ -85,11 +86,16 @@ class AgentWorkspacePage(QWidget):
     approval_approve_requested = Signal(int)
     approval_reject_requested = Signal(int)
     settings_requested = Signal()
+    workspace_managed_requested = Signal(int)
+    workspace_local_requested = Signal(int)
+    workspace_open_requested = Signal(int)
+    workspace_clear_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("AgentWorkspacePage")
         self.current_session_id: int | None = None
+        self.current_task_id: int | None = None
         self._model_configured = False
         self._busy = False
         self._approval_busy: set[int] = set()
@@ -112,6 +118,13 @@ class AgentWorkspacePage(QWidget):
 
         self.task_context_card = AgentTaskContextCard()
         root.addWidget(self.task_context_card)
+
+        self.workspace_card = AgentWorkspaceCard()
+        self.workspace_card.managed_requested.connect(self.workspace_managed_requested.emit)
+        self.workspace_card.local_requested.connect(self.workspace_local_requested.emit)
+        self.workspace_card.open_requested.connect(self.workspace_open_requested.emit)
+        self.workspace_card.clear_requested.connect(self.workspace_clear_requested.emit)
+        root.addWidget(self.workspace_card)
 
         self.capability_warning_banner = SAInfoBanner(variant="warning")
         self.capability_warning_banner.hide()
@@ -236,6 +249,7 @@ class AgentWorkspacePage(QWidget):
         approvals=(),
         *,
         capability_status: AgentCapabilityStatus | None = None,
+        workspace_view=None,
         turn_busy: bool = False,
         approval_busy: tuple[int, ...] = (),
     ) -> None:
@@ -259,6 +273,9 @@ class AgentWorkspacePage(QWidget):
 
         self._bind_task_context(task, route_name)
         self.task_context_card.setVisible(True)
+        self.current_task_id = int(task.id)
+        self.workspace_card.set_view(workspace_view)
+        self.workspace_card.setVisible(True)
 
         self._clear_conversation()
         visible_count = 0
@@ -351,12 +368,14 @@ class AgentWorkspacePage(QWidget):
         mcp.setVisible(bool(status.mcp_configured))
 
         sandbox = self.capability_chips["sandbox"]
-        sandbox.setText("Sandbox 已启用")
+        workspace_readable = self.workspace_card.available and self.workspace_card.workspace_kind != "none"
+        sandbox.setText("Workspace 可读写" if self.workspace_card.workspace_kind == "managed"
+                        else "Workspace 只读")
         sandbox.set_variant("neutral")
-        sandbox.setVisible(bool(status.sandbox_configured))
+        sandbox.setVisible(workspace_readable)
 
         sandbox_exec = self.capability_chips["sandbox_exec"]
-        sandbox_exec.setText("Sandbox 执行已配置")
+        sandbox_exec.setText("代码执行已配置")
         sandbox_exec.set_variant("neutral")
         sandbox_exec.setVisible(bool(status.sandbox_execution_configured))
 
@@ -535,6 +554,8 @@ class AgentWorkspacePage(QWidget):
     def _release_pending_scroll(self, handler, epoch: int) -> None:
         if epoch != self._scroll_epoch or self._pending_scroll_handler is not handler:
             return
+        # Qt may relayout after the first two timers when approvals change height.
+        handler()
         self._clear_pending_scroll()
 
     @staticmethod
@@ -550,6 +571,9 @@ class AgentWorkspacePage(QWidget):
 
     def clear_session(self, error: str = "") -> None:
         self.current_session_id = None
+        self.current_task_id = None
+        self.workspace_card.set_view(None)
+        self.workspace_card.hide()
         self._approval_busy.clear()
         self._busy = False
         self._model_configured = False
@@ -581,6 +605,7 @@ class AgentWorkspacePage(QWidget):
         else:
             self._approval_busy.discard(int(approval_id))
         self._update_approval_buttons()
+        self.workspace_card.set_busy(self._busy or bool(self._approval_busy))
         self._update_interaction_status()
         self._update_send_enabled()
 
@@ -597,6 +622,7 @@ class AgentWorkspacePage(QWidget):
         if busy and not self._busy:
             self._scrolled_away_during_busy = self._distance_from_bottom() > 48
         self._busy = bool(busy)
+        self.workspace_card.set_busy(self._busy or bool(self._approval_busy))
         self._update_approval_buttons()
         self._update_interaction_status()
         self._update_send_enabled()
