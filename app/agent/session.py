@@ -56,6 +56,12 @@ class AgentSessionService:
     def get_active_for_task(self, task_id: int) -> dict | None:
         return self.repo.get_active_for_task(int(task_id))
 
+    def list_active_sessions(self, limit: int | None = None) -> list[dict]:
+        return self.repo.list_active_sessions(limit)
+
+    def list_recent_active_sessions(self, limit: int = 10) -> list[dict]:
+        return self.repo.list_recent_active_sessions(limit)
+
     def list_sessions_for_task(self, task_id: int) -> list[dict]:
         return self.repo.list_sessions_for_task(int(task_id))
 

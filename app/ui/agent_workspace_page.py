@@ -114,17 +114,18 @@ class AgentWorkspacePage(QWidget):
         root.setContentsMargins(spacing.XXL, spacing.LG, spacing.XXL, spacing.XL)
         root.setSpacing(spacing.LG)
 
-        root.addLayout(self._build_toolbar())
-
         self.task_context_card = AgentTaskContextCard()
-        root.addWidget(self.task_context_card)
-
         self.workspace_card = AgentWorkspaceCard()
         self.workspace_card.managed_requested.connect(self.workspace_managed_requested.emit)
         self.workspace_card.local_requested.connect(self.workspace_local_requested.emit)
         self.workspace_card.open_requested.connect(self.workspace_open_requested.emit)
         self.workspace_card.clear_requested.connect(self.workspace_clear_requested.emit)
-        root.addWidget(self.workspace_card)
+        header = QHBoxLayout()
+        header.setSpacing(spacing.SM)
+        header.addWidget(self.task_context_card, stretch=1)
+        header.addWidget(self.workspace_card)
+        root.addLayout(header)
+        root.addLayout(self._build_toolbar())
 
         self.capability_warning_banner = SAInfoBanner(variant="warning")
         self.capability_warning_banner.hide()
@@ -157,7 +158,6 @@ class AgentWorkspacePage(QWidget):
             ),
         )
         self.empty_hint.setObjectName("AgentEmptyHint")
-        root.addWidget(self.empty_hint)
 
         self.conversation_scroll = QScrollArea()
         self.conversation_scroll.setObjectName("AgentConversationScroll")
@@ -167,6 +167,7 @@ class AgentWorkspacePage(QWidget):
         self.conversation_layout = QVBoxLayout(self.conversation_body)
         self.conversation_layout.setContentsMargins(0, 4, 0, 4)
         self.conversation_layout.setSpacing(spacing.LG)
+        self.conversation_layout.addWidget(self.empty_hint)
         self.conversation_layout.addStretch()
         self.conversation_scroll.setWidget(self.conversation_body)
         root.addWidget(self.conversation_scroll, stretch=1)
@@ -198,14 +199,6 @@ class AgentWorkspacePage(QWidget):
         toolbar = QVBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(spacing.SM)
-
-        back_row = QHBoxLayout()
-        back_row.setContentsMargins(0, 0, 0, 0)
-        self.back_button = SAButton("← 返回今日", variant="subtle", size="small")
-        self.back_button.clicked.connect(self.back_requested.emit)
-        back_row.addWidget(self.back_button)
-        back_row.addStretch(1)
-        toolbar.addLayout(back_row)
 
         self.capability_chips_widget = FlowWidget()
         self.capability_chips: dict[str, SATag] = {}
@@ -659,11 +652,14 @@ class AgentWorkspacePage(QWidget):
                 # Keep QObject parent ownership until DeferredDelete is delivered.
                 # Detaching here creates an orphan top-level QWidget while scroll
                 # callbacks/layout events may still be queued.
+                if widget is self.empty_hint:
+                    continue
                 widget.hide()
                 widget.deleteLater()
                 # This UI rebuild must not expose stale children to findChild or
                 # leave deferred top-level widgets alive until test teardown.
                 QCoreApplication.sendPostedEvents(widget, QEvent.Type.DeferredDelete)
+        self.conversation_layout.addWidget(self.empty_hint)
         self.conversation_layout.addStretch()
 
     def _add_bubble(self, speaker: str, text: str, role: str,

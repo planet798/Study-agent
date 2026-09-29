@@ -237,6 +237,7 @@ class MainWindow(QMainWindow):
         self.nav_practice_btn = self.sidebar.item(PageKey.PRACTICE)
         self.nav_ai_btn = self.sidebar.item(PageKey.SETTINGS)
         self.sidebar.page_requested.connect(self._on_nav_requested)
+        self.sidebar.session_requested.connect(self._on_open_agent_session)
 
         # ----- 今日页（View 已抽到 TodayPage，MainWindow 只做编排） -----
         self.today_page = TodayPage()
@@ -331,7 +332,6 @@ class MainWindow(QMainWindow):
         if (self.agent_session_service is not None
                 and self.agent_runtime_factory is not None):
             self.agent_workspace_page = AgentWorkspacePage()
-            self.agent_workspace_page.back_requested.connect(self._on_agent_back)
             self.agent_workspace_page.send_requested.connect(self._on_agent_send)
             self.agent_workspace_page.settings_requested.connect(self._switch_to_ai_settings)
             self.agent_workspace_page.approval_approve_requested.connect(self._on_agent_approval_approve)
@@ -430,41 +430,67 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - route summary is optional
             return None
 
-    def _on_start_study(self, task_id: int) -> None:
-        """Open/resume one task-bound Session without making a model request."""
+    def _refresh_learning_sessions(self) -> None:
         page = getattr(self, "agent_workspace_page", None)
-        if (page is None or self.agent_session_service is None
-                or self.agent_runtime_factory is None):
-            self.statusBar().showMessage("学习会话暂不可用", 3000)
+        if self.agent_session_service is None or page is None:
+            return
+        try:
+            sessions = self.agent_session_service.list_recent_active_sessions(10)
+            selected = (page.current_session_id if self.stack.currentWidget() is page else None)
+            if selected is not None and not any(s["id"] == selected for s in sessions):
+                sessions.append(self.agent_session_service.get(selected))
+            self.sidebar.set_sessions(sessions, selected,
+                                      bool(self._agent_inflight_sessions or self._approval_inflight))
+        except Exception:
+            self.statusBar().showMessage("无法加载学习会话列表", 4000)
+
+    def _on_start_study(self, task_id: int) -> None:
+        """Today action creates/resumes only active Tasks; history uses session ID."""
+        if self._agent_inflight_sessions or self._approval_inflight:
             return
         try:
             task = self.task_service.get_task(int(task_id))
             if task.status != STATUS_ACTIVE:
-                page.clear_session("当前任务已不在待学习状态。")
                 return
             session = self.agent_session_service.start_or_resume(task.id)
-            messages = self.agent_session_service.messages(session["id"])
+            self._on_open_agent_session(session["id"])
+        except Exception:
+            self.statusBar().showMessage("无法打开学习会话，请稍后重试。", 4000)
+
+    def _on_open_agent_session(self, session_id: int) -> None:
+        """Open by immutable origin task_id, regardless of today's Task status."""
+        page = getattr(self, "agent_workspace_page", None)
+        if page is None or self.agent_session_service is None:
+            return
+        if (self._agent_inflight_sessions or self._approval_inflight) and page.current_session_id != int(session_id):
+            self._refresh_learning_sessions()
+            return
+        try:
+            session = self.agent_session_service.get(int(session_id))
+            if session["status"] != "active":
+                self._refresh_learning_sessions()
+                return
+            task = self.task_service.get_task(int(session["task_id"]))
             page.load_session(
                 session=session,
-                messages=messages,
+                messages=self.agent_session_service.messages(int(session_id)),
                 task=task,
                 route_name=self._route_name_for_task(task),
                 model_configured=self._agent_model_is_configured(),
-                approvals=self._pending_approvals(session["id"]),
+                approvals=self._pending_approvals(int(session_id)),
                 capability_status=self._agent_capability_status(),
                 workspace_view=self._workspace_view(task.id),
-                turn_busy=session["id"] in self._agent_inflight_sessions,
+                turn_busy=int(session_id) in self._agent_inflight_sessions,
                 approval_busy=tuple(self._approval_inflight),
             )
             self.stack.setCurrentIndex(self.agent_workspace_page_index)
-            # Workspace is a Today sub-flow, never a selected Sidebar destination.
-            self.sidebar.set_current(PageKey.TODAY)
-            self.page_header.set_title("学习会话")
-            self.page_header.set_subtitle(task.title)
+            self.page_header.set_title(session["title"] or task.title)
+            self.page_header.set_subtitle(self._route_name_for_task(task) or "学习会话")
             self.page_header.set_icon(None)
-        except Exception:  # noqa: BLE001 - a failed Session open must not break Today
-            page.clear_session("无法打开学习会话，请稍后重试。")
+            self._refresh_learning_sessions()
+        except Exception:
             self.statusBar().showMessage("无法打开学习会话，请稍后重试。", 4000)
+            self._refresh_learning_sessions()
 
     def _workspace_view(self, task_id: int):
         if self.task_workspace_service is None:
@@ -610,6 +636,7 @@ class MainWindow(QMainWindow):
         from .agent_approval_worker import AgentApprovalWorker
         self._approval_inflight.add(approval_id)
         self.agent_workspace_page.set_approval_busy(approval_id, True)
+        self._refresh_learning_sessions()
         worker = AgentApprovalWorker(self.db_path, self.agent_approval_service_factory,
                                      approval_id, parent=self)
         worker.succeeded.connect(
@@ -632,6 +659,7 @@ class MainWindow(QMainWindow):
             self.agent_workspace_page.set_approval_busy(approval_id, False)
         self.refresh(preserve_scroll=True)
         self._reload_agent_session(session_id)
+        self._refresh_learning_sessions()
         if error:
             self.statusBar().showMessage(error, 4000)
         elif result is not None:
@@ -667,6 +695,7 @@ class MainWindow(QMainWindow):
         self._agent_inflight_sessions.add(session_id)
         page.set_error("")
         page.set_busy(True)
+        self._refresh_learning_sessions()
         worker = AgentTurnWorker(
             db_path=self.db_path,
             runtime_factory=self.agent_runtime_factory,
@@ -690,6 +719,7 @@ class MainWindow(QMainWindow):
             return
         # A stale Session completion persists normally but never renders into another.
         self._reload_agent_session(int(session_id), error=error)
+        self._refresh_learning_sessions()
         # If the user returned to Today while the worker ran, refresh the card label
         # (begin/continue) without touching a different open Workspace.
         if self.stack.currentWidget() is self.today_page:
@@ -741,6 +771,7 @@ class MainWindow(QMainWindow):
         self.current_date = today_str
         self.date_label.setText(today_str)
         self.refresh()
+        self._refresh_learning_sessions()
 
     def refresh(self, preserve_scroll: bool = False) -> None:
         """重建今日页（学习任务 + 职业面板）。

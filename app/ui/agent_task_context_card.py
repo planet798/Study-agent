@@ -1,52 +1,45 @@
-"""AgentTaskContextCard：Workspace 的 Task Context 卡片（纯 UI，无业务依赖）。
-
-Composition::
-
-    SACard
-        FlowWidget
-            [Route tag] [Activity tag] [Duration tag]
-        AgentTaskDescription (PlainText, optional)
-
-Task title 不属于这里：它是 Global SAPageHeader 的 subtitle，避免重复表达。
-"""
-
+"""Compact task metadata and optional expandable description."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
-from .components.card import SACard
 from .components.flow_layout import FlowWidget
 from .components.tag import SATag
 from .design import spacing
 
 
-class AgentTaskContextCard(SACard):
+class AgentTaskContextCard(QWidget):
     def __init__(self, parent: QWidget | None = None):
-        super().__init__(variant="default", parent=parent, padding=spacing.LG, spacing=spacing.SM)
-
+        super().__init__(parent)
+        self.setObjectName("AgentTaskContextControl")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(spacing.XS)
         self.tags_widget = FlowWidget(self)
         self.route_tag = self.tags_widget.add_widget(SATag("", "neutral"))
         self.activity_tag = self.tags_widget.add_widget(SATag("", "info"))
         self.duration_tag = self.tags_widget.add_widget(SATag("", "neutral"))
-        self.body_layout.addWidget(self.tags_widget)
-
+        layout.addWidget(self.tags_widget)
+        self.description_button = QPushButton("任务信息 ▾")
+        self.description_button.setObjectName("AgentTaskInfoToggle")
+        self.description_button.setCheckable(True)
+        self.description_button.toggled.connect(self._toggle_description)
+        layout.addWidget(self.description_button, alignment=Qt.AlignmentFlag.AlignLeft)
         self.description_label = QLabel("")
         self.description_label.setObjectName("AgentTaskDescription")
         self.description_label.setTextFormat(Qt.TextFormat.PlainText)
         self.description_label.setWordWrap(True)
-        self.description_label.setVisible(False)
-        self.body_layout.addWidget(self.description_label)
+        self.description_label.hide()
+        layout.addWidget(self.description_label)
+        self.description_button.hide()
 
-    # ---------- public ----------
-    def set_metadata(
-        self,
-        route_text: str,
-        activity_text: str,
-        duration_text: str,
-        *,
-        route_is_fallback: bool = False,
-    ) -> None:
+    def _toggle_description(self, checked: bool) -> None:
+        self.description_label.setVisible(checked and bool(self.description_label.text()))
+        self.description_button.setText("任务信息 ▴" if checked else "任务信息 ▾")
+
+    def set_metadata(self, route_text: str, activity_text: str, duration_text: str,
+                     *, route_is_fallback: bool = False) -> None:
         self.route_tag.setText(route_text or "未分类")
         self.route_tag.set_variant("neutral" if route_is_fallback else "accent")
         self.activity_tag.setText(activity_text or "学习活动")
@@ -55,11 +48,8 @@ class AgentTaskContextCard(SACard):
     def set_description(self, description: str | None) -> None:
         text = (description or "").strip()
         self.description_label.setText(text)
-        self.description_label.setVisible(bool(text))
+        self.description_button.setVisible(bool(text))
+        self.description_label.setVisible(bool(text) and self.description_button.isChecked())
 
     def tag_texts(self) -> tuple[str, str, str]:
-        return (
-            self.route_tag.text(),
-            self.activity_tag.text(),
-            self.duration_tag.text(),
-        )
+        return (self.route_tag.text(), self.activity_tag.text(), self.duration_tag.text())

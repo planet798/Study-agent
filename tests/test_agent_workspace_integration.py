@@ -131,9 +131,9 @@ def test_today_task_opens_internal_workspace_and_resumes_same_session(
     session_a = sessions.get_active_for_task(task_a.id)
     assert session_a is not None
     assert window.stack.currentWidget() is window.agent_workspace_page
-    assert window.page_header.title() == "学习会话"
-    assert window.page_header.subtitle() == "Task A"
-    assert window.sidebar.current_key() == PageKey.TODAY.value
+    assert window.page_header.title() == "Task A"
+    assert window.page_header.subtitle() == "学习会话"
+    assert window.sidebar.current_key() == f"session:{session_a['id']}"
     assert not hasattr(window.agent_workspace_page, "task_title_label")
     assert not window.agent_workspace_page.input_edit.isEnabled()
     window._on_start_study(task_a.id)
@@ -146,10 +146,10 @@ def test_today_task_opens_internal_workspace_and_resumes_same_session(
     session_b = sessions.get_active_for_task(task_b.id)
     assert session_b["id"] != session_a["id"]
     assert window.agent_workspace_page.current_session_id == session_b["id"]
-    assert window.page_header.subtitle() == "Task B"
+    assert window.page_header.title() == "Task B"
     assert _message_widgets(window.agent_workspace_page) == []
 
-    window.agent_workspace_page.back_button.click()
+    window.sidebar.item(PageKey.TODAY).click()
     assert window.stack.currentWidget() is window.today_page
     # Returning restores the Today header contract (no stale Workspace title).
     assert window.page_header.title() == "今日"
@@ -179,7 +179,7 @@ def test_workspace_switch_clears_stale_approvals_errors_and_input(
     page.set_error("old error")
     page.input_edit.setPlainText("old unsent input")
     window._on_start_study(task_b.id)
-    assert window.page_header.subtitle() == "B"
+    assert window.page_header.title() == "B"
     assert page.approvals_layout.count() == 0
     assert not page.error_label.text() and not page.input_edit.toPlainText()
     window._on_start_study(task_a.id)
@@ -293,13 +293,14 @@ def test_stale_worker_completion_never_renders_into_another_session(
     page.send_button.click()
     assert entered.wait(3)
     next(w for w in window._task_widgets if w.task().id == task_b.id).start_study_btn.click()
-    session_b = page.current_session_id
-    assert window.page_header.subtitle() == "B"
+    assert page.current_session_id == sessions.get_active_for_task(task_a.id)["id"]
+    assert sessions.get_active_for_task(task_b.id) is None
     release.set()
 
     qtbot.waitUntil(lambda: not window._agent_inflight_sessions, timeout=5000)
-    assert page.current_session_id == session_b
-    assert window.page_header.subtitle() == "B"
+    window._on_start_study(task_b.id)
+    assert page.current_session_id == sessions.get_active_for_task(task_b.id)["id"]
+    assert window.page_header.title() == "B"
     assert _message_widgets(page) == []
     window.close()
 

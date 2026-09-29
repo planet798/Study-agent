@@ -1,10 +1,10 @@
-"""Workspace binding card and MainWindow's user-only binding actions."""
+"""Compact workspace selector and MainWindow binding actions."""
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QPoint, Qt, QUrl
+from PySide6.QtCore import QPoint, QUrl
 
 from app.agent.session import AgentSessionService
 from app.database.agent_repository import AgentRepository
@@ -22,78 +22,67 @@ def _view(task_id=7, kind="none", path="", available=False):
     )
 
 
-def test_card_states_and_relative_position(qtbot, repo):
+def _action(card, label):
+    return next(a for a in card.menu.actions() if a.text() == label)
+
+
+def test_compact_states_and_header_position(qtbot, repo):
     card = AgentWorkspaceCard()
     qtbot.addWidget(card)
     card.set_view(_view())
     card.show()
-    assert card.managed_button.isVisible() and card.local_button.isVisible()
-    assert not card.open_button.isVisible()
-    assert "尚未" in card.state_label.text()
+    assert [a.text() for a in card.menu.actions()] == ["使用托管工作区", "选择本地项目"]
     card.set_view(_view(kind="managed", available=True, path="/tmp/study-agent/task_7"))
     assert card.badge.text() == "可读写"
-    assert card.open_button.isVisible() and card.replace_button.isVisible()
-    assert card.path_label.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
-    card.set_view(_view(kind="local", available=True, path="D:\\Projects\\llm-sft-lora"))
-    assert card.badge.text() == "本地项目 · 只读"
-    assert card.path_label.text() == "D:\\Projects\\llm-sft-lora"
+    assert _action(card, "打开文件夹")
+    assert "/tmp/study-agent/task_7" not in card.selector.text()
+    assert card.selector.toolTip() == "/tmp/study-agent/task_7"
     card.set_view(_view(kind="local", available=False, path="/private/missing"))
-    assert card.reselect_button.isVisible() and card.clear_button.isVisible()
-    assert not card.open_button.isVisible()
-    assert "重新选择" in card.hint_label.text()
-
+    assert card.badge.isHidden()
+    assert _action(card, "重新选择本地项目")
+    assert not any(a.text() == "打开文件夹" for a in card.menu.actions())
     task = repo.create(title="Study", scheduled_date="2026-01-05", source="manual")
     page = AgentWorkspacePage()
     qtbot.addWidget(page)
     page.load_session({"id": 3}, [], task, None, True, workspace_view=_view(task.id))
-    assert page.layout().indexOf(page.workspace_card) == page.layout().indexOf(page.task_context_card) + 1
-    assert page.layout().indexOf(page.workspace_card) < page.layout().indexOf(page.conversation_scroll)
+    assert page.layout().indexOf(page.conversation_scroll) > page.layout().indexOf(page.capability_warning_banner)
+    assert page.workspace_card.parent() is page
 
 
-def test_card_signals_and_busy_disable(qtbot):
+def test_menu_signals_busy_and_teardown(qtbot):
     card = AgentWorkspaceCard()
     qtbot.addWidget(card)
     card.set_view(_view(task_id=19))
     actions = []
     card.managed_requested.connect(lambda task: actions.append(("managed", task)))
     card.local_requested.connect(lambda task: actions.append(("local", task)))
-    card.managed_button.click()
-    card.local_button.click()
+    _action(card, "使用托管工作区").trigger()
+    _action(card, "选择本地项目").trigger()
     assert actions == [("managed", 19), ("local", 19)]
     card.set_busy(True)
-    assert all(not button.isEnabled() for button in card._buttons)
-    card.managed_button.click()
+    assert not card.selector.isEnabled()
+    _action(card, "使用托管工作区").trigger()
     assert len(actions) == 2
     card.set_busy(False)
-    assert card.managed_button.isEnabled()
-    card.set_view(_view(task_id=19, kind="managed", available=True))
-    card.replace_button.menu().actions()[1].trigger()
-    assert actions[-1] == ("local", 19)
-
-
-def test_replace_popup_is_closed_with_card(qtbot):
-    card = AgentWorkspaceCard()
-    qtbot.addWidget(card)
-    card.set_view(_view(kind="managed", available=True))
     card.show()
-    menu = card.replace_button.menu()
-    menu.popup(card.mapToGlobal(QPoint(0, 0)))
-    qtbot.waitUntil(menu.isVisible)
+    card.menu.popup(card.mapToGlobal(QPoint(0, 0)))
+    qtbot.waitUntil(card.menu.isVisible)
     card.close()
-    assert not menu.isVisible()
+    assert not card.menu.isVisible()
 
 
-def test_long_path_is_wrapped_selectable_plain_text(qtbot):
+def test_path_available_in_menu_and_clipboard_not_conversation(qtbot):
     card = AgentWorkspaceCard()
     qtbot.addWidget(card)
-    path = "/tmp/<img src=x>/" + ("nested/" * 100)
+    path = "D:\\Projects\\" + ("nested\\" * 100)
     card.set_view(_view(kind="local", path=path, available=True))
-    card.resize(540, 280)
+    card.resize(540, 50)
     card.show()
-    assert card.path_label.text() == path
-    assert card.path_label.textFormat() == Qt.TextFormat.PlainText
-    assert card.path_label.wordWrap()
-    assert card.path_label.minimumWidth() == 0
+    assert card.selector.toolTip() == path
+    assert len(card.selector.text()) < 40
+    _action(card, "复制路径").trigger()
+    from PySide6.QtWidgets import QApplication
+    assert QApplication.clipboard().text() == path
 
 
 class _WorkspaceService:
@@ -126,50 +115,36 @@ class _WorkspaceService:
         return Path(self.binding[task_id][1])
 
 
-def test_main_window_binding_dialog_open_and_clear(
-    qtbot, conn, repo, task_service, date_service, tmp_path, monkeypatch,
-):
+def test_main_window_binding_dialog_open_and_clear(qtbot, conn, repo, task_service, date_service, tmp_path, monkeypatch):
     task = repo.create(title="Workspace Task", scheduled_date="2026-01-05", source="manual")
     sessions = AgentSessionService(AgentRepository(conn), task_service)
     service = _WorkspaceService(tmp_path)
-    window = MainWindow(
-        task_service, date_service, today_provider=lambda: "2026-01-05",
-        agent_session_service=sessions, agent_runtime_factory=lambda conn: None,
-        task_workspace_service=service,
-    )
+    window = MainWindow(task_service, date_service, today_provider=lambda: "2026-01-05",
+                        agent_session_service=sessions, agent_runtime_factory=lambda conn: None,
+                        task_workspace_service=service)
     qtbot.addWidget(window)
     window._on_start_study(task.id)
     card = window.agent_workspace_page.workspace_card
-    assert card.workspace_kind == "none"
-    assert service.calls == []
-    card.managed_button.click()
+    _action(card, "使用托管工作区").trigger()
     assert card.workspace_kind == "managed"
-    assert not (tmp_path / f"task_{task.id}").exists()
     opened = []
     monkeypatch.setattr("app.ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url) or True)
-    card.open_button.click()
+    _action(card, "打开文件夹").trigger()
     assert opened == [QUrl.fromLocalFile(str(tmp_path / f"task_{task.id}"))]
-    assert (tmp_path / f"task_{task.id}").is_dir()
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setattr("app.ui.main_window.QFileDialog.getExistingDirectory", lambda *args: "")
-    card.replace_button.menu().actions()[1].trigger()
-    assert card.workspace_kind == "managed"  # cancel leaves binding unchanged
     monkeypatch.setattr("app.ui.main_window.QFileDialog.getExistingDirectory", lambda *args: str(project))
-    card.replace_button.menu().actions()[1].trigger()
+    _action(card, "选择本地项目").trigger()
     assert card.workspace_kind == "local"
-    assert card.path_label.text() == str(project)
-    card.open_button.click()
+    assert card.selector.toolTip() == str(project)
+    _action(card, "打开文件夹").trigger()
     assert opened[-1] == QUrl.fromLocalFile(str(project))
     project.rmdir()
     window._reload_agent_session(window.agent_workspace_page.current_session_id)
-    assert not card.reselect_button.isHidden()
-    assert not card.open_button.isVisible()
-    card.clear_button.click()
+    assert not any(a.text() == "打开文件夹" for a in card.menu.actions())
+    _action(card, "解除绑定").trigger()
     assert card.workspace_kind == "none"
     assert (tmp_path / f"task_{task.id}").is_dir()
-    window._on_start_study(task.id)
-    assert card.workspace_kind == "none"
     window.close()
 
 
@@ -179,9 +154,9 @@ def test_busy_and_approval_busy_lock_workspace_controls(qtbot, repo):
     qtbot.addWidget(page)
     page.load_session({"id": 1}, [], task, None, True, workspace_view=_view(task.id))
     page.set_busy(True)
-    assert not page.workspace_card.managed_button.isEnabled()
+    assert not page.workspace_card.selector.isEnabled()
     page.set_busy(False)
     page.set_approval_busy(4, True)
-    assert not page.workspace_card.managed_button.isEnabled()
+    assert not page.workspace_card.selector.isEnabled()
     page.set_approval_busy(4, False)
-    assert page.workspace_card.managed_button.isEnabled()
+    assert page.workspace_card.selector.isEnabled()

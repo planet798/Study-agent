@@ -83,7 +83,10 @@ class SANavigationItem(QPushButton):
         self._collapsed = bool(collapsed)
         self.setProperty("collapsed", "true" if self._collapsed else "false")
         # collapsed 只显示 icon；展开恢复文本。
-        self.setText("" if self._collapsed else self._label)
+        label = (self.fontMetrics().elidedText(self._label, Qt.TextElideMode.ElideRight,
+                                               EXPANDED_WIDTH - 62)
+                 if self._key.startswith("session:") else self._label)
+        self.setText("" if self._collapsed else label)
         self.setToolTip(self._label)
         if self._collapsed:
             self.setAccessibleName(self._label)
@@ -142,6 +145,7 @@ class SANavigationSidebar(QWidget):
     """左侧导航栏。"""
 
     page_requested = Signal(str)      # PageKey value
+    session_requested = Signal(int)
     collapsed_changed = Signal(bool)
 
     def __init__(self, specs, parent: QWidget | None = None):
@@ -196,6 +200,17 @@ class SANavigationSidebar(QWidget):
             self._add_item(spec)
         root.addLayout(self.items_layout)
 
+        self.sessions_heading = QLabel("学习会话")
+        self.sessions_heading.setObjectName("SASessionsHeading")
+        self.sessions_heading.setContentsMargins(_spacing.SM, _spacing.MD, 0, _spacing.XS)
+        root.addWidget(self.sessions_heading)
+        self.sessions_layout = QVBoxLayout()
+        self.sessions_layout.setContentsMargins(0, 0, 0, 0)
+        self.sessions_layout.setSpacing(_spacing.XS)
+        root.addLayout(self.sessions_layout)
+        self._session_items: dict[int, SANavigationItem] = {}
+        self.sessions_heading.hide()
+
         root.addStretch()
 
         # ---- divider + settings ----
@@ -223,6 +238,46 @@ class SANavigationSidebar(QWidget):
             lambda _checked=False, k=key_value(spec.key): self._on_item_clicked(k)
         )
         return item
+
+    def set_sessions(self, sessions: list[dict], current_id: int | None = None,
+                     busy: bool = False) -> None:
+        """Render a bounded recent list; session IDs never appear in visible text."""
+        previous_key = self.current_key()
+        for item in self._session_items.values():
+            self._group.removeButton(item)
+            self._items.pop(item.key(), None)
+            self.sessions_layout.removeWidget(item)
+            item.hide()
+            item.deleteLater()
+        self._session_items.clear()
+        self.sessions_heading.setVisible(bool(sessions) and not self._collapsed)
+        for session in sessions[:11]:
+            sid = int(session["id"])
+            title = str(session.get("title") or "学习会话")
+            item = SANavigationItem(f"session:{sid}", title, _icons.IconName.BOOK, self)
+            # Reuse Fluent navigation selected/hover/disabled QSS.
+            item.setMinimumWidth(0)
+            item.setToolTip(title)
+            item.setText(item.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight,
+                                                       EXPANDED_WIDTH - 62))
+            item.setEnabled(not busy or sid == current_id)
+            item.set_collapsed(self._collapsed)
+            self._group.addButton(item)
+            self._items[item.key()] = item
+            self._session_items[sid] = item
+            self.sessions_layout.addWidget(item)
+            item.clicked.connect(lambda _checked=False, id=sid: self._on_session_clicked(id))
+        if current_id in self._session_items:
+            self.set_current(f"session:{current_id}")
+        elif previous_key in self._items and not previous_key.startswith("session:"):
+            self.set_current(previous_key)
+
+    def session_item(self, session_id: int) -> SANavigationItem | None:
+        return self._session_items.get(int(session_id))
+
+    def _on_session_clicked(self, session_id: int) -> None:
+        self.set_current(f"session:{session_id}")
+        self.session_requested.emit(session_id)
 
     def add_footer_item(self, spec) -> SANavigationItem:
         item = self._add_item(spec)
@@ -272,6 +327,7 @@ class SANavigationSidebar(QWidget):
         self.brand_icon.setVisible(True)
         for item in self._items.values():
             item.set_collapsed(collapsed)
+        self.sessions_heading.setVisible(bool(self._session_items) and not collapsed)
         if collapsed:
             self.collapse_btn.setToolTip("展开侧栏")
             self.collapse_btn.setAccessibleName("展开侧栏")

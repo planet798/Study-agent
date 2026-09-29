@@ -46,6 +46,22 @@ class AgentRepository:
         ).fetchone()
         return self._session_from_row(row)
 
+    def list_active_sessions(self, limit: int | None = None) -> list[dict]:
+        """Active conversations independent of the origin Task's current status."""
+        sql = ("SELECT * FROM agent_sessions WHERE status = ?"
+               " ORDER BY updated_at DESC, id DESC")
+        if limit is not None:
+            if int(limit) < 0:
+                raise ValueError("limit must be non-negative")
+            sql += " LIMIT ?"
+            rows = self.conn.execute(sql, (STATUS_ACTIVE, int(limit))).fetchall()
+        else:
+            rows = self.conn.execute(sql, (STATUS_ACTIVE,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_recent_active_sessions(self, limit: int = 10) -> list[dict]:
+        return self.list_active_sessions(limit)
+
     def list_sessions_for_task(self, task_id: int) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM agent_sessions WHERE task_id = ? ORDER BY id",
@@ -66,9 +82,13 @@ class AgentRepository:
 
     def touch_session(self, session_id: int) -> None:
         """更新 updated_at（消息追加后调用）。"""
+        from datetime import datetime
+
+        # Sub-second precision makes a completed turn reorder correctly even
+        # when two conversations are updated within the same second.
         self.conn.execute(
             "UPDATE agent_sessions SET updated_at = ? WHERE id = ?",
-            (now_iso(), int(session_id)),
+            (datetime.now().isoformat(timespec="microseconds"), int(session_id)),
         )
         self.conn.commit()
 

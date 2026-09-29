@@ -283,6 +283,8 @@ def test_task_context_card_tags_and_optional_description(qtbot, repo):
     page.load_session({"id": 1}, [], task, "R2 LLM Post-Training", True)
     assert page.task_context_card.tag_texts() == ("R2 LLM Post-Training", "理论", "35 分钟")
     assert page.task_context_card.description_label.text() == "Understand attention"
+    assert page.task_context_card.description_label.isHidden()
+    page.task_context_card.description_button.click()
     assert not page.task_context_card.description_label.isHidden()
 
     empty = repo.create(
