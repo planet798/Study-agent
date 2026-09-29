@@ -40,6 +40,7 @@ from ..database.study_plan_repository import (
 )
 from ..utils.date_utils import add_days
 from .study_plan_service import MAX_DAILY_STUDY_MINUTES, StudyPlanService
+from .task_service import TaskService
 
 WEEK_DAYS = 7
 
@@ -860,12 +861,6 @@ class DailyPlannerService:
                     f"（AI 只能从最高优先级候选中选择）"
                 )
                 continue
-            if max_minutes is not None:
-                rec_topic = topic_by_id.get(rec.topic_id)
-                if rec_topic is not None and \
-                        rec_topic.estimated_minutes > max_minutes:
-                    # Phase D.1：全局剩余分钟不够 → 跳过（不算规划失败）
-                    continue
             if rec.topic_id in blocked_ids:
                 # 前置关键技能未满足：即使 JD 高分也不能越级安排
                 problems.append(
@@ -909,15 +904,26 @@ class DailyPlannerService:
             seen_topic_ids.add(rec.topic_id)
             to_create.append((rec, component, activity_kind))
 
-        # carry_over 校验
+        # carry_over 校验。已排在目标日的 not_done 可以恢复 active，
+        # 但不会新增分钟或消耗 Scheduler 的新任务 slot。
         to_carry: list = []
+        to_activate_today: list = []
+        route_id = self._route_id() if self.scope_tasks_by_route else None
+        seen_carry_ids: set[int] = set()
         for carry in plan.carry_over_tasks:
+            if carry.task_id in seen_carry_ids:
+                problems.append(f"task_id {carry.task_id} 重复延期")
+                continue
+            seen_carry_ids.add(carry.task_id)
             task = self.repo.get(carry.task_id)
             if task is None:
                 problems.append(f"task_id {carry.task_id} 不存在")
                 continue
-            if task.status == STATUS_DONE:
-                problems.append(f"task_id {carry.task_id} 已完成，不能修改")
+            if route_id is not None and task.route_id != route_id:
+                problems.append(f"task_id {carry.task_id} 不属于当前路线")
+                continue
+            if task.status not in (STATUS_ACTIVE, STATUS_NOT_DONE):
+                problems.append(f"task_id {carry.task_id} 状态不可延期: {task.status}")
                 continue
             if not _is_recent_unfinished(task, plan_date):
                 problems.append(f"task_id {carry.task_id} 不是近期未完成任务")
@@ -927,12 +933,51 @@ class DailyPlannerService:
                 same = self.repo.list_earliest_active_for_topic(task.topic_id)
                 if same is not None and same.id != carry.task_id:
                     continue
+            if task.scheduled_date == plan_date:
+                if task.status == STATUS_NOT_DONE:
+                    to_activate_today.append(task)
+                continue
             to_carry.append((carry, task))
+
+        # Budget counts the same existing generated/new commitments as the
+        # Scheduler (including done/not_done, excluding cancelled), never
+        # unrelated manual/history rows. A same-date carry has delta zero.
+        existing_minutes = self.repo.sum_generated_new_minutes_by_date(plan_date)
+        capacity = (max_minutes if max_minutes is not None else
+                    self.max_daily_minutes - existing_minutes)
+        if max_minutes is not None:
+            # Route slots skip oversized candidates, then fill their task slot
+            # from proposals that actually fit. Carry-overs take precedence.
+            remaining = max(0, int(capacity))
+            fitting_carry = []
+            for item in to_carry:
+                minutes = max(0, int(item[1].estimated_minutes or 0))
+                if minutes <= remaining:
+                    fitting_carry.append(item)
+                    remaining -= minutes
+            to_carry = fitting_carry
+            fitting_create = []
+            for item in to_create:
+                minutes = max(0, int(item[0].estimated_minutes or 0))
+                if minutes <= remaining:
+                    fitting_create.append(item)
+                    remaining -= minutes
+            to_create = fitting_create
 
         # Phase D：严格限制每个 slot 最多创建 max_tasks 个任务（含 carry_over）
         if max_tasks is not None:
             to_carry = to_carry[:max(0, int(max_tasks))]
             to_create = to_create[:max(0, int(max_tasks) - len(to_carry))]
+
+        # Measure the actual accepted delta only after filtering, before any
+        # writes. A previous-date carry costs its persisted Task estimate.
+        projected = sum(max(0, int(task.estimated_minutes or 0))
+                        for _, task in to_carry) + sum(
+                            max(0, int(rec.estimated_minutes or 0))
+                            for rec, _, _ in to_create
+                        )
+        if max_minutes is None and projected > max(0, capacity):
+            problems.append(f"计划任务预计 {projected} 分钟超出剩余预算 {max(0, capacity)}")
 
         # 任何违规 => 不采纳整份计划（不写库不建任务）
         if problems:
@@ -946,11 +991,14 @@ class DailyPlannerService:
                 component=component, activity_kind=activity_kind,
             )
             created.append(task.id)
-        # 再安排 carry_over（改期到今天，保留延期次数）
+        # 再安排 carry_over。Service 持有状态转换规则，Planner 不再
+        # 任意 repo.set_status；已在目标日的恢复不增加新的 Scheduler 承诺。
+        task_service = TaskService(self.repo)
         for carry, task in to_carry:
-            self.repo.postpone(carry.task_id, plan_date)
-            self.repo.set_status(carry.task_id, STATUS_ACTIVE)
+            task_service.carry_over_to_date(carry.task_id, plan_date)
             created.append(carry.task_id)
+        for task in to_activate_today:
+            task_service.carry_over_to_date(task.id, plan_date)
 
         return True, created, []
 
@@ -1128,7 +1176,7 @@ def _is_recent_unfinished(task: Task, plan_date: str) -> bool:
     - 状态为 active 或 not_done（非 done）；
     - 计划日期不晚于目标日（即今天之前遗留，或延期到计划日的）。
     """
-    if task.status == STATUS_DONE:
+    if task.status not in (STATUS_ACTIVE, STATUS_NOT_DONE):
         return False
     if task.status == STATUS_NOT_DONE:
         return True

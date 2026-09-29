@@ -210,6 +210,23 @@ class TaskService:
         self.repo.mark_not_done(task_id, reason)
         return self.get_task(task_id)
 
+    def carry_over_to_date(self, task_id: int, plan_date: str) -> Task:
+        """Planner-only carry-over with the canonical Task transition rules.
+
+        An active Task may move only forward. The historical not_done rule
+        allows reactivation to the proposed date; terminal states never revive.
+        """
+        task = self.get_task(task_id)
+        if task.status == STATUS_NOT_DONE:
+            self._transition(task_id, STATUS_ACTIVE)
+        elif task.status != STATUS_ACTIVE or task.scheduled_date > plan_date:
+            raise InvalidTransitionError(
+                f"非法延期任务状态或日期: {task.status} (任务 id={task_id})"
+            )
+        if not self.repo.move_carry_over(task_id, plan_date, task.status):
+            raise InvalidTransitionError(f"延期任务状态已变更: id={task_id}")
+        return self.get_task(task_id)
+
     def postpone_task(self, task_id: int) -> Task:
         """延期任务到下一天。
 

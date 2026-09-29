@@ -379,6 +379,19 @@ class TaskRepository:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def move_carry_over(self, task_id: int, new_date: str,
+                        from_status: str) -> bool:
+        """Apply a validated carry-over date/status transition in one update."""
+        ts = now_iso()
+        cur = self.conn.execute(
+            "UPDATE tasks SET scheduled_date = ?, "
+            "postpone_count = postpone_count + CASE WHEN scheduled_date != ? THEN 1 ELSE 0 END, "
+            "status = ?, updated_at = ? WHERE id = ? AND status = ?",
+            (new_date, new_date, STATUS_ACTIVE, ts, task_id, from_status),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
+
     def set_status(self, task_id: int, status: str) -> bool:
         """直接设置状态（供日期切换 / 测试等使用）。"""
         ts = now_iso()
