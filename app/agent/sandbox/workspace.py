@@ -189,7 +189,7 @@ class SandboxWorkspace:
                     continue
         if decoded is None:
             raise SandboxWorkspaceError("Only UTF-8 text files are supported.")
-        if any(ord(char) < 32 and char not in "\\t\\n\\r" for char in decoded):
+        if any(ord(char) < 32 and char not in "\t\n\r" for char in decoded):
             raise SandboxWorkspaceError("Only UTF-8 text files are supported.")
         truncated = has_more or len(decoded) > self.max_file_chars
         return {

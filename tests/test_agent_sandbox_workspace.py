@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.agent.sandbox.workspace import (
+    LocalProjectWorkspace,
     SandboxFileTooLargeError,
     SandboxPathError,
     SandboxWorkspace,
@@ -135,6 +136,76 @@ def test_utf8_read_write_and_binary_file_rejection(tmp_path):
     binary.write_bytes(b"\x00\xff\x00")
     with pytest.raises(SandboxWorkspaceError, match="UTF-8"):
         workspace.read_text_file("image.bin")
+
+
+@pytest.mark.parametrize("kind", ["managed", "local"])
+@pytest.mark.parametrize("name, content", [
+    ("notes.md", "# Notes\n\nFirst paragraph.\n\nSecond paragraph.\n"),
+    ("script.py", 'def f():\n    print("hello")\n'),
+    ("data.json", '{\n  "name": "Study Agent",\n  "active": true\n}\n'),
+    ("prompt.txt", "<|im_start|>user\nExplain this.\n<|im_end|>\n"),
+    ("中文.md", "# 学习笔记\n\n第一段。\n\n第二段。\n"),
+    ("tabs.txt", "one\ttwo\nthree\tfour\n"),
+    ("windows.txt", "line1\r\nline2\r\n"),
+])
+def test_normal_multiline_utf8_text_is_readable(tmp_path, kind, name, content):
+    if kind == "managed":
+        workspace = _workspace(tmp_path, max_chars=200)
+        root = workspace.ensure_workspace()
+    else:
+        root = tmp_path / "local"
+        root.mkdir()
+        workspace = LocalProjectWorkspace(root, max_file_chars=200)
+    (root / name).write_bytes(content.encode("utf-8"))
+    result = workspace.read_text_file(name)
+    assert result == {"path": name, "content": content, "truncated": False}
+
+
+@pytest.mark.parametrize("kind", ["managed", "local"])
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x07", "\x02", "\x1f"])
+def test_unsupported_c0_controls_still_rejected(tmp_path, kind, control):
+    if kind == "managed":
+        workspace = _workspace(tmp_path, max_chars=40)
+        root = workspace.ensure_workspace()
+    else:
+        root = tmp_path / "local"
+        root.mkdir()
+        workspace = LocalProjectWorkspace(root, max_file_chars=40)
+    (root / "control.txt").write_bytes(("a" + control + "b").encode("utf-8"))
+    with pytest.raises(SandboxWorkspaceError, match="UTF-8"):
+        workspace.read_text_file("control.txt")
+
+
+@pytest.mark.parametrize("kind", ["managed", "local"])
+def test_invalid_utf8_bytes_still_rejected(tmp_path, kind):
+    if kind == "managed":
+        workspace = _workspace(tmp_path, max_chars=40)
+        root = workspace.ensure_workspace()
+    else:
+        root = tmp_path / "local"
+        root.mkdir()
+        workspace = LocalProjectWorkspace(root, max_file_chars=40)
+    (root / "invalid.bin").write_bytes(b"line1\n\xff\n")
+    with pytest.raises(SandboxWorkspaceError, match="UTF-8"):
+        workspace.read_text_file("invalid.bin")
+
+
+@pytest.mark.parametrize("kind", ["managed", "local"])
+def test_multiline_truncation_remains_bounded(tmp_path, kind):
+    if kind == "managed":
+        workspace = _workspace(tmp_path, max_chars=15)
+        root = workspace.ensure_workspace()
+    else:
+        root = tmp_path / "local"
+        root.mkdir()
+        workspace = LocalProjectWorkspace(root, max_file_chars=15)
+    content = "第一行\n第二行\n" * 30
+    (root / "large.md").write_bytes(content.encode("utf-8"))
+    result = workspace.read_text_file("large.md")
+    assert result["content"] == content[:15]
+    assert len(result["content"]) == 15
+    assert "\n" in result["content"]
+    assert result["truncated"] is True
 
 
 def test_file_size_limits_and_bounded_read(tmp_path):

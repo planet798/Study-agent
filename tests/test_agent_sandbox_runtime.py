@@ -365,21 +365,27 @@ def test_workspace_tool_matrix_and_safe_defaults(tmp_path):
             "sandbox_list_files", "sandbox_read_file", "sandbox_write_file",
             "sandbox_make_directory",
         )
+        markdown = "# 学习笔记\n\nFirst paragraph.\nSecond paragraph.\n"
         assert scope.registry.execute_raw(
-            "sandbox_write_file", context, '{"path":"notes.md","content":"hello"}'
+            "sandbox_write_file", context,
+            json.dumps({"path": "notes.md", "content": markdown}),
         )["ok"] is True
+        assert scope.registry.execute_raw(
+            "sandbox_read_file", context, '{"path":"notes.md"}'
+        )["data"]["content"] == markdown
         assert "sandbox_run" not in scope.registry.names()
-    assert (managed_root / "notes.md").read_text() == "hello"
+    assert (managed_root / "notes.md").read_text() == markdown
 
     project = tmp_path / "PRIVATE_PROJECT_PATH_SENTINEL"
     project.mkdir()
-    (project / "README.md").write_text("public", encoding="utf-8")
+    local_content = 'def f():\r\n    print("hello")\r\n'
+    (project / "README.md").write_bytes(local_content.encode("utf-8"))
     local = AgentWorkspaceSpec("local", project, True, False, False)
     with provider.open_turn(context, workspace_spec=local) as scope:
         assert scope.registry.names() == ("sandbox_list_files", "sandbox_read_file")
         assert scope.registry.execute_raw(
             "sandbox_read_file", context, '{"path":"README.md"}'
-        )["data"]["content"] == "public"
+        )["data"]["content"] == local_content
         assert "sandbox_run" not in scope.registry.names()
     assert not (project / "task_5").exists()
 
