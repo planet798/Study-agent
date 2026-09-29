@@ -29,7 +29,6 @@ def run_agent_diagnostic(db_path=None, *, ai_config_service=None,
             mcp_config_path=mcp_config_path, sandbox_config_path=sandbox_config_path,
         )
         from ..agent.mcp.config import MCPConfigError, load_mcp_config
-        from ..agent.sandbox.config import SandboxConfigError, load_sandbox_config
         from ..agent.skills.learning import build_default_agent_skill_registry
         from ..agent.tools.learning import build_learning_tool_registry
         from ..agent.approval.provider import AgentApprovalProvider
@@ -39,13 +38,10 @@ def run_agent_diagnostic(db_path=None, *, ai_config_service=None,
             allowed_count = sum(len(server.allowed_tools) for server in enabled_servers)
         except (MCPConfigError, OSError):
             enabled_servers, allowed_count = [], 0
-        try:
-            sandbox = load_sandbox_config(sandbox_config_path)
-            file_tools = sandbox.enabled and sandbox.file_tools
-        except (SandboxConfigError, OSError):
-            file_tools = False
         from ..database.task_workspace_repository import TaskWorkspaceRepository
         workspace_counts = TaskWorkspaceRepository(conn).count_by_kind()
+        # A Task binding, not sandbox.json, authorizes basic file tools.
+        file_tools = bool(workspace_counts["managed"] or workspace_counts["local"])
         report = {
             "database": "ok", "schema": version, "fingerprint": FINGERPRINT_VERSION,
             "ai": "configured" if status.model_configured else "unconfigured",
