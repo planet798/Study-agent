@@ -1,4 +1,4 @@
-# Product Baseline — after S1–S6 (Agent-2 core)
+# Product Baseline — after S1–S6, Agent-11 and Workspace-1
 
 > Canonical product boundary. Product simplification is complete; do not continue product removal. Agent implementation status is recorded below; future capabilities are explicitly marked not implemented.
 
@@ -32,7 +32,7 @@ Daily Review / Review Scheduler / Daily Retention / generated review tasks; Mont
 
 ## Legacy DB and migration compatibility
 
-`SCHEMA_VERSION = 24`; `FINGERPRINT_VERSION = 6` (v6 also protects Approval request identity and immutable user authorization events; Session Memory and Trace/Evaluation remain derived growth-only telemetry). Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
+`SCHEMA_VERSION = 25`; `FINGERPRINT_VERSION = 7` (v6 protects Approval request identity and immutable user authorization events; v7 protects Task Workspace bindings, including local path and creation time; Session Memory and Trace/Evaluation remain derived growth-only telemetry). Evaluator stays v2. Do not drop or rewrite historical `review_schedule`, `knowledge_points.review_count/next_review_date/interval_days`, `weekly_summaries`, `monthly_summaries`, historical `task_type=review` / `source=daily_retention`, manual `task_type=manual` / NULL-route rows, or historical Monthly prompt overrides. Migration Gate / Release Verifier protect historical rows and fingerprints. Legacy data is not a production feature.
 
 ## Agent core — Agent-1 through Agent-11 implemented
 
@@ -52,15 +52,16 @@ Implemented:
 - **Agent-3**: Today task cards open/resume the task-bound internal Workspace. Each user turn gets one compact Service-backed Task Context snapshot; model turns run in `AgentTurnWorker` with a worker-owned SQLite connection. Workspace is not a Sidebar page.
 - **Agent-4**: static Agent learning-behavior Skills are selected deterministically from `learning_activity_kind`; they grant no permissions and are not persisted.
 - **Agent-5**: optional official-SDK MCP Tools for operator-configured external servers, gated by exact local allowlist plus `readOnlyHint=True`; transport/client lifecycle is per worker turn and no external integration can mutate Study-Agent state.
-- **Agent-6**: Task-ID-scoped bounded file workspace and optional Docker-only execution. Sandbox mutations are limited to that workspace; application state and Native/MCP permissions remain read-only.
+- **Agent-6**: Bounded relative-path file tools and optional Docker-only execution. Workspace-1 gates them behind an explicit Task binding: none exposes no file tools; managed supports list/read/write/mkdir; local project supports list/read only. Application state and Native/MCP permissions remain read-only.
 - **Agent-7**: Session-scoped rolling conversation summary plus recent complete turns. Original `agent_messages` remain append-only and the UI continues to display full history. Summary is derived, untrusted continuity data; it cannot update learning evidence or application state.
 - **Agent-8**: Content-free per-turn Trace/events and deterministic protocol Evaluation (`pass` / `warn` / `fail`). Trace never duplicates conversation/tool payloads; Evaluation uses no LLM and does not assess answer quality or learning outcomes. Trace/Evaluation failures are fail-open.
 - **Agent-9**: Local approval-request Tool for Task completion; explicit Workspace approval runs canonical `TaskService.complete_task()` in a worker-owned connection. Append-only authorization events are protected history. No natural-language approval or auto-resume.
 - **Agent-10**: Adds fixed request-only Tools for formal Assessment start/resume and bounded LearningOutcome note save. Approval executes through canonical Services on a fresh worker connection. Assessment startup does not judge answers or change Mastery; Note save creates no Capability evidence and never occupies the Task-completion outcome link.
-- **Agent-11**: Workspace production UX adds static capability status, safe errors, Settings shortcut, Ctrl+Enter, bounded input, in-flight serialization and resilient reload/shutdown. Offline `agent-diagnostic` reports read-only local health without external calls. Platform v1 is frozen for dogfooding and bug fixes.
+- **Agent-11**: Agent Session production UX adds static capability status, safe errors, Settings shortcut, Ctrl+Enter, bounded input, in-flight serialization and resilient reload/shutdown. Offline `agent-diagnostic` reports read-only local health without external calls.
+- **Workspace-1**: Task-scoped user-selected managed or local project binding appears in a Workspace card. Managed file tools work with safe defaults even without `sandbox.json`; local projects are read-only and sensitive paths are denied. The model receives no host path and cannot switch bindings. Saving a Study-Agent Learning Note remains an approved SQLite action, distinct from writing an explicitly requested Workspace file. See `docs/WORKSPACES.md`.
 
 NOT IMPLEMENTED:
 
-- Agent Assessment submission, arbitrary note editing, or other application writes
+- Agent Assessment submission, arbitrary note editing, local project writes/execution, diff approval, or other application writes
 
 Agent Tools must call **existing Service → Repository → SQLite**, never Repository or raw SQLite directly. Agent may neither set Mastery nor Capability directly: **Assessment → Mastery** and **Evidence → Capability**. `AgentSkill` / `AgentSkillRegistry` in `app/agent/skills/` are static learning-behavior strategies; current `SkillService` and `skills` table describe career/technical skills and must not be repurposed. See `docs/AGENT_ARCHITECTURE.md`.

@@ -6,8 +6,9 @@
 
 ```text
 Learning Route → Phase → Topic → Learning Component → Task
-→ Agent Study Session → Task Context + Agent Skill + Session Memory
-→ Agent Runtime → Native / MCP / Sandbox Tools
+→ Agent Study Session + explicit Task Workspace binding
+→ Task Context + Agent Skill + Session Memory
+→ Agent Runtime → Native / MCP / Workspace-gated Sandbox Tools
 → structured Trace → deterministic Evaluation
 → Learning Interaction → Assessment / Evidence → Mastery / Capability
 ```
@@ -139,16 +140,30 @@ per-user-turn MCP scope (AgentTurnWorker thread)
 ```text
 AgentToolRegistry(default: read-only)
 → explicit allowed_mutation_scopes=("sandbox",)
-→ SandboxProvider(task_id from AgentToolContext)
-→ data/agent_workspaces/task_<id>/
-→ optional Docker-only sandbox_run
+→ SandboxProvider(frozen per-turn Workspace spec)
+→ managed: data/agent_workspaces/task_<id>/ | local: selected project root (read-only)
+→ optional managed-only Docker sandbox_run
 ```
 
 - `AgentToolSpec` adds `mutation_scope`; read-only tools must leave it empty. The default Registry remains read-only. Only the Sandbox composition Registry may authorize the sole supported mutation scope, `sandbox`; application/database/task/mastery/capability scopes are not supported.
-- `app/agent/sandbox/{config,workspace,backend,tools,provider}.py` uses a local operator config (`data/sandbox.json`, `STUDY_AGENT_SANDBOX_CONFIG`). Missing/invalid config disables Sandbox without affecting Native/MCP tools. Workspace roots derive only from integer `task_id`, persist across Sessions, and are created lazily on an actual Sandbox tool call.
+- `app/agent/sandbox/{config,workspace,backend,tools,provider}.py` uses a local operator config (`data/sandbox.json`, `STUDY_AGENT_SANDBOX_CONFIG`) for limits and optional execution. Workspace-1 requires a user-selected Task Workspace binding for any file tool; missing/invalid config still allows managed file tools at safe default limits, but disables execution. Managed roots derive only from integer `task_id`, persist across Sessions, and are created lazily on a managed file action (or explicit user Open Folder).
 - Fixed tools: `sandbox_list_files`, `sandbox_read_file`, `sandbox_write_file`, `sandbox_make_directory`, optional `sandbox_run`. Paths are relative, traversal and symlink/junction escape are rejected, text/results are bounded, writes are atomic, and there is no delete tool.
-- `sandbox_run` is exposed only when Docker is configured, reachable, and its image already exists locally. It uses a fixed argv-list Docker CLI, `shell=False`, `--network none`, only the current Task workspace bind mount, dropped capabilities, no-new-privileges, read-only container root, resource limits, timeout, bounded output, and container cleanup. Docker failure has no host subprocess fallback.
+- `sandbox_run` is exposed only for a managed binding when Docker is configured, reachable, and its image already exists locally. It uses a fixed argv-list Docker CLI, `shell=False`, `--network none`, only the current Task workspace bind mount, dropped capabilities, no-new-privileges, read-only container root, resource limits, timeout, bounded output, and container cleanup. Docker failure has no host subprocess fallback.
 - Sandbox never imports application Services/Repositories/SQLite and cannot update Task, Mastery, Capability, Assessment, Practice, or Evidence. Task Context stays Native-only and Skill selection stays once-per-turn.
+
+## Workspace-1 — Explicit Task Workspace binding
+
+```text
+AgentWorkspacePage → signals → MainWindow → TaskWorkspaceService
+                                      → TaskWorkspaceRepository → SQLite
+Agent Runtime → TaskWorkspaceService.runtime_spec(session.task_id)
+              → frozen AgentWorkspaceSpec → SandboxProvider.open_turn(..., workspace_spec)
+              → relative-path filesystem tools
+```
+
+- Schema v25 stores one binding per Task in `task_workspaces`: `managed` stores no physical path, while `local` stores the user's canonical selected absolute directory. These bindings are user configuration history protected by fingerprint v7, not derived telemetry. Removing a binding never deletes files.
+- The UI-safe `TaskWorkspaceView` carries display path, label, availability and access flags. The Runtime spec is separate and stays in local memory; the model gets only capability semantics, **never an absolute host path**. The user picks a local directory through `QFileDialog`, not a Tool or model argument. No binding exposes zero file tools; managed exposes list/read/write/mkdir; local exposes only list/read with a sensitive-file deny policy and zero execution tools. Missing local directories expose zero local file tools and never trigger fallback or mkdir.
+- A turn reads the latest binding once; UI controls cannot switch/clear it during a busy turn/approval. `sandbox_run` requires a managed binding, execution config, and available Docker. There is no local project write or execution in Workspace-1. `request_save_learning_note` remains a separate application Approval for a SQLite `LearningOutcome(kind="note")`, while explicitly requested file exports use managed Workspace write tools. See [WORKSPACES.md](WORKSPACES.md).
 
 ## Agent-7 — Session Memory / Context Compaction
 
@@ -211,7 +226,7 @@ The Approval Provider now registers three fixed request Tools: Task completion, 
 
 ## Still not implemented
 
-- Assessment submission Tools, arbitrary note editing, or other application mutations
+- Assessment submission Tools, arbitrary note editing, local project writes, or other application mutations
 
 ## Future roadmap
 
@@ -222,7 +237,7 @@ The Approval Provider now registers three fixed request Tools: Task completion, 
 | Agent-9 | Explicit approval-gated Task completion request — implemented |
 | Agent-10 | Approved Assessment & Learning Note Actions — implemented |
 | Agent-11 | Agent UX polish + production hardening — implemented; Platform v1 freeze |
-| Agent-11 | Agent UX polish + production hardening — next |
+| Workspace-1 | Explicit Task Workspace binding; managed write / local read-only — implemented |
 
 ## Tests
 
