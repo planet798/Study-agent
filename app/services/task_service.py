@@ -160,6 +160,19 @@ class TaskService:
         """
         return task.status == STATUS_ACTIVE
 
+    def prepare_replan(
+        self, date_str: str, *, route_ids=(), include_unassigned: bool = False,
+    ) -> dict[str, list[int]]:
+        """Prepare only the requested route scope for a user-confirmed replan.
+
+        Referenced tasks become cancelled old plan items, not 'not_done'
+        learning attempts. Neither Sessions nor Workspace bindings are touched.
+        The repository applies the entire selected set in one savepoint.
+        """
+        return self.repo.prepare_replan_tasks(
+            date_str, tuple(route_ids), include_unassigned=include_unassigned,
+        )
+
     def cancel_task(self, task_id: int) -> Task:
         """移除今日任务：active -> cancelled（只改状态，绝不物理删除）。
 

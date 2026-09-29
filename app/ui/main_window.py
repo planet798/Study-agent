@@ -1408,20 +1408,24 @@ class MainWindow(QMainWindow):
             if not plannable:
                 show_warning(self, "当前没有可自动规划的学习路线。")
                 return
-            # 只清理 today / generated / new / active；done、manual、cancelled 保留
-            cleaned_ids = []
-            for t in self.task_service.get_tasks_by_date(today_str):
-                if (t.status == "active" and t.source == "generated"
-                        and t.task_type == "new"):
-                    self.task_service.repo.delete(t.id)
-                    cleaned_ids.append(t.id)
+            # Preparation is one atomic Service operation, scoped to routes
+            # the scheduler can actually regenerate. Linked history survives.
+            try:
+                prepared = self.task_service.prepare_replan(
+                    today_str, route_ids=(r.id for r in plannable),
+                )
+            except Exception as error:
+                show_warning(self, f"重新规划准备失败：{error}")
+                return
             result = self.scheduler.generate(today_str, force=True)
             self.refresh(preserve_scroll=True)
             n = len(result.get("created", []))
             routes = len(result.get("plannable_route_ids", []))
             msg = f"重新规划完成：生成了 {n} 个任务（{routes} 条路线）"
-            if cleaned_ids:
-                msg += f"，移除了 {len(cleaned_ids)} 个旧生成任务"
+            if prepared["removed_ids"]:
+                msg += f"，移除了 {len(prepared['removed_ids'])} 个旧生成任务"
+            if prepared["preserved_ids"]:
+                msg += f"，保留了 {len(prepared['preserved_ids'])} 个有历史的任务"
             self.statusBar().showMessage(msg, 6000)
             return
 
@@ -1441,13 +1445,18 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 清理今天可被重排的普通生成任务（active + generated）
-        tasks = self.task_service.get_tasks_by_date(today_str)
-        cleaned_ids = []
-        for t in tasks:
-            if t.status == "active" and t.source == "generated":
-                self.task_service.repo.delete(t.id)
-                cleaned_ids.append(t.id)
+        # Legacy single-route planning may own unassigned historical Tasks,
+        # but must never clean another explicitly assigned route's Tasks.
+        try:
+            route_id = self.daily_planner_service.replan_route_id()
+            prepared = self.task_service.prepare_replan(
+                today_str,
+                route_ids=(route_id,) if route_id is not None else (),
+                include_unassigned=True,
+            )
+        except Exception as error:
+            show_warning(self, f"重新规划准备失败：{error}")
+            return
 
         # 对该日期重新生成（AI 优先，内部自动 fallback）。
         # force=True：即使当天已有 planner decision / cancelled 记录，也刷新计划；
@@ -1457,8 +1466,10 @@ class MainWindow(QMainWindow):
         )
         self.refresh(preserve_scroll=True)
         msg = f"重新规划完成：生成了 {len(result.get('created', []))} 个任务"
-        if cleaned_ids:
-            msg += f"，移除了 {len(cleaned_ids)} 个旧生成任务"
+        if prepared["removed_ids"]:
+            msg += f"，移除了 {len(prepared['removed_ids'])} 个旧生成任务"
+        if prepared["preserved_ids"]:
+            msg += f"，保留了 {len(prepared['preserved_ids'])} 个有历史的任务"
         self.statusBar().showMessage(msg, 5000)
 
     # ---------- 操作处理 ----------

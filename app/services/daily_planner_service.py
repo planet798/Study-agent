@@ -87,6 +87,10 @@ class DailyPlannerService:
         except Exception:  # noqa: BLE001
             return None
 
+    def replan_route_id(self) -> int | None:
+        """Effective route for the single-route compatibility replan path."""
+        return self._route_id()
+
     def _route_name(self) -> str:
         route_id = self._route_id()
         repo = getattr(self.study_plan_service, "learning_route_repo", None)

@@ -403,6 +403,64 @@ class TaskRepository:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def prepare_replan_tasks(
+        self, date_str: str, route_ids: tuple[int, ...], *,
+        include_unassigned: bool = False,
+    ) -> dict[str, list[int]]:
+        """Atomically retire eligible generated Tasks without losing linked history.
+
+        A user-confirmed replan cancels referenced old plan items; unlike
+        not_done, cancellation does not claim the learner attempted the task.
+        Unreferenced/unbound items retain the original physical replacement
+        behavior. The savepoint also works inside an existing transaction.
+        """
+        routes = tuple(sorted(set(int(route_id) for route_id in route_ids)))
+        scopes = []
+        args: list = [date_str, STATUS_ACTIVE]
+        if routes:
+            scopes.append("route_id IN (" + ",".join("?" for _ in routes) + ")")
+            args.extend(routes)
+        if include_unassigned:
+            scopes.append("route_id IS NULL")
+        if not scopes:
+            return {"removed_ids": [], "preserved_ids": []}
+
+        self.conn.execute("SAVEPOINT replan_preparation")
+        try:
+            rows = self.conn.execute(
+                "SELECT id FROM tasks WHERE scheduled_date = ? AND status = ? "
+                "AND source = 'generated' AND task_type = 'new' AND ("
+                + " OR ".join(scopes) + ") ORDER BY id", tuple(args),
+            ).fetchall()
+            removed: list[int] = []
+            preserved: list[int] = []
+            for row in rows:
+                task_id = int(row[0])
+                protected = self.conn.execute(
+                    "SELECT "
+                    "EXISTS(SELECT 1 FROM agent_sessions WHERE task_id = ?) OR "
+                    "EXISTS(SELECT 1 FROM task_workspaces WHERE task_id = ?) OR "
+                    "EXISTS(SELECT 1 FROM assessment_attempts WHERE task_id = ?)",
+                    (task_id, task_id, task_id),
+                ).fetchone()[0]
+                if protected:
+                    cur = self.conn.execute(
+                        "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+                        (STATUS_CANCELLED, now_iso(), task_id),
+                    )
+                    preserved.append(task_id)
+                else:
+                    cur = self.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+                    removed.append(task_id)
+                if cur.rowcount != 1:
+                    raise RuntimeError(f"Replan Task changed during preparation: {task_id}")
+            self.conn.execute("RELEASE SAVEPOINT replan_preparation")
+            return {"removed_ids": removed, "preserved_ids": preserved}
+        except BaseException:
+            self.conn.execute("ROLLBACK TO SAVEPOINT replan_preparation")
+            self.conn.execute("RELEASE SAVEPOINT replan_preparation")
+            raise
+
     def delete(self, task_id: int) -> bool:
         """删除任务（保留，供后续 UI 删除功能使用）。"""
         cur = self.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
