@@ -15,7 +15,7 @@ import json
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtCore import QThread, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QThread, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -195,6 +195,8 @@ class MainWindow(QMainWindow):
         # 防止重复发送造成同一 Session 的模型回复乱序。
         self._agent_inflight_sessions: set[int] = set()
         self._approval_inflight: set[int] = set()
+        self._today_scroll_epoch = 0
+        self._today_scroll_handler = None
         # 防止连续双击【开始验收】创建多个 worker / 多个 pending attempt
         self._assessment_inflight: set[int] = set()
 
@@ -248,6 +250,9 @@ class MainWindow(QMainWindow):
 
         # compatibility aliases（旧测试 / 旧代码依赖）
         self.scroll = self.today_page.scroll
+        self.scroll.viewport().installEventFilter(self)
+        self.scroll.verticalScrollBar().installEventFilter(self)
+        self.scroll.verticalScrollBar().sliderPressed.connect(self._clear_today_scroll_restore)
         self.list_container = self.today_page.list_container
         self.list_layout = self.today_page.list_layout
         self.empty_hint = self.today_page.empty_hint
@@ -379,6 +384,7 @@ class MainWindow(QMainWindow):
         self._update_page_header(PageKey.TODAY)
 
     def _switch_to_routes(self) -> None:
+        self._clear_today_scroll_restore()
         if self.routes_page_index is None:
             self.statusBar().showMessage("学习路线不可用", 3000)
             return
@@ -388,6 +394,7 @@ class MainWindow(QMainWindow):
         self._update_page_header(PageKey.ROUTES)
 
     def _switch_to_ai_settings(self) -> None:
+        self._clear_today_scroll_restore()
         if self.ai_settings_page_index is None:
             self.statusBar().showMessage("设置不可用", 3000)
             return
@@ -397,6 +404,7 @@ class MainWindow(QMainWindow):
         self._update_page_header(PageKey.SETTINGS)
 
     def _switch_to_practice(self) -> None:
+        self._clear_today_scroll_restore()
         if getattr(self, "practice_page_index", None) is None:
             self.statusBar().showMessage("实践项目不可用", 3000)
             return
@@ -483,6 +491,7 @@ class MainWindow(QMainWindow):
                 turn_busy=int(session_id) in self._agent_inflight_sessions,
                 approval_busy=tuple(self._approval_inflight),
             )
+            self._clear_today_scroll_restore()
             self.stack.setCurrentIndex(self.agent_workspace_page_index)
             self.page_header.set_title(session["title"] or task.title)
             self.page_header.set_subtitle(self._route_name_for_task(task) or "学习会话")
@@ -780,6 +789,7 @@ class MainWindow(QMainWindow):
             时置 True，重建后恢复原滚动位置，避免自动跳到底部。
         """
         state = self.capture_today_view_state() if preserve_scroll else None
+        self._clear_today_scroll_restore()
         today_str = self.current_date
         tasks = self.task_service.get_tasks_by_date(today_str)
         self._today_tasks = tasks
@@ -855,31 +865,49 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             return TodayViewState()
 
+    def _clear_today_scroll_restore(self) -> None:
+        """Invalidate an old restore, including callbacks queued before disconnect."""
+        self._today_scroll_epoch += 1
+        handler = self._today_scroll_handler
+        self._today_scroll_handler = None
+        if handler is not None:
+            try:
+                self.scroll.verticalScrollBar().rangeChanged.disconnect(handler)
+            except (RuntimeError, TypeError):
+                pass
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt API
+        if (hasattr(self, "scroll")
+                and watched in (self.scroll.viewport(), self.scroll.verticalScrollBar())
+                and event.type() in (QEvent.Type.Wheel, QEvent.Type.MouseButtonPress,
+                                     QEvent.Type.TouchBegin)):
+            self._clear_today_scroll_restore()
+        return super().eventFilter(watched, event)
+
     def restore_today_view_state(self, state: TodayViewState) -> None:
-        """在 layout 完成后恢复滚动位置（clamp 到当前 maximum）。
-
-        Qt 的 deleteLater / layout 是异步的，且被删除的焦点控件会让 Qt 自动
-        ensureWidgetVisible 而滚动；因此先清除焦点，再用 QTimer 在事件循环后
-        恢复，并做一次延迟兜底。
-        """
-        from PySide6.QtWidgets import QApplication
-
+        """Restore after a real range/layout change; last refresh or user input wins."""
+        self._clear_today_scroll_restore()
         focused = QApplication.focusWidget()
         if focused is not None:
             focused.clearFocus()
+        epoch = self._today_scroll_epoch
+        bar = self.scroll.verticalScrollBar()
+        target = max(0, int(state.scroll_value))
 
-        def _apply() -> None:
-            try:
-                bar = self.scroll.verticalScrollBar()
-                if bar.maximum() <= 0 and state.scroll_value > 0:
-                    return  # layout 还未完成，等待下一个 timer
-                bar.setValue(min(int(state.scroll_value), bar.maximum()))
-            except Exception:  # noqa: BLE001
-                pass
+        def _apply(*_args) -> None:
+            if epoch != self._today_scroll_epoch or self._quit_requested:
+                return
+            # During a rebuild Qt can temporarily report an empty range.
+            if target > 0 and bar.maximum() <= 0:
+                return
+            bar.setValue(min(target, bar.maximum()))
+            self._clear_today_scroll_restore()
 
-        _apply()
-        for delay in (0, 16, 60, 160, 400, 800):
-            QTimer.singleShot(delay, _apply)
+        self._today_scroll_handler = _apply
+        bar.rangeChanged.connect(_apply)
+        # One layout turn, not a train of delayed retries. If the range is
+        # still empty, rangeChanged completes the pending restore later.
+        QTimer.singleShot(0, self, _apply)
 
     # ---------- Phase C：路线筛选 / 统计 ----------
 
@@ -1530,6 +1558,7 @@ class MainWindow(QMainWindow):
         - 托盘可用时点 X：只 hide，保留进程与托盘；
         - 无托盘可用时点 X：回退为“关闭即退出”，避免出现无入口的隐形进程。
         """
+        self._clear_today_scroll_restore()
         if self._quit_requested or self._tray is None:
             self._shutdown()
             event.accept()
@@ -1541,6 +1570,7 @@ class MainWindow(QMainWindow):
     def _shutdown(self) -> None:
         """退出前集中清理：托盘、AI 线程、打开的 AI 对话框。"""
         self._quit_requested = True
+        self._clear_today_scroll_restore()
 
         # Release page-owned scroll callbacks and any Workspace menu popup
         # before the parent window (or QApplication) starts tearing down Qt.

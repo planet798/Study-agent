@@ -10,6 +10,9 @@
 from __future__ import annotations
 
 from enum import Enum
+from weakref import ref
+
+import shiboken6
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
@@ -30,6 +33,13 @@ from .button import SAIconButton
 
 EXPANDED_WIDTH = 228
 COLLAPSED_WIDTH = 60
+
+
+def _safe_theme_disconnect(manager, callback) -> None:
+    try:
+        manager.theme_changed.disconnect(callback)
+    except (RuntimeError, TypeError, SystemError):
+        pass
 
 
 def key_value(key) -> str:
@@ -70,7 +80,16 @@ class SANavigationItem(QPushButton):
 
         self._refresh()
         self.toggled.connect(self._on_toggled)
-        theme_manager().theme_changed.connect(self._on_theme_changed)
+        manager = theme_manager()
+        weak_item = ref(self)
+
+        def on_theme_changed(theme):
+            item = weak_item()
+            if item is not None and shiboken6.isValid(item):
+                item._on_theme_changed(theme)
+
+        manager.theme_changed.connect(on_theme_changed)
+        self.destroyed.connect(lambda *_: _safe_theme_disconnect(manager, on_theme_changed))
 
     # ---------- public ----------
     def key(self) -> str:
@@ -127,7 +146,8 @@ class SANavigationItem(QPushButton):
         self._repolish()
 
     def _on_theme_changed(self, _theme: str) -> None:
-        self._refresh_icon()
+        if shiboken6.isValid(self):
+            self._refresh_icon()
 
     def _repolish(self) -> None:
         self.style().unpolish(self)
@@ -223,7 +243,16 @@ class SANavigationSidebar(QWidget):
 
         self.setFixedWidth(EXPANDED_WIDTH)
         self._apply_brand_icon()
-        theme_manager().theme_changed.connect(self._on_theme_changed)
+        manager = theme_manager()
+        weak_sidebar = ref(self)
+
+        def on_theme_changed(theme):
+            sidebar = weak_sidebar()
+            if sidebar is not None and shiboken6.isValid(sidebar):
+                sidebar._on_theme_changed(theme)
+
+        manager.theme_changed.connect(on_theme_changed)
+        self.destroyed.connect(lambda *_: _safe_theme_disconnect(manager, on_theme_changed))
 
     # ---------- items ----------
     def _add_item(self, spec) -> SANavigationItem:
@@ -351,4 +380,5 @@ class SANavigationSidebar(QWidget):
         )
 
     def _on_theme_changed(self, _theme: str) -> None:
-        self._apply_brand_icon()
+        if shiboken6.isValid(self) and shiboken6.isValid(self.brand_icon):
+            self._apply_brand_icon()
