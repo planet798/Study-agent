@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         agent_approval_service=None,
         agent_approval_service_factory=None,
         task_workspace_service=None,
+        personalization_service=None,
     ):
         super().__init__()
         # 主题偏好（QSettings；测试可注入隔离实例）；UI-2 runtime，不改 DB。
@@ -175,6 +176,7 @@ class MainWindow(QMainWindow):
         self.ai_config_service = ai_config_service
         self.prompt_registry = prompt_registry
         self.prompt_preview_service = prompt_preview_service
+        self.personalization_service = personalization_service
         # Phase 2：Topic Learning Activity（可选）
         self.topic_learning_service = topic_learning_service
         # Phase 3：Capability Evidence（可选）
@@ -339,6 +341,7 @@ class MainWindow(QMainWindow):
             self.prompt_registry,
             preview_service=self.prompt_preview_service,
             theme_settings=self.theme_settings,
+            personalization_service=self.personalization_service,
         )
         self.stack.addWidget(self.ai_settings_page)
         self.ai_settings_page_index = self.stack.count() - 1

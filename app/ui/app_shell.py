@@ -43,7 +43,7 @@ PAGE_SPECS: tuple[PageSpec, ...] = (
         PageKey.PRACTICE, "实践项目", "项目与实践证据", _icons.IconName.PROJECT
     ),
     PageSpec(
-        PageKey.SETTINGS, "设置", "模型、Prompt 与外观设置",
+        PageKey.SETTINGS, "设置", "个性化、模型与外观设置",
         _icons.IconName.SETTINGS, footer=True,
     ),
 )

@@ -40,7 +40,7 @@ def test_settings_tabs_unchanged(qapp, ai_config_service, prompt_registry):
     page = AISettingsPage(ai_config_service, prompt_registry)
     tab = page.findChild(QTabWidget)
     labels = [tab.tabText(i) for i in range(tab.count())]
-    assert labels == ["模型 / API", "Prompt 管理"]
+    assert labels == ["个性化", "模型 / API", "高级"]
 
 
 def test_profile_list_no_unicode_markers(qapp, ai_config_service):

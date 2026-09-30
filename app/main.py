@@ -1764,6 +1764,12 @@ def main() -> int:
         jd_repo=JdRepository(conn),
     )
 
+    # Main-thread Settings dependency only; never passed to Agent workers.
+    from app.database.personalization_repository import PersonalizationRepository
+    from app.services.personalization_service import PersonalizationService
+
+    personalization_service = PersonalizationService(PersonalizationRepository(conn))
+
     # 不显式传 today_provider：MainWindow 默认跟随 date_utils.today()，
     # 因此 --date 注入的日期会自动作用于整个应用（GUI 日期/阶段/任务/统计/AI）。
     # Phase D：Obsidian 每日笔记（供 UI 导出；未注入则 UI 隐藏导出能力）
@@ -1806,6 +1812,7 @@ def main() -> int:
         ai_config_service=ai_config_service,
         prompt_registry=prompt_registry,
         prompt_preview_service=prompt_preview_service,
+        personalization_service=personalization_service,
         topic_learning_service=topic_learning_service,
         practice_service=practice_service,
         agent_session_service=agent_session_service,

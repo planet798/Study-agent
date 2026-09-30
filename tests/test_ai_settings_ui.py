@@ -1,6 +1,6 @@
 """AI 设置中心 UI 测试（offscreen）。
 
-覆盖：顶部导航入口、两个 Tab、API Profile 增删改切、Key 默认遮挡、
+覆盖：顶部导航入口、三个 Tab、API Profile 增删改切、Key 默认遮挡、
 Prompt 分类/编辑/保存/恢复/预览、占位符校验 UI、网络测试后台不冻结。
 """
 
@@ -46,7 +46,9 @@ class TestPageStructure:
 
         tab = settings_page.findChild(QTabWidget)
         labels = [tab.tabText(i) for i in range(tab.count())]
-        assert labels == ["模型 / API", "Prompt 管理"]
+        assert labels == ["个性化", "模型 / API", "高级"]
+        assert tab.currentIndex() == 0
+        assert tab.widget(2).isAncestorOf(settings_page.prompt_panel)
 
 
 class TestProfilePanel:

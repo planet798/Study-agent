@@ -1,8 +1,9 @@
-# Personalization — P-1B
+# Personalization — P-1B / P-1C
 
 Current versions: **schema 27 / fingerprint 7 / evaluator 2**.
 
-This phase is persistence only: **no UI, no Agent injection, no automatic
+P-1B established persistence. P-1C adds **Personalization Settings UI and manual
+memory management**. There is still **no Agent injection and no automatic Session
 extraction**. AgentRuntime, structured workflows, Skill selection, compaction,
 PromptRegistry and Prompt Manager semantics are unchanged.
 
@@ -45,11 +46,46 @@ deletion is idempotent and physically removes only the personal-memory row.
 `app/database/personalization_repository.py` owns SQL persistence and provenance
 lookups, with no prompt construction, model calls or UI wording.
 `app/services/personalization_service.py` owns plain-text/boolean validation and
-operations. Construct the repository with the worker-owned fresh connection, then
-construct the service from that repository. There is no global DB singleton or
+operations. P-1C constructs the service from the main-thread connection for Settings
+only, passing it through MainWindow to AISettingsPage. A future worker integration
+must construct its own repository/service from the worker-owned fresh connection. There is no global DB singleton or
 main-thread connection stored in AgentRuntime. Each mutation commits, matching
 existing Agent repository conventions. Fresh-schema snapshots derive from the
 same real migration path and include the singleton seed.
+
+## Settings UX (P-1C)
+
+Appearance remains above the tabs. Tab order is **个性化 → 模型 / API → 高级**;
+个性化 is the default. The Settings shell subtitle is 个性化、模型与外观设置;
+there is no new navigation PageKey.
+
+`PersonalizationPanel` calls Service only. Agent 说明 uses a normal prose multiline
+editor with a placeholder example (never saved as initial content), an 8000-character
+counter and explicit 保存. Empty persisted instructions stay empty; no system prompt
+fallback exists. Service validation is authoritative. Errors use controlled inline
+feedback, never raw exceptions. Saving is immediate persistence, not a claim that
+Agent turns already consume it. Explicit refresh loads persisted state; there is no
+background polling or refresh during typing.
+
+The memory master checkbox persists only `memory_enabled`. Turning it off disables
+the auto-memory consent checkbox without clearing its checked preference or any
+memory rows. Re-enabling restores interaction; 管理记忆 remains available while off.
+The second checkbox stores consent for future extraction, not an operational feature.
+No Sessions are scanned and no model calls or background jobs are added.
+
+`PersonalMemoriesDialog` is a modal manager listing all memories, including disabled
+ones. Source labels are 手动添加 / 学习会话, never raw source IDs. The empty state says
+还没有本地记忆。 with an 添加记忆 action. Add/edit use a multiline editor and 1000-character
+counter; Cancel does not mutate. Editing preserves provenance and creation time.
+启用 / 停用 keep items listed using neutral theme styling. 删除 requires confirmation
+with 取消 as default/escape; it physically removes only the personal-memory row and
+immediately refreshes the list. Chat history and Session Memory are unaffected.
+
+PromptManagerPanel lives intact under 高级 with a structured-workflow warning. Category
+tree, variables, override save/reset, default viewing and final preview remain
+independent of Personal Instructions. No personalization creates Prompt Overrides.
+When the optional service is absent/unavailable, personalization controls are disabled
+with concise feedback; Appearance and Model/API remain accessible.
 
 ## Release verifier
 
@@ -69,3 +105,12 @@ real migration, Agent history verifier, schema migrations, PromptRegistry, Sessi
 Memory repository, directly affected version/migration contracts and fresh-schema
 parity. The focused `-m migration tests/test_personalization_migration.py` run passed
 4 tests. `git diff --check` passed. No broad test suite or stress loops were run.
+
+P-1C validation: **121 focused tests passed** across `test_personalization_ui.py`,
+`test_ai_settings_ui.py`, `test_ui4_pages.py`, `test_theme_preferences.py`,
+`test_foundation_components.py`, `test_main_window.py` and `test_main_window_exit.py`.
+Coverage includes actual add/edit/delete modal flows, cancel-by-default confirmation,
+master/auto toggle persistence, controlled validation feedback, independent Advanced
+Prompt save/reset/preview, unavailable-service fallback and unchanged history/compaction
+rows. Schema/domain semantics and all three versions remain unchanged. No broad test
+suite or stress loops were run.

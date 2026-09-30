@@ -50,8 +50,10 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
 - **JD / Market / Skill**：`jd_service` / `jd_summary_service` / `market_signal` /
   `skill_service`。JD 30-day / market / skill priority 是 Planner 后台信号，不占据 Today UI。
 - **Today (S3)**：execution-focused learning surface；只呈现日期、当前阶段、Planner、路线筛选、两项 Summary、今日学习任务与添加入口。
-- **AI Settings / Prompt**：`ai/config_service` + `ai/secrets` + `ai/prompt_registry`
-  + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
+- **Settings**：默认 个性化（Agent 说明 / 手动本地记忆管理）→ 模型 / API → 高级。
+  `PersonalizationPanel` 仅调用 Service；尚无 Agent injection / 自动记忆提取。
+  `ai/config_service` + `ai/secrets` + `ai/prompt_registry` + `ai/prompt_defaults`
+  保持语义不变；PromptManagerPanel 移至高级，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
 ## Agent core (Agent-1 through Agent-11, Workspace-1 and Learning Shell-1 implemented)

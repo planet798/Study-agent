@@ -1,7 +1,8 @@
 """AI 设置中心页面（一级导航）。
 
-Tab 1【模型 / API】: AI Provider Profile 增 / 删 / 改 / 重命名 / 切换当前 / 测试连接。
-Tab 2【Prompt 管理】: 查看 / 修改 / 保存 / 恢复默认 / 查看变量 / 最终 Prompt 预览。
+Tab 1【个性化】: Agent 说明与本地记忆偏好（仅持久化）。
+Tab 2【模型 / API】: AI Provider Profile 管理。
+Tab 3【高级】: 现有内部 Prompt 管理与预览。
 
 设计约束：
 - API Key 只写系统 keyring；UI 默认遮挡，绝不回显完整 Key；
@@ -54,6 +55,7 @@ from .ai_settings_dialogs import (
 )
 from .ai_worker import AIConnectionTestWorker
 from .styles import apply_secondary_button_text
+from .personalization_panel import PersonalizationPanel
 
 
 # ============================================================
@@ -703,6 +705,7 @@ class AISettingsPage(QWidget):
         preview_service: PromptPreviewService | None = None,
         parent: QWidget | None = None,
         theme_settings=None,
+        personalization_service=None,
     ):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -734,19 +737,32 @@ class AISettingsPage(QWidget):
         layout.addWidget(appearance_card)
 
         hint = QLabel(
-            "模型 / API 决定“连接谁”，Prompt 管理决定“告诉模型什么”。"
-            "API Key 保存在系统凭据存储，不写入数据库 / 日志。"
+            "通过个性化设置，让 Study Agent 更符合你的学习习惯。"
+            "模型与 API 设置负责连接模型，高级设置用于内部 Prompt 调整。"
         )
         hint.setObjectName("TaskMeta")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        tabs = QTabWidget()
+        self.tabs = QTabWidget()
+        self.personalization_panel = PersonalizationPanel(personalization_service, self)
         self.profiles_panel = AIProfilesPanel(ai_config_service, self)
-        self.prompt_panel = PromptManagerPanel(prompt_registry, preview_service, self)
-        tabs.addTab(self.profiles_panel, "模型 / API")
-        tabs.addTab(self.prompt_panel, "Prompt 管理")
-        layout.addWidget(tabs, stretch=1)
+        self.advanced_panel = QWidget()
+        advanced_layout = QVBoxLayout(self.advanced_panel)
+        warning = QLabel(
+            "这里用于调整 Study Agent 内部结构化 AI 工作流。"
+            "错误修改可能影响规划、验收或 JSON 输出。"
+        )
+        warning.setObjectName("TaskMeta")
+        warning.setWordWrap(True)
+        advanced_layout.addWidget(warning)
+        self.prompt_panel = PromptManagerPanel(prompt_registry, preview_service, self.advanced_panel)
+        advanced_layout.addWidget(self.prompt_panel, stretch=1)
+        self.tabs.addTab(self.personalization_panel, "个性化")
+        self.tabs.addTab(self.profiles_panel, "模型 / API")
+        self.tabs.addTab(self.advanced_panel, "高级")
+        self.tabs.setCurrentIndex(0)
+        layout.addWidget(self.tabs, stretch=1)
 
     def _on_theme_combo_changed(self) -> None:
         mode = self.theme_combo.currentData()
@@ -757,4 +773,5 @@ class AISettingsPage(QWidget):
 
     def refresh(self) -> None:
         self.profiles_panel.refresh()
+        self.personalization_panel.refresh()
         self.prompt_panel.refresh()
