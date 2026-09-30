@@ -144,8 +144,8 @@ full 失败                 → 只重跑失败测试，修复
 
 ## 3. 测试基础设施（本轮新增）
 
-- `tests/conftest.py::conn` → `get_fresh_connection()`：直接建当前 v25 schema,
-  **不重放 v2..v25**（约 280ms → 个位数 ms）。与真实迁移在空库上的 schema 逐字一致。
+- `tests/conftest.py::conn` → `get_fresh_connection()`：直接建当前 v26 schema,
+  **不重放 v2..v26**（约 280ms → 个位数 ms）。与真实迁移在空库上的 schema 逐字一致。
 - `app/database/connection.py::get_connection()`：**production 真实路径**，仍走
   `migrate()`。改动它要非常谨慎。
 - markers：`slow` / `migration` / `ui` / `integration` / `threaded`，见 `pytest.ini`。分类显式写在 module/class/function；UI fixture hook 识别 qtbot/qapp。slow 表示真实成本，不等同于全部 migration/integration/Qt。
