@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -42,6 +42,8 @@ class AssessmentDialog(QDialog):
         self._service_factory = service_factory or (lambda conn: self._service)
         self._db_path = db_path
         self._answer_edits: list[QPlainTextEdit] = []
+        self._worker: AssessmentWorker | None = None
+        self._closing = False
 
         self.setWindowTitle("学习验收")
         self.setModal(False)
@@ -160,6 +162,8 @@ class AssessmentDialog(QDialog):
         self.error_label.setVisible(True)
 
     def _on_submit(self) -> None:
+        if self._closing or self._worker is not None:
+            return
         answers = [e.toPlainText().strip() for e in self._answer_edits]
         if any(not a for a in answers):
             self._set_error("请完成所有题目后再提交")
@@ -176,14 +180,71 @@ class AssessmentDialog(QDialog):
                 kwargs={"today": self._today},
                 parent=self,
             )
-            worker.succeeded.connect(self._on_judged)
-            worker.failed.connect(self._on_failed)
-            worker.finished.connect(lambda w=worker: w.deleteLater())
+            self._worker = worker
+            worker.succeeded.connect(self._on_worker_succeeded)
+            worker.failed.connect(self._on_worker_failed)
+            worker.finished.connect(self._on_worker_finished)
             worker.start()
         except Exception as e:  # noqa: BLE001
+            if self._worker is not None:
+                self._worker.deleteLater()
+                self._worker = None
             self._on_failed(str(e))
 
+    def _on_worker_succeeded(self, attempt) -> None:
+        if not self._closing and self.sender() is self._worker:
+            self._on_judged(attempt)
+
+    def _on_worker_failed(self, message: str) -> None:
+        if not self._closing and self.sender() is self._worker:
+            self._on_failed(message)
+
+    def _on_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is self._worker:
+            self._worker = None
+            worker.deleteLater()
+
+    def drain_worker(self) -> None:
+        """Dialog owns the worker through completion; interruption is advisory."""
+        self._closing = True
+        worker = self._worker
+        if worker is None:
+            return
+        for signal, slot in ((worker.succeeded, self._on_worker_succeeded),
+                             (worker.failed, self._on_worker_failed),
+                             (worker.finished, self._on_worker_finished)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        if worker.isRunning():
+            worker.requestInterruption()
+            worker.wait()  # AI/HTTP call cannot be cooperatively cancelled.
+        self._worker = None
+        worker.deleteLater()
+
+    def done(self, result):  # noqa: N802 - QDialog API; accept/reject may hide
+        self.drain_worker()
+        super().done(result)
+
+    def closeEvent(self, event):  # noqa: N802 - Qt API
+        self.drain_worker()
+        super().closeEvent(event)
+
+    def showEvent(self, event):  # noqa: N802 - a previously hidden dialog may reopen
+        if self._worker is None:
+            self._closing = False
+        super().showEvent(event)
+
+    def event(self, event):
+        if event.type() == QEvent.Type.DeferredDelete:
+            self.drain_worker()
+        return super().event(event)
+
     def _on_judged(self, attempt) -> None:
+        if self._closing:
+            return
         self.submit_btn.setEnabled(True)
         self._attempt = attempt
         if attempt.get("judge_status") != "judged":
@@ -197,6 +258,8 @@ class AssessmentDialog(QDialog):
         self._show_result(attempt)
 
     def _on_failed(self, msg: str) -> None:
+        if self._closing:
+            return
         self.submit_btn.setEnabled(True)
         self.status_label.setText("判题失败（已保存答案，可稍后重试）")
         self._set_error(f"AI 调用失败：{msg}")

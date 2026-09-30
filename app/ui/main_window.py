@@ -1588,6 +1588,14 @@ class MainWindow(QMainWindow):
         if self.agent_workspace_page is not None:
             self.agent_workspace_page.close()
 
+        # Dialog-owned workers have one owner: drain through their dialogs,
+        # including hidden/accepted children, before MainWindow destruction.
+        from .routes_page import RouteDetailDialog
+        for dialog_type in (AssessmentDialog, RouteDetailDialog):
+            for dialog in self.findChildren(dialog_type):
+                dialog.drain_worker()
+                dialog.close()
+
         # 1) 清理托盘（隐藏 + 删除），不再驻留后台
         if self._tray is not None:
             self._tray.hide()

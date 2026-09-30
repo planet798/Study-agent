@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -96,7 +96,8 @@ class RouteDetailDialog(QDialog):
         self.practice_service = practice_service
         self.practice_capability_service = practice_capability_service
         self.practice_readiness_service = practice_readiness_service
-        self._ai_worker = None
+        self._ai_worker: AIRouteBuilderWorker | None = None
+        self._closing = False
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
         self.resize(640, 620)
@@ -921,6 +922,8 @@ class RouteDetailDialog(QDialog):
         return skills, market_payload
 
     def _on_ai_generate(self) -> None:
+        if self._closing or self._ai_worker is not None:
+            return
         if self.ai_route_service is None or \
                 not self.ai_route_service.is_configured():
             show_warning(self, "AI 未配置，无法生成学习路线；可继续手动创建。")
@@ -940,21 +943,81 @@ class RouteDetailDialog(QDialog):
             self.ai_route_service, context,
             route_skills=route_skills, market=market, parent=self,
         )
-        worker.succeeded.connect(self._on_draft_ready)
-        worker.failed.connect(self._on_draft_failed)
         self._ai_worker = worker
-        worker.start()
+        worker.succeeded.connect(self._on_worker_succeeded)
+        worker.failed.connect(self._on_worker_failed)
+        worker.finished.connect(self._on_worker_finished)
+        try:
+            worker.start()
+        except Exception:
+            self._ai_worker = None
+            worker.deleteLater()
+            raise
+
+    def _on_worker_succeeded(self, draft) -> None:
+        if not self._closing and self.sender() is self._ai_worker:
+            self._on_draft_ready(draft)
+
+    def _on_worker_failed(self, message: str) -> None:
+        if not self._closing and self.sender() is self._ai_worker:
+            self._on_draft_failed(message)
+
+    def _on_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is self._ai_worker:
+            self._ai_worker = None
+            worker.deleteLater()
+
+    def drain_worker(self) -> None:
+        """Wait for the dialog-owned AI call; interruption does not cancel HTTP."""
+        self._closing = True
+        worker = self._ai_worker
+        if worker is None:
+            return
+        for signal, slot in ((worker.succeeded, self._on_worker_succeeded),
+                             (worker.failed, self._on_worker_failed),
+                             (worker.finished, self._on_worker_finished)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        if worker.isRunning():
+            worker.requestInterruption()
+            worker.wait()
+        self._ai_worker = None
+        worker.deleteLater()
+
+    def done(self, result):  # noqa: N802 - accept/reject can hide the dialog
+        self.drain_worker()
+        super().done(result)
+
+    def closeEvent(self, event):  # noqa: N802 - Qt API
+        self.drain_worker()
+        super().closeEvent(event)
+
+    def showEvent(self, event):  # noqa: N802 - a hidden dialog may reopen
+        if self._ai_worker is None:
+            self._closing = False
+        super().showEvent(event)
+
+    def event(self, event):
+        if event.type() == QEvent.Type.DeferredDelete:
+            self.drain_worker()
+        return super().event(event)
 
     def _on_draft_failed(self, message: str) -> None:
-        show_warning(self, f"AI 生成失败：{message}")
+        if not self._closing:
+            show_warning(self, f"AI 生成失败：{message}")
 
     def _on_draft_ready(self, draft) -> None:
+        if self._closing:
+            return
         mode, reason = self.route_plan_service.ai_plan_mode(self.route.id)
         if mode == "blocked":
             show_warning(self, reason)
             return
         preview = RouteDraftPreviewDialog(draft, mode=mode, parent=self)
-        if preview.exec() != QDialog.DialogCode.Accepted:
+        if preview.exec() != QDialog.DialogCode.Accepted or self._closing:
             return
         new_draft = preview.draft()
         from ..ai.schemas import AIRouteDraft
