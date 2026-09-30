@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1578,6 +1578,40 @@ def _migrate_v26(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[26] = _migrate_v26
+
+
+_V27_SQL = """
+CREATE TABLE IF NOT EXISTS agent_personalization_settings (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    instructions TEXT NOT NULL DEFAULT '',
+    memory_enabled INTEGER NOT NULL DEFAULT 0 CHECK(memory_enabled IN (0,1)),
+    auto_memory_enabled INTEGER NOT NULL DEFAULT 0 CHECK(auto_memory_enabled IN (0,1)),
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+INSERT OR IGNORE INTO agent_personalization_settings(id) VALUES (1);
+
+CREATE TABLE IF NOT EXISTS agent_personal_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    source_type TEXT NOT NULL CHECK(source_type IN ('manual','session')),
+    source_session_id INTEGER REFERENCES agent_sessions(id),
+    source_message_id INTEGER REFERENCES agent_messages(id),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK((source_type = 'manual' AND source_session_id IS NULL AND source_message_id IS NULL)
+       OR (source_type = 'session' AND source_session_id IS NOT NULL))
+);
+"""
+
+
+def _migrate_v27(conn: sqlite3.Connection) -> None:
+    """Add opt-in mutable personalization, separate from Session compaction."""
+    conn.executescript(_V27_SQL)
+    conn.commit()
+
+
+_MIGRATIONS[27] = _migrate_v27
 
 
 def get_schema_version(conn) -> int:

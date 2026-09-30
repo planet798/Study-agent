@@ -615,7 +615,7 @@ def test_v20_db_migrates_stepwise_to_v26(tmp_path):
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == SCHEMA_VERSION == 26
+        assert get_schema_version(conn) == SCHEMA_VERSION == 27
 
         # 新表 + 索引存在
         tables = {
@@ -654,8 +654,8 @@ def test_v20_db_migrates_stepwise_to_v26(tmp_path):
         ).fetchone()[0] == 1
 
         # 迁移幂等
-        assert migrate(conn) == 26
-        assert migrate(conn) == 26
+        assert migrate(conn) == 27
+        assert migrate(conn) == 27
     finally:
         conn.close()
 
@@ -695,8 +695,8 @@ def test_real_v21_database_migrates_to_v26_without_changing_agent_history(tmp_pa
 
         migrate_stepwise(conn)
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 26
-        assert get_schema_version(conn) == 26
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 27
+        assert get_schema_version(conn) == 27
         assert conn.execute(
             "SELECT COUNT(*) FROM agent_session_memory"
         ).fetchone()[0] == 0
@@ -745,7 +745,7 @@ def test_real_v22_database_migrates_to_v26_preserving_memory_and_history(tmp_pat
 
         migrate_stepwise(conn)
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 26
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 27
         assert AgentMemoryRepository(conn).get_for_session(session["id"]) == memory
         assert [row["id"] for row in repo.list_messages(session["id"])] == [
             user["id"], assistant["id"],

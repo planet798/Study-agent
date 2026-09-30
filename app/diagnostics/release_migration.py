@@ -124,6 +124,8 @@ def inventory(conn: sqlite3.Connection) -> dict:
             "agent_session_memory", "agent_turn_traces", "agent_trace_events",
             "agent_turn_evaluations", "agent_approval_requests",
             "agent_approval_events", "task_workspaces",
+            # Mutable user state: diagnostic counts only, never growth/history.
+            "agent_personalization_settings", "agent_personal_memories",
         )},
     }
     data["tasks_done"] = _scalar(

@@ -88,7 +88,7 @@ def test_v24_to_v25_preserves_agent_and_learning_history(tmp_path):
 
 def test_binding_fingerprint_detects_immutable_changes_and_redacts_path(tmp_path):
     conn = get_fresh_connection(tmp_path / "fresh.db")
-    assert get_schema_version(conn) == SCHEMA_VERSION == 26
+    assert get_schema_version(conn) == SCHEMA_VERSION == 27
     assert FINGERPRINT_VERSION == 7
     ids = [conn.execute(
         "INSERT INTO tasks(title, scheduled_date, created_at, updated_at) "

@@ -86,7 +86,7 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - Agent-11 提供生产 Session UX、safe errors、忙碌状态串行化、resilient reload/shutdown 与离线 `agent-diagnostic`。
 - Workspace-1 提供 schema v25 的 Task-scoped managed/local binding。managed 支持 list/read/write/mkdir 及按 Sandbox 配置的可选 Docker execution；local 仅 list/read、敏感文件拒绝，无写入/执行。模型不接收 host absolute path。绑定入口是 conversation header 的 compact selector/menu，不是大型 body Card。
 - Session Management-1C 通过展开侧栏的独立 ⋯ 菜单提供 rename/reset、pin/unpin 与确认 archive；归档当前会话返回 Today。轻量归档列表支持 Restore，不自动打开或重新固定；Agent turn / approval execution 忙碌期间禁止 metadata mutation。无 Delete UI/API。详见 `docs/SESSION_MANAGEMENT.md`。
-- 当前版本：schema 26 / fingerprint 7 / evaluator 2。Agent-10 三个固定请求不等于通用 application writes；Session search/folders、Agent 提交验收答案、任意笔记编辑、local writes/execution 与 diff approval 均未实现。详见 `docs/PRODUCT_BASELINE.md`、`docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/WORKSPACES.md`。
+- 当前版本：schema 27 / fingerprint 7 / evaluator 2。Agent-10 三个固定请求不等于通用 application writes；Session search/folders、Agent 提交验收答案、任意笔记编辑、local writes/execution 与 diff approval 均未实现。详见 `docs/PRODUCT_BASELINE.md`、`docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/WORKSPACES.md`。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。Agent learning behavior 配置位于独立 `app/agent/skills/` 命名空间，绝不复用或重解释 Career Skill 表。详见 `docs/AGENT_ARCHITECTURE.md`。
 
@@ -112,17 +112,17 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
 
-## 4. 当前 DB schema 版本（v26）
+## 4. 当前 DB schema 版本（v27）
 
-- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 26`（`app/database/schema.py`）。
-- `_MIGRATIONS`: v2..v26 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
-- 空库真实路径：`create_schema()`（基础表） + v2..v26 逐级执行。
+- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 27`（`app/database/schema.py`）。
+- `_MIGRATIONS`: v2..v27 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
+- 空库真实路径：`create_schema()`（基础表） + v2..v27 逐级执行。
 - **测试快路径**：`initialize_fresh_database(conn)` → 运行时从真实迁移反推当前完整
-  DDL + 种子，一次性建好并写 `user_version=26`，**不重放**历史迁移。
+  DDL + 种子，一次性建好并写 `user_version=27`，**不重放**历史迁移。
   与真实路径在空库上的结果逐字一致（含 `learning_routes` 种子）。
 - 关键历史节点：v12 canonical routes seed / v13 KP route 唯一 / v15 单 active plan /
   v16 legacy theory backfill / v18 capability / v19 practice evidence / v20 requirements /
-  v21 `agent_sessions` + `agent_messages` / v22 `agent_session_memory`（derived memory）/ v23 `agent_turn_traces`, `agent_trace_events`, `agent_turn_evaluations`（operational telemetry）/ v24 `agent_approval_requests`, `agent_approval_events`（authorization history）/ v25 `task_workspaces`（Task-scoped managed/local Workspace binding identity）/ v26 Session management metadata（`display_title`, `pinned_at`, `archived_at`）。
+  v21 `agent_sessions` + `agent_messages` / v22 `agent_session_memory`（derived memory）/ v23 `agent_turn_traces`, `agent_trace_events`, `agent_turn_evaluations`（operational telemetry）/ v24 `agent_approval_requests`, `agent_approval_events`（authorization history）/ v25 `task_workspaces`（Task-scoped managed/local Workspace binding identity）/ v26 Session management metadata（`display_title`, `pinned_at`, `archived_at`）/ v27 mutable Personal Instructions + Personal Memory persistence（详见 `docs/PERSONALIZATION.md`；无 UI / Agent injection / 自动提取）。
 - Memory / Trace / Evaluation 表进入 verifier `GROWTH_TABLES` 与 inventory，不进入 immutable `HISTORY_TABLES` / fingerprint；当前 `FINGERPRINT_VERSION = 7`：v5 引入 Agent Session/Message immutable history，v6 加入 Approval request identity / immutable Events，v7 加入 Task Workspace bindings（含 local path / creation identity）。当前 `EVALUATOR_VERSION = 2`。
 
 ## 5. 依赖边界（不要越界）

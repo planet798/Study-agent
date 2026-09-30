@@ -30,15 +30,15 @@ def migrated(tmp_path):
         original_messages = repo.list_messages(session["id"])
         assert "display_title" not in session
         steps = []
-        assert migrate_stepwise(conn, on_step=steps.append) == SCHEMA_VERSION == 26
-        assert steps == [26]
+        assert migrate_stepwise(conn, on_step=steps.append) == SCHEMA_VERSION == 27
+        assert steps == [26, 27]
         row = repo.get_session(session["id"])
         assert {key: row[key] for key in session} == session
         assert row["display_title"] == ""
         assert row["pinned_at"] is None and row["archived_at"] is None
         assert repo.list_messages(session["id"]) == original_messages
         assert rm.verify(conn, before)["ok"]
-        assert migrate_stepwise(conn) == 26
+        assert migrate_stepwise(conn) == 27
         yield conn, AgentSessionService(repo, None), session, other, before
     finally:
         conn.close()

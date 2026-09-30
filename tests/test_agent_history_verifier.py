@@ -119,7 +119,7 @@ def test_v20_before_inventory_uses_none_then_v24_migration_verifies(tmp_path):
 
         migrate_stepwise(conn)
         after = rm.inventory(conn)
-        assert after["schema_version"] == 26
+        assert after["schema_version"] == 27
         assert after["counts"]["agent_sessions"] >= 0
         assert after["counts"]["agent_messages"] >= 0
         assert after["counts"]["agent_session_memory"] == 0

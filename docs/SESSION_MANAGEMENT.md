@@ -1,6 +1,6 @@
 # Session Management-1B / 1C
 
-Versions: schema **26**, fingerprint **7**, evaluator **2**.
+Current versions: schema **27**, fingerprint **7**, evaluator **2**.
 
 The real v25→v26 migration adds `display_title TEXT NOT NULL DEFAULT ''`,
 `pinned_at TEXT`, and `archived_at TEXT` to `agent_sessions`. Existing rows
