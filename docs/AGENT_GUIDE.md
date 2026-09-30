@@ -22,9 +22,11 @@ full 失败                 → 只重跑失败测试，修复
 ```bash
 .venv/bin/pytest tests/test_<module>.py -q            # targeted
 .venv/bin/pytest tests/test_a.py tests/test_b.py -q   # related regressions
-.venv/bin/pytest -m "not slow" -q                     # 快速迭代（跳过迁移/集成）
+.venv/bin/pytest -m "not slow" -q                     # broad 开发回归（只排除显式 expensive cases）
 .venv/bin/pytest -m migration -q                      # 只跑迁移
-.venv/bin/pytest -m ui -q                             # 只跑 GUI/offscreen
+.venv/bin/pytest -m ui -q                             # Qt widget/qapp/event loop
+.venv/bin/pytest -m threaded -q                       # 线程生命周期/资源
+.venv/bin/pytest -m integration -q                    # 多生产子系统组合
 .venv/bin/pytest -q                                   # 任务收尾 full（默认仍跑全量）
 ```
 
@@ -91,17 +93,17 @@ full 失败                 → 只重跑失败测试，修复
 - Daily Review / Review Scheduler / Daily Retention 已从生产产品中移除；历史表和字段只用于迁移与历史保全。未来 recall 是 Agent contextual learning 方向，不是已实现功能。
 - 测试：`tests/test_assessment_*.py`、`test_review_retirement.py`、`test_skill_service.py`
 
-### Agent core (Agent-1 through Agent-11 + Workspace-1)
+### Agent core (Agent-1 through Agent-11 + Workspace-1 + Learning Shell-1)
 - production：`app/agent/context.py`、`app/agent/runtime.py`、`app/agent/memory/{policy,compactor}.py`、`app/agent/trace/{models,collector,service}.py`、`app/agent/eval/evaluator.py`、`app/agent/approval/{service,tools,provider}.py`、`app/database/agent_approval_repository.py`、`app/database/agent_{memory,trace,evaluation}_repository.py`、`app/agent/skills/{base,registry,selector,learning}.py`、`app/agent/tools/{base,registry,learning}.py`、`app/agent/mcp/{config,client,tools,provider}.py`、`app/agent/sandbox/{config,workspace,backend,tools,provider}.py`、`app/ui/agent_workspace_page.py`、`app/ui/agent_message_widget.py`、`app/ui/agent_task_context_card.py`、`app/ui/agent_composer.py`、`app/ui/components/flow_layout.py`、`app/ui/ai_worker.py::AgentTurnWorker`、`app/main.py::build_agent_runtime`。
 - tests：Agent-11 Workspace status/error/diagnostic/worker lifecycle; Agent-10 Assessment/Note Approval repository/service/tools/runtime/UI/integration/privacy; Agent-9 completion approval/worker/registry; Agent-8 Trace repository/collector/runtime/privacy 与 deterministic Evaluation; Agent-7 Memory repository/compaction; Agent-4 skills/runtime、Agent-5 MCP config/client/discovery/tools/runtime、Agent-6 Sandbox config/workspace/permissions/tools/backend/runtime，以及 Agent-3 Workspace 与 Agent-1/2 regressions。
 - 不变式：每 user turn Memory window / Task Context / Skill 各准备一次；Memory before MCP/Sandbox；tool loop 固定边界、每轮 reload 边界之后的新消息；Skill 确定性选择一次；MCP scope 只在 worker turn 存活。
 - Memory 是 Session-scoped derived prefix summary；按 `role=user` 分组，只摘要连续完整旧 turns，当前 turn 永不 summary，默认保留最近 4 个完整历史 turns。原始 `agent_messages` append-only 且 UI 仍显示全部；summary failure fail-soft，当前 turn 超硬上限则受控失败且已保存 user 保留。
 - 三个 Approval Tools（完成任务、开始/恢复正式验收、保存有界学习笔记）仅写 pending 元数据；Workspace 用户明确点击批准后才由 worker fresh connection 执行现有 TaskService/AssessmentService/LearningOutcomeService。审批表不复制笔记正文；批准时重新验证 immutable Tool Call。Approval Requests/Events 属于 v6 指纹保护的授权历史；不解析聊天批准、不记忆权限。详见 `docs/AGENT_APPROVALS.md`。
 - Trace/Evaluation 是 content-free derived operational telemetry：Trace 只存受控 metadata、时长、usage/counts/flags，绝不复制 prompt/message/tool/MCP/Sandbox 正文；Evaluation 只由 Trace + Events 确定性运行规则，无 LLM judge、质量分、学习推断或业务写入。Trace/Eval persistence failure fail-open。
-- Agent Session 是 stack 内部页，不是 Sidebar/PageSpec；Worker 仅接收 db_path/runtime_factory/session_id/user_text，在线程内构造 fresh connection/runtime；离开页面不关闭 Session。Workspace-1 新增 Task-scoped 显式文件 Workspace 绑定（none/managed/local），与内部 Agent Session 页面不是同一个概念：`app/services/workspace_service.py` → `app/database/task_workspace_repository.py`；UI card 经 MainWindow/service 操作绑定，Runtime 每 turn 取得冻结的 `AgentWorkspaceSpec`，SandboxProvider 不查数据库。无绑定无文件 Tools；managed bounded read/write/mkdir（无 sandbox.json 也可用）；local 仅 list/read 且敏感路径拒绝；绝对 host path 仅 UI 可见，不进模型/Trace。详见 `docs/WORKSPACES.md`。Agent-11 状态只读本地配置（不连 MCP、不探测 Docker），异常映射安全有限文案；同一 Session 中 turn 与 approval execution 串行，退出时等待 worker。`agent-diagnostic` 在 GUI 启动前只读运行。详见 `docs/AGENT_PRODUCTION.md`。Session task-bound；Native Tools 仍只读/Service-only；MCP 故障不禁用 Native Tools；legacy `AIClient.chat()` 与 Agent-1 no-tool 路径保持。
+- Agent Workspace 是 stack 内部页，不是静态 PageKey/PageSpec；Learning Shell-1 在 Sidebar 显示动态学习会话（最近 10 个 active Session + 必要时当前 Session），按 session_id 直接打开，origin Task 的状态不决定 Session 可访问性，session.task_id 保持 immutable。Worker 仅接收 db_path/runtime_factory/session_id/user_text，在线程内构造 fresh connection/runtime；离开页面不关闭 Session。Workspace-1 新增 Task-scoped 显式文件 Workspace 绑定（none/managed/local），与内部 Agent Session 页面不是同一个概念：`app/services/workspace_service.py` → `app/database/task_workspace_repository.py`；UI compact header selector/menu 经 MainWindow/service 操作绑定，Runtime 每 turn 取得冻结的 `AgentWorkspaceSpec`，SandboxProvider 不查数据库。无绑定无文件 Tools；managed bounded read/write/mkdir（无 sandbox.json 也可用）；local 仅 list/read 且敏感路径拒绝；绝对 host path 仅 UI 可见，不进模型/Trace。详见 `docs/WORKSPACES.md`。Agent-11 状态只读本地配置（不连 MCP、不探测 Docker），异常映射安全有限文案；同一 Session 中 turn 与 approval execution 串行，退出时等待 worker。`agent-diagnostic` 在 GUI 启动前只读运行。详见 `docs/AGENT_PRODUCTION.md`。Session task-bound；Native Tools 仍只读/Service-only；MCP 故障不禁用 Native Tools；legacy `AIClient.chat()` 与 Agent-1 no-tool 路径保持。
 - Agent Skills 是 `app/agent/skills/` 下的静态学习策略；严禁与 Career `SkillService` / `SkillRepository` / `skills` 表混用。Agent-5 MCP 是本地 exact allowlist + server `readOnlyHint=True` 双 gate，只读、不访问 SQLite。Agent-6 仅通过 `sandbox` mutation scope 改写 task workspace；默认 Registry 仍只读，无 host-shell fallback、无 Application/DB mutation scope。Memory 不读取 Task/Practice repositories、MCP client 或 Sandbox filesystem；Eval 不读 conversation/AI，Trace 不授予 Tool 权限。详见 `docs/AGENT_MEMORY.md`、`docs/AGENT_TRACE_EVAL.md`、`docs/MCP.md` 与 `docs/SANDBOX.md`。
 - UX-1 消息呈现：User 消息与 Approval Card 恒为 PlainText；Assistant 消息在 `app/ui/agent_message_widget.py` 用 Qt 原生 `QTextDocument`（`MarkdownNoHTML | MarkdownDialectGitHub`）安全渲染 Markdown，禁用 raw HTML、外部链接打开与所有 resource fetch（http/file/qrc）。DB 仍存原始 Markdown，渲染不改 persistence / Memory / Trace / Approval。默认渐进式交互教学由 system prompt 与 learning Skills 指导，不是硬 token 上限。详见 `docs/AGENT_PRODUCTION.md`。
-- UX-2 Agent Session 信息层级：Task title 只在全局 `SAPageHeader` subtitle 出现一次；页面内为 toolbar（返回 + capability chips）、Task Context card（route/activity/duration tags + 可选描述）、Workspace card、conversation、待确认操作 section、composer（`Ctrl+Enter` 发送 / `Enter` 换行；近上限才显示计数）。capability chips 只表达本地 configuration 快照，不得声称“在线”；same-session reload 保留未发送 draft，切换 Session 才清空。approval 文案由 application 静态映射产生，PlainText，模型不可控制。UX-3：新 Assistant 回复定位到消息首行；忙碌期间用户阅读历史则保留位置并显示“新回复 ↓”；代码/表格安全换行，正文按 viewport 缩放，消息仍只有外层 scrollbar。详见 `docs/AGENT_PRODUCTION.md`。
+- 当前 Learning Shell-1 信息层级：全局 `SAPageHeader` 显示 Session title + route secondary text；页面内为紧凑 route/activity/duration metadata、可展开任务信息、Workspace selector/menu、capability chips、conversation、待确认操作 section、bottom composer（`Ctrl+Enter` 发送 / `Enter` 换行；近上限才显示计数）。返回 Today 使用 Sidebar，不再有返回按钮；绝对路径仅 tooltip/menu 可查看和复制。capability chips 只表达本地 configuration 快照，不得声称“在线”；same-session reload 保留未发送 draft，切换 Session 才清空。approval 文案由 application 静态映射产生，PlainText，模型不可控制。UX-3：新 Assistant 回复定位到消息首行；忙碌期间用户阅读历史则保留位置并显示“新回复 ↓”；代码/表格安全换行，正文按 viewport 缩放，消息仍只有外层 scrollbar。详见 `docs/AGENT_PRODUCTION.md`。
 
 ### Migration / Schema（**高危，必须真实路径**）
 - production：`app/database/schema.py`、`app/database/connection.py`、
@@ -146,7 +148,7 @@ full 失败                 → 只重跑失败测试，修复
   **不重放 v2..v25**（约 280ms → 个位数 ms）。与真实迁移在空库上的 schema 逐字一致。
 - `app/database/connection.py::get_connection()`：**production 真实路径**，仍走
   `migrate()`。改动它要非常谨慎。
-- markers：`slow` / `migration` / `ui` / `integration`，见 `pytest.ini`。
+- markers：`slow` / `migration` / `ui` / `integration` / `threaded`，见 `pytest.ini`。分类显式写在 module/class/function；UI fixture hook 识别 qtbot/qapp。slow 表示真实成本，不等同于全部 migration/integration/Qt。
   默认 full suite 语义不变。
 
 ## 4. 快速自检清单（提交改动前）

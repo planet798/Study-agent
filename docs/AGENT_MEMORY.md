@@ -32,7 +32,7 @@ CREATE TABLE agent_session_memory (
 
 `through_message_id` is the last original message represented by the summary. Foreign keys prove that both rows exist; `AgentMemoryRepository` additionally verifies that the Session exists and the boundary message belongs to that same Session. Boundary and source count cannot move backwards. `created_at` is stable across updates; `summary`, boundary, count, format version and `updated_at` may advance.
 
-Memory is rebuildable derived state, not conversation history: `agent_session_memory` is in release-verifier inventory / `GROWTH_TABLES`, but not `HISTORY_TABLES` or `FINGERPRINT_COLUMNS`. `FINGERPRINT_VERSION` stays 5. `agent_sessions` and every `agent_messages` field remain protected by the v5 immutable-history fingerprint.
+Memory is rebuildable derived state, not conversation history: `agent_session_memory` is in release-verifier inventory / `GROWTH_TABLES`, but not `HISTORY_TABLES` or `FINGERPRINT_COLUMNS`. At Agent-7 introduction, the global fingerprint stayed at v5: Memory added no immutable fingerprint fields. Later Approval (v6) and Workspace bindings (v7) raised the current global fingerprint to v7 independently of Memory. Immutable `agent_sessions` identity and every `agent_messages` field retain the protection introduced in v5.
 
 ## Policy and cost estimate
 
@@ -100,6 +100,6 @@ If the active user turn itself exceeds the hard history budget, `AgentContextToo
 
 Production wiring creates `AgentMemoryRepository` from the worker-owned fresh SQLite connection and injects `AgentMemoryCompactor` into the worker Runtime. Compaction precedes MCP/Sandbox startup, performs no workspace scan, and does not create a Task workspace or probe Docker. The Workspace UI continues to call the full `AgentSessionService.messages()` API and displays the complete original conversation, never the compacted model window.
 
-## Versions and next stage
+## Historical introduction and current versions
 
-Session Memory was introduced in schema v22; current `SCHEMA_VERSION = 24` and `FINGERPRINT_VERSION = 6`. Trace/Evaluation is a separate derived v23 layer documented in `docs/AGENT_TRACE_EVAL.md`; it does not change Agent-7 memory semantics.
+Session Memory was introduced in schema v22; current `SCHEMA_VERSION = 25`, `FINGERPRINT_VERSION = 7`, and `EVALUATOR_VERSION = 2`. Trace/Evaluation is a separate derived v23 layer documented in `docs/AGENT_TRACE_EVAL.md`; Approval persistence was introduced in v24 and Workspace bindings in v25. None changes Agent-7 memory semantics or puts Memory into immutable history fingerprints.

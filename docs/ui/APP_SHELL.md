@@ -1,7 +1,7 @@
 # Study-Agent App Shell
 
-> 当前主导航：Today / Learning Routes / Practice；Settings 固定在 Sidebar footer。
-> Monthly 已从产品中移除。
+> 当前静态主导航：Today / Learning Routes / Practice；Settings 固定在 Sidebar footer。
+> Learning Shell-1 增加动态「学习会话」，打开内部 Agent Workspace；Monthly 已从产品中移除。
 
 ## Architecture
 
@@ -12,6 +12,7 @@ MainWindow
     │   ├── Today
     │   ├── Learning Routes
     │   ├── Practice
+    │   ├── dynamic: 学习会话 (Session entries)
     │   └── footer: Settings
     └── Workspace
         ├── SAPageHeader
@@ -26,7 +27,8 @@ MainWindow
 - Expanded 228px / collapsed 60px。
 - 选中态使用背景、accent indicator、Filled icon 与字重共同表达。
 - Settings 通过 stretch + divider 固定在 footer。
-- 点击事件由 `sidebar.page_requested` 转发至 `MainWindow._on_nav_requested`。
+- 静态页面点击由 `sidebar.page_requested` 转发至 `MainWindow._on_nav_requested`。
+- 动态会话点击由 `sidebar.session_requested` 转发至 `MainWindow._on_open_agent_session(session_id)`；active Session 独立于 origin Task 状态，最近 10 个按 updated_at 降序（必要时保留当前会话）。内部 Agent Workspace 不注册静态 PageKey/PageSpec；离开不关闭 Session，忙碌时不切换其它 Session。
 
 ## Page header and navigation
 

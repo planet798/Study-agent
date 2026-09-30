@@ -2,9 +2,11 @@
 
 Windows 桌面学习管理工具（Python + PySide6 + SQLite）
 
-## 当前产品基线（S6）
+## 当前产品基线（S6 · Agent-11 · Workspace-1 · Learning Shell-1）
 
-主要页面：Today、Learning Routes、Practice、Settings。核心链路：Curriculum → Planning → Today → Assessment / Practice Evidence → Mastery / Capability。未来 Agent Study Session 尚未实现；canonical 边界见 [`docs/PRODUCT_BASELINE.md`](docs/PRODUCT_BASELINE.md)。
+静态主导航：Today、Learning Routes、Practice、Settings。核心链路：Curriculum → Planning → Today → Agent Study Session → Assessment / Practice Evidence → Mastery / Capability。Agent-1 至 Agent-11、Workspace-1 和 Learning Shell-1 已实现；canonical 边界见 [`docs/PRODUCT_BASELINE.md`](docs/PRODUCT_BASELINE.md)。
+
+Task-bound Agent Sessions 持久保存对话；active Session 可从 Sidebar 动态「学习会话」列表按 `session_id` 重新打开，不受 origin Task 的 active/done/not_done/cancelled 状态影响。最近 10 个会话按更新时间排序，当前会话可额外保留入口；离开不关闭 Session，origin `task_id` 不改写。它打开的是内部 Agent Workspace，不是静态 `PageKey` 页面或通用聊天机器人。
 
 - 今日学习任务与简要待处理/预计时长
 - 任务完成、未完成原因、延期与跨日补确认
@@ -94,12 +96,12 @@ Monthly Dashboard、Monthly AI Summary 与 summary cache production path 已移�
 - AI 动态规划：根据最近 7 天完成情况/延期/学习时间调整每日任务
   - 主窗口新增“AI 今日规划”区域（状态 + 重新规划今天按钮）
   - AI 只调建议，本地校验后创建；失败自动回退规则型生成
-  - 重规划只动 active+generated 任务，永不动 done/not_done/延期/手动任务
+  - 重规划只准备目标日、scope 内的 active/generated/new 任务；多路线仅涉及当前可规划路线，done/not_done/manual/cancelled 不动。已有 Session、Workspace 或 Assessment 引用的任务保持 active 且不删除，仍占用规划承诺。
   - 每次决策保存到 planner_decisions 表供审计
 
 ## AI 设置中心（推荐）
 
-在顶部导航打开 **AI 设置**，无需修改任何源码或环境变量：
+在 Sidebar 打开 **设置**，无需修改任何源码或环境变量：
 
 - **模型 / API**：添加 / 删除 / 重命名 API 配置，修改 Base URL / Model / API Key，
   切换当前配置，测试连接。切换后**下一次 AI 请求立即生效**（无需重启）。
@@ -240,7 +242,8 @@ study-agent/
 │   ├── ui/                     # GUI 层（开发中）
 │   ├── database/               # 数据层
 │   ├── services/               # 业务逻辑层
-│   ├── ai/                     # AI 接口（占位，未接入 API）
+│   ├── ai/                     # AI 客户端 / Profiles / Prompts / Planner
+│   ├── agent/                  # 持久学习会话 / Tools / Memory / Approval / Trace
 │   └── utils/                  # 工具函数
 ├── data/                       # SQLite 数据库文件（logs/ 为启动日志）
 ├── scripts/                    # Windows 启动/快捷方式/诊断脚本
@@ -426,7 +429,7 @@ python -m app.main db-release verify --db "...\\study_agent.db" --before before.
   `component_consistency_problems`（复用 `TopicLearningProfileService.
   validate_consistency`：dangling component / topic mismatch / activity kind
   mismatch）；
-- fingerprint 带 `fingerprint_version`（当前 v3）：历史表采用**子集语义**（
+- fingerprint 带 `fingerprint_version`（当前 v7；子集语义于 v3 引入）：v5 加入 Agent Session/Message 历史保护，v6 加入 Approval 身份/事件保护，v7 加入 Task Workspace 绑定（含 local path / creation identity）保护；Memory 与 Trace/Evaluation 仍是 derived/growth-only telemetry。历史表采用**子集语义**（
   `before IDs ⊆ after IDs`）——迁移前已有行必须保留且 immutable 字段不变；
   迁移后**允许正常新增业务行**（`history_preserved` / `history_new_rows`），
   不再因正式库增长而误报；旧 v1/v2 snapshot 无 per-row hash 时，仅在行数相等时

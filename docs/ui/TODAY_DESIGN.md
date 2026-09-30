@@ -62,10 +62,9 @@ cancelled 永不进入任何指标。数据不可靠时宁可不显示，也不�
 `SAEmptyState`：“今天还没有学习任务 / 可以添加任务，或等待学习计划生成” +
 `添加学习任务` action。Planner 不可用时不承诺一定会生成计划。
 
-## Scroll restore（不变）
+## Scroll restore（历史 UI-3 与当前行为）
 
-`capture_today_view_state` / `restore_today_view_state` 保留原行为，
-重试时机仍为 `0 / 16 / 60 / 160 / 400 / 800 ms`。UI-3 未修改。
+UI-3 当时保留了 `0 / 16 / 60 / 160 / 400 / 800 ms` timer 重试。Learning Shell-1.1 已替换为 Today 本地 epoch、单个 rangeChanged handler 与一次 guarded zero-delay callback；新刷新、用户滚动和退出会取消旧恢复，当前位置按新 maximum clamp。
 
 ## S1 — Daily Review retirement
 
@@ -79,7 +78,7 @@ Review-like recall will be handled by future Agent contextual learning, not by s
 
 ## Agent-3 — Task-driven Agent Workspace
 
-Today 的 active task 卡片可以「开始学习 / 继续学习」，进入 task-bound internal Agent Workspace；它不是 Sidebar page。返回 Today 不关闭 Session。Workspace 每个 user turn 构建一次小型只读 Task Context，tool loop 继续按需读取；模型调用在 worker thread 使用独立 DB connection。普通会话 UI 只显示 user 与最终 assistant plain text，不展示 tool protocol。
+Today 的 active task 卡片可以「开始学习 / 继续学习」，进入 task-bound internal Agent Workspace；它不是静态 PageKey 页面。Learning Shell-1 的 Sidebar 动态「学习会话」按 session_id 重新打开已有 active Session，无论 origin Task 当前是否 active/done/not_done/cancelled。返回 Today 不关闭 Session，origin task_id 保持 immutable。Workspace 每个 user turn 构建一次小型只读 Task Context，tool loop 继续按需读取；模型调用在 worker thread 使用独立 DB connection。普通会话 UI 只显示 user PlainText 与最终 assistant safe Markdown，不展示 tool protocol。
 
 ## S5 — Manual Learning
 

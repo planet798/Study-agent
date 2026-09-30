@@ -94,14 +94,14 @@ Agent-2 tools do not mutate Task, Assessment, Mastery, Capability, Evidence, Pra
 ```text
 Today active Task → [开始学习]/[继续学习]
 → AgentSessionService.start_or_resume(task_id)
-→ internal Agent Workspace (Sidebar remains Today)
+→ internal Agent Workspace (dynamic Sidebar Session selection)
 → AgentTaskContextBuilder snapshot + persistent AgentRuntime
 → AgentTurnWorker with fresh worker-owned SQLite connection
 ```
 
 - `AgentTaskContextBuilder` reuses the six Agent-2 Registry tools to create one compact, read-only snapshot per user turn. It writes no tool-call/result history; actual model-requested tools remain persisted by the Runtime.
 - Runtime injects the JSON snapshot inside explicit delimiters and instructs the model to treat its text as application data, not system instructions. Free-text fields are truncated at 2000 characters.
-- Workspace is an internal stack page appended after formal pages, not a `PageKey`, `PageSpec`, or Sidebar item. Returning to Today does not close the Session.
+- Workspace is an internal stack page appended after formal pages, not a static `PageKey` or `PageSpec`. Learning Shell-1 adds dynamic Sidebar Session items; clicking one opens by `session_id` using the Session's immutable origin `task_id`, regardless of Task status. Returning to Today does not close the Session.
 - `AgentTurnWorker` receives only database path, runtime factory, session id, and user text; factory builds all SQLite-backed dependencies from a fresh connection inside `run()`. Worker outcome reloads persisted history; failure preserves the committed user message. Stale completions never render into another Session.
 
 ## Agent-4 — Static learning behavior strategies
@@ -199,7 +199,7 @@ accepted user message
 - Each Agent and Memory-summarizer call is observed once; usage aliases are normalized without treating booleans as integers. Missing/invalid usage makes `usage_complete=false` while known token counts still accumulate. Tool events classify registered names as native/MCP/Sandbox and store only success/error code, never message bodies.
 - Trace writes and all events are one repository transaction. Completed traces are inserted once—there is no `running` row. Persistence and Evaluation are fail-open and cannot change the Agent result or mask the original failure.
 - `AgentTurnEvaluator` consumes only Trace/Event metadata, imports no model/database/conversation services, and emits stable checks plus pass/warn/fail. It performs no LLM judge, numeric answer/teaching score, learning inference, retry, prompt update, permission change, or Task/Mastery/Capability/Practice write.
-- The worker-owned connection is wired by `app/main.py::build_agent_runtime`; MainWindow and Workspace do not access or display Trace. Sidebar/navigation remains unchanged.
+- The worker-owned connection is wired by `app/main.py::build_agent_runtime`; MainWindow and Workspace do not access or display Trace. Trace adds no navigation page; Learning Shell-1's dynamic Session entries are separate.
 - Implementation details and privacy invariants: `docs/AGENT_TRACE_EVAL.md`.
 
 ## Agent-9 — Explicit per-request approval
@@ -214,7 +214,7 @@ Agent Runtime
 User approval click → Approval Worker → canonical TaskService → application mutation
 ```
 
-Native/MCP remain read-only; Sandbox mutation is task-workspace scoped. Only the local `request_complete_current_task` approval Tool (`mutation_scope="approval"`) may create pending authorization metadata. A persisted assistant tool-call ID binds each request, and its pending Tool result never implies the Task has been completed. Workspace button clicks alone reject or dispatch canonical `TaskService.complete_task()` in a fresh-connection Approval Worker. No chat-text consent, auto-approval, remembered permissions, second Tool result, automatic model resume, or Session close. v24 Approval Requests and append-only Events are verifier-protected authorization history (fingerprint v6); Trace/Eval remain content-free derived telemetry (evaluator v2 adds approval-tool counts). See `docs/AGENT_APPROVALS.md`.
+At Agent-9 introduction, Native/MCP remained read-only and Sandbox mutation task-workspace scoped; the local `request_complete_current_task` approval Tool (`mutation_scope="approval"`) introduced pending authorization metadata. Agent-10 subsequently added two more fixed requests, described below. A persisted assistant tool-call ID binds each request, and its pending Tool result never implies the Task has been completed. Workspace button clicks alone reject or dispatch canonical `TaskService.complete_task()` in a fresh-connection Approval Worker. No chat-text consent, auto-approval, remembered permissions, second Tool result, automatic model resume, or Session close. v24 Approval Requests and append-only Events are verifier-protected authorization history (fingerprint v6); Trace/Eval remain content-free derived telemetry (evaluator v2 adds approval-tool counts). See `docs/AGENT_APPROVALS.md`.
 
 ## Agent-10 — Approved Assessment & Learning Note actions
 
@@ -222,13 +222,18 @@ The Approval Provider now registers three fixed request Tools: Task completion, 
 
 ## Agent-11 — Workspace production hardening
 
-`AgentCapabilityStatus` reads local AI/MCP/Sandbox configuration without opening external connections or executing Docker. Workspace shows a lightweight status row and static sanitized warnings, Settings shortcut, Ctrl+Enter, input-size guard and safe scroll-to-bottom. The finite UI error mapper does not echo exceptions, and distinguishes confirmed persisted user messages from pre-persistence failures. Turn and approval execution are serialized within the Workspace; re-entry restores in-flight busy state, while Session A results never render into Session B. Workers are waited on and released during shutdown. `agent-diagnostic` opens an existing DB read-only, reports local capability counts and safe inventory without network/model/MCP/Docker calls. See `docs/AGENT_PRODUCTION.md`.
+`AgentCapabilityStatus` reads local AI/MCP/Sandbox configuration without opening external connections or executing Docker. Workspace shows a lightweight status row and static sanitized warnings, Settings shortcut, Ctrl+Enter and input-size guard. Current scroll behavior opens history at the latest message, targets a new Assistant reply's first line, and respects history reading. The finite UI error mapper does not echo exceptions, and distinguishes confirmed persisted user messages from pre-persistence failures. Turn and approval execution are serialized within the Workspace; re-entry restores in-flight busy state, while Session A results never render into Session B. Workers are waited on and released during shutdown. `agent-diagnostic` opens an existing DB read-only, reports local capability counts and safe inventory without network/model/MCP/Docker calls. See `docs/AGENT_PRODUCTION.md`.
+
+## Learning Shell-1 — Persistent Session navigation
+
+The Sidebar lists recent active Sessions by `updated_at DESC` (10 plus the current Session when needed); origin Task active/done/not_done/cancelled does not decide Session visibility. Opening by `session_id` restores the full conversation and Task-scoped Workspace/approvals without creating another Task or rewriting `session.task_id`. Leaving does not close a Session. Busy turns/approvals lock switching to a different Session. The main conversation has compact header metadata/Workspace selector and a bottom composer, not a temporary Today child flow or generic chatbot.
 
 ## Still not implemented
 
-- Assessment submission Tools, arbitrary note editing, local project writes, or other application mutations
+- Session Management-1: rename, pin, archive UI, search/folders
+- Assessment answer-submission Tools, arbitrary note editing, local project writes/execution, diff approval, natural-language approval, remembered permissions, MCP application writes, or other arbitrary application mutations
 
-## Future roadmap
+## Implemented stages
 
 | Stage | Scope |
 |---|---|
@@ -238,6 +243,7 @@ The Approval Provider now registers three fixed request Tools: Task completion, 
 | Agent-10 | Approved Assessment & Learning Note Actions — implemented |
 | Agent-11 | Agent UX polish + production hardening — implemented; Platform v1 freeze |
 | Workspace-1 | Explicit Task Workspace binding; managed write / local read-only — implemented |
+| Learning Shell-1 | Persistent Session navigation independent of Task status; compact conversation shell — implemented |
 
 ## Tests
 

@@ -18,7 +18,7 @@ It does not evaluate answer quality, teaching quality, or whether a user learned
 - `agent_trace_events`: ordered `(trace_id, seq)` events for `runtime`, `memory`, `model`, `tool`, `mcp`, and `sandbox`. `seq` starts at 1 and is contiguous. `details_json` is allowlisted and capped at 4096 characters.
 - `agent_turn_evaluations`: replaceable deterministic evaluation keyed by `(trace_id, evaluator_version)`.
 
-Trace and its complete event list are inserted in one transaction. There is no `running` trace row or incremental update. A process crash may leave no trace; the committed `agent_messages` remain authoritative. All three tables are derived operational telemetry: verifier inventory / `GROWTH_TABLES`, never immutable `HISTORY_TABLES` or `FINGERPRINT_COLUMNS`. `FINGERPRINT_VERSION` stays 5.
+Trace and its complete event list are inserted in one transaction. There is no `running` trace row or incremental update. A process crash may leave no trace; the committed `agent_messages` remain authoritative. All three tables are derived operational telemetry: verifier inventory / `GROWTH_TABLES`, never immutable `HISTORY_TABLES` or `FINGERPRINT_COLUMNS`. At Agent-8 introduction, Trace/Evaluation added no immutable fingerprint fields and the global fingerprint remained v5. Approval protection (v6) and Workspace binding protection (v7) later raised the current global fingerprint to v7; Trace/Evaluation still does not participate.
 
 ## Collection and privacy
 
@@ -63,8 +63,8 @@ Trace insertion and Evaluation are best-effort. If collector creation, trace per
 
 Overall status is `fail` for failed turns or a core invariant mismatch; `warn` when core invariants hold but a controlled Tool error occurred or usage is incomplete; otherwise `pass`. Missing provider usage is not an Agent failure. Metrics are bounded structural counts, durations, memory flags and tokens; there is no numeric score.
 
-There is no LLM-as-a-Judge, quality score, teaching score, mastery inference, automatic retry, prompt optimization, Skill/Registry mutation, or Trace-to-Mastery/Capability flow. The single approval-gated Task completion request is described in `docs/AGENT_APPROVALS.md`; other write actions require separate design.
+There is no LLM-as-a-Judge, quality score, teaching score, mastery inference, automatic retry, prompt optimization, Skill/Registry mutation, or Trace-to-Mastery/Capability flow. The three fixed approval-gated requests (Task completion, Assessment start/resume, bounded Learning Note save) are described in `docs/AGENT_APPROVALS.md`; they do not turn Trace/Evaluation into a business-write authority.
 
 ## Versions and UI
 
-Trace/Evaluation tables were introduced in v23. Current versions: `SCHEMA_VERSION = 24`, `FINGERPRINT_VERSION = 6`, `EVALUATOR_VERSION = 2`. Evaluation v2 adds `approval_tool_calls` for the local request-only approval Tool; v1 evaluation rows remain unchanged. Approval execution and user decisions are recorded in separate append-only authorization events, never by rewriting a completed Trace. Production constructs repositories/service from the `AgentTurnWorker`-owned connection. No Trace Viewer, token dashboard, Evaluation UI, or Sidebar page is added.
+Trace/Evaluation tables were introduced in v23. Current versions: `SCHEMA_VERSION = 25`, `FINGERPRINT_VERSION = 7`, `EVALUATOR_VERSION = 2`. Evaluation v2 adds `approval_tool_calls` for the local request-only approval Tools; v1 evaluation rows remain unchanged. Approval execution and user decisions are recorded in separate append-only authorization events, never by rewriting a completed Trace. Production constructs repositories/service from the `AgentTurnWorker`-owned connection. Trace/Evaluation adds no Trace Viewer, token dashboard, Evaluation UI, or static Sidebar page. Learning Shell-1's dynamic Session navigation is separate from telemetry.

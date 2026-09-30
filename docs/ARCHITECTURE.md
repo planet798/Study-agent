@@ -54,7 +54,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   + `ai/prompt_defaults`；active definitions 有限，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
 
-## Agent core (Agent-1 through Agent-9 implemented)
+## Agent core (Agent-1 through Agent-11, Workspace-1 and Learning Shell-1 implemented)
 
 Planner 决定学什么；Agent Runtime 围绕当前 Session 绑定的 Task 提供只读学习上下文与压缩后的对话连续性。
 
@@ -68,11 +68,11 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 
 - Agent-1 提供 task-bound Session、immutable multi-turn message persistence 与独立 `AgentModelClient`；Agent-1.1 verifier v5 保护 Agent 对话历史。
 - Agent-2 提供 `app/agent/tools/` 中的 Tool Registry 与六个只读学习工具。工具只从 `AgentToolContext` 获取当前 session/task identity，所有参数 schema 均拒绝额外字段；不允许任意选择 task / route / topic / KP ID。
-- Agent Runtime 通过 Service → Repository → SQLite 读取；Tool/Runtime 不直接访问 SQLite 或 Repository。工具只能读取，不能写 Task、Assessment、Mastery、Capability、Evidence 或 Practice。
+- Agent Runtime 通过 Service → Repository → SQLite 读取；Tool/Runtime 不直接访问 SQLite 或 Repository。六个 Native learning Tools 与 MCP 只读；正式业务 mutation 仅由三个本地申请 Tools 请求，再经用户明确 Approval 调用 canonical Services，不能由模型直接执行。
 - tool-call / tool-result 经 `AgentSessionService` 持久化；Runtime 从存储重建 `ModelMessage`，最多执行 4 个 tool rounds。无 Registry 时保持 Agent-1 no-tool 行为。
 - legacy `AIClient`（`app/ai/interface.py`）保持不变，继续服务 Planner / Assessment / JD / TaskReview / Route Builder；Agent 使用独立的 `AgentModelClient.complete(ModelRequest)`。
 - Agent-3：Today active Task → [开始学习]/[继续学习] → task-bound Session → internal Agent Workspace。`AgentTaskContextBuilder` 每 user turn 复用六个 read-only tools 构建一次 compact snapshot；`AgentTurnWorker` 在 worker thread 用 fresh SQLite connection 构建 Runtime 并执行，失败后从持久化 history reload。
-- Agent Workspace 只是最后追加的 internal stack page，不在 `PageKey` / `PAGE_SPECS` / Sidebar 中；离开 Workspace 不关闭 Session；普通 UI 只显示 user 与最终 assistant 文本。
+- Agent Workspace 仍是 internal stack page，不是静态 `PageKey` / `PAGE_SPECS` 页面。Learning Shell-1 在 Sidebar 增加动态「学习会话」：最近 10 个 active Session 按 `updated_at DESC` 排序，当前会话可额外保留入口；点击按 `session_id` 直接打开原 Workspace。Session 可访问性不取决于 origin Task 的 active/done/not_done/cancelled；离开不关闭 Session，`agent_sessions.task_id` 是不可改写的 origin 身份。忙碌期间禁止切换到另一 Session。普通 UI 只显示 user 与最终 assistant 文本，不展示 tool protocol。
 - Agent-4 提供静态 `AgentSkill` / `AgentSkillRegistry` / `AgentSkillSelector`：从同一 turn 的 `Task Context.task.activity_kind` 确定性选择教学策略，一轮选择一次、无模型分类调用、无 DB access、不授予 Tool 权限、不持久化 Skill key。
 - Agent Skill prompt 是可信静态 instruction，置于 Task Context JSON 数据之前；Career `SkillService` / `skills` 表仍属于职业/技术技能域，二者严格分离。
 - Agent-5 通过官方 `mcp>=2,<3` SDK 增加 per-user-turn stdio / Streamable HTTP MCP Tools。只有本地精确 `allowed_tools` 与 `readOnlyHint=True` 双重满足才暴露；MCP 是外部不可信数据，Native tools 始终保留且不允许 MCP mutation tools。
@@ -81,7 +81,11 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - MCP Context、Agent Skill、Worker thread 和 Native Registry 语义保持；MCP/Sandbox 配置缺失或服务不可用不会禁用 Native 工具。MCP 仍 read-only；Sandbox 文件不等于 Task/Mastery/Capability/Practice evidence。
 - Agent-7 添加 Session-scoped derived rolling Memory：`agent_messages` 仍 append-only；只摘要连续完整的历史 user turns，保留最近 4 个完整 turns 与当前 turn；summary 使用 `AgentModelClient`、`tools=()` 和严格字符上限。失败时使用上一份 summary + 安全完整-turn tail；Memory 不影响 Task Context / Skill / tools，不扫描 Sandbox。
 - Agent Runtime 每 user turn 在 Task Context、Skill、MCP、Sandbox 之前准备一次固定 ConversationWindow；每个工具回合从同一边界重新加载新增原始消息。Workspace/UI 仍读取完整 `agent_messages`。
-- Agent-9 只增加任务完成申请和显式用户批准，不提供模型直接 application mutation。未来 Assessment/Note actions 尚未实现。Schema v24 / fingerprint v6 / evaluator v2。详见 `docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/AGENT_TRACE_EVAL.md`。
+- Agent-8 提供 content-free Trace/events 与确定性 Evaluation；derived/growth-only telemetry 不进入 immutable history fingerprints。
+- Agent-9 提供 Task completion Approval；Agent-10 已加入 Assessment start/resume 与 bounded Learning Note save Approval。用户明确批准后才由 worker-owned SQLite connection 调用 canonical Services；Assessment startup 不提交答案/判分，Learning Note 是 SQLite application data，不是 Workspace 文件写入。
+- Agent-11 提供生产 Session UX、safe errors、忙碌状态串行化、resilient reload/shutdown 与离线 `agent-diagnostic`。
+- Workspace-1 提供 schema v25 的 Task-scoped managed/local binding。managed 支持 list/read/write/mkdir 及按 Sandbox 配置的可选 Docker execution；local 仅 list/read、敏感文件拒绝，无写入/执行。模型不接收 host absolute path。绑定入口是 conversation header 的 compact selector/menu，不是大型 body Card。
+- 当前版本：schema 25 / fingerprint 7 / evaluator 2。Agent-10 三个固定请求不等于通用 application writes；Session rename/pin/archive UI/search/folders、Agent 提交验收答案、任意笔记编辑、local writes/execution 与 diff approval 均未实现。详见 `docs/PRODUCT_BASELINE.md`、`docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/WORKSPACES.md`。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。Agent learning behavior 配置位于独立 `app/agent/skills/` 命名空间，绝不复用或重解释 Career Skill 表。详见 `docs/AGENT_ARCHITECTURE.md`。
 
@@ -101,24 +105,24 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
    必须走 `db-release backup/inventory/migrate/verify`。
 8. **release / legacy 迁移只走真实 `migrate_stepwise()` 路径**，不得使用
    `initialize_fresh_database()`（后者仅用于全新空库）。
-9. **Verifier 历史保留是子集语义**（fingerprint v6；Agent Session/Message 和 Approval immutable history 亦受保护）：
+9. **Verifier 历史保留是子集语义**（当前 fingerprint v7；v5 Agent Session/Message、v6 Approval、v7 Task Workspace binding history 均受保护）：
    before IDs 必须仍是 after 的子集且 immutable 字段不变；after 新增业务行合法。
    不能要求正式库迁移后冻结不增长。
 10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
 
-## 4. DB schema 版本（v24）
+## 4. 当前 DB schema 版本（v25）
 
-- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 24`（`app/database/schema.py`）。
-- `_MIGRATIONS`: v2..v24 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
-- 空库真实路径：`create_schema()`（基础表） + v2..v24 逐级执行。
+- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 25`（`app/database/schema.py`）。
+- `_MIGRATIONS`: v2..v25 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
+- 空库真实路径：`create_schema()`（基础表） + v2..v25 逐级执行。
 - **测试快路径**：`initialize_fresh_database(conn)` → 运行时从真实迁移反推当前完整
-  DDL + 种子，一次性建好并写 `user_version=24`，**不重放**历史迁移。
+  DDL + 种子，一次性建好并写 `user_version=25`，**不重放**历史迁移。
   与真实路径在空库上的结果逐字一致（含 `learning_routes` 种子）。
 - 关键历史节点：v12 canonical routes seed / v13 KP route 唯一 / v15 单 active plan /
   v16 legacy theory backfill / v18 capability / v19 practice evidence / v20 requirements /
-  v21 agent_sessions + agent_messages / v22 `agent_session_memory`（derived memory）/ v23 `agent_turn_traces`, `agent_trace_events`, `agent_turn_evaluations`（operational telemetry）/ v24 `agent_approval_requests`, `agent_approval_events`（authorization history）。
-- Memory / Trace / Evaluation 表进入 verifier `GROWTH_TABLES` 与 inventory，不进入 immutable `HISTORY_TABLES` / fingerprint；`FINGERPRINT_VERSION` 为 v6（Approval identity / Events 参与指纹），原始 Agent Session/Message history 仍受保护。
+  v21 `agent_sessions` + `agent_messages` / v22 `agent_session_memory`（derived memory）/ v23 `agent_turn_traces`, `agent_trace_events`, `agent_turn_evaluations`（operational telemetry）/ v24 `agent_approval_requests`, `agent_approval_events`（authorization history）/ v25 `task_workspaces`（Task-scoped managed/local Workspace binding identity）。
+- Memory / Trace / Evaluation 表进入 verifier `GROWTH_TABLES` 与 inventory，不进入 immutable `HISTORY_TABLES` / fingerprint；当前 `FINGERPRINT_VERSION = 7`：v5 引入 Agent Session/Message immutable history，v6 加入 Approval request identity / immutable Events，v7 加入 Task Workspace bindings（含 local path / creation identity）。当前 `EVALUATOR_VERSION = 2`。
 
 ## 5. 依赖边界（不要越界）
 
@@ -138,5 +142,5 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
   `synchronous=OFF`），只建当前 schema，不重放迁移。
 - migration / WAL / release / verifier 测试必须用 `get_connection()` 或
   `migrate_stepwise()` **真实路径**。
-- pytest markers：`slow` / `migration` / `ui` / `integration`（见 `pytest.ini`）。
+- pytest markers：`slow` / `migration` / `ui` / `integration` / `threaded`（见 `pytest.ini`）；specialized marks 显式声明，UI fixture 分类识别 `qtbot` 与 `qapp`，`slow` 不等于全部 UI/integration/migration。
   默认 `pytest -q` 仍跑完整 suite。
