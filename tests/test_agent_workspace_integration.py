@@ -13,6 +13,7 @@ pytestmark = pytest.mark.integration
 from app.agent.session import AgentSessionService
 from app.database.agent_repository import AgentRepository
 from app.ui.agent_message_widget import AgentMessageWidget
+from app.ui.app_shell import PageKey
 
 
 def _message_widgets(page):
@@ -326,8 +327,11 @@ def test_reenter_inflight_session_keeps_busy_until_worker_finishes(
     page.send_button.click()
     assert entered.wait(3)
     sid = page.current_session_id
-    window._on_agent_back()
-    window._on_start_study(task.id)
+    window.sidebar.item(PageKey.TODAY).click()
+    assert window.stack.currentWidget() is window.today_page
+    assert sessions.get(sid)["status"] == "active"
+    window.sidebar.session_item(sid).click()
+    assert window.stack.currentWidget() is page
     assert page.current_session_id == sid
     assert not page.send_button.isEnabled() and not page.input_edit.isEnabled()
     assert not page.interaction_status_label.isHidden()

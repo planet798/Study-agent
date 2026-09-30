@@ -5,6 +5,7 @@ import pytest
 
 from PySide6.QtWidgets import QFrame, QLabel
 from app.ui.agent_workspace_page import AgentWorkspacePage
+from app.ui.app_shell import PageKey
 from app.database.repository import TaskRepository
 
 
@@ -104,8 +105,11 @@ def test_reenter_during_approval_disables_chat_and_other_decisions(
     window.agent_approval_service_factory = factory
     page.findChild(type(page.send_button), "AgentApprovalApprove").click()
     assert entered.wait(3)
-    window._on_agent_back()
-    window._on_start_study(task.id)
+    window.sidebar.item(PageKey.TODAY).click()
+    assert window.stack.currentWidget() is window.today_page
+    assert sessions.get(sid)["status"] == "active"
+    window.sidebar.session_item(sid).click()
+    assert window.stack.currentWidget() is page
     assert page.current_session_id == sid
     assert not page.input_edit.isEnabled()
     assert not page.findChild(type(page.send_button), "AgentApprovalReject").isEnabled()
@@ -127,7 +131,9 @@ def test_stale_workspace_does_not_open_assessment_dialog(qtbot, conn, repo, task
     qtbot.addWidget(window)
     window._on_start_study(task.id)
     sid = window.agent_workspace_page.current_session_id
-    window._on_agent_back()
+    window.sidebar.item(PageKey.TODAY).click()
+    assert window.stack.currentWidget() is window.today_page
+    assert sessions.get(sid)["status"] == "active"
     opened = []
     window._open_assessment_dialog = opened.append
     window._on_agent_approval_finished(123, sid,

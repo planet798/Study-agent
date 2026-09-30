@@ -132,8 +132,8 @@ class TestNavigation:
         assert w.practice_page_index is not None
         # 视觉顺序：今日 → 学习路线 → 实践项目；设置沉底。
         texts = []
-        for i in range(w.nav_layout.count()):
-            item = w.nav_layout.itemAt(i).widget()
+        for i in range(w.sidebar.items_layout.count()):
+            item = w.sidebar.items_layout.itemAt(i).widget()
             if item is not None:
                 texts.append(item.text())
         assert texts == ["今日", "学习路线", "实践项目"]

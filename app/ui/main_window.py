@@ -233,7 +233,6 @@ class MainWindow(QMainWindow):
         root.addWidget(self.app_shell)
 
         # legacy compatibility aliases（旧测试依赖；不再有可见的顶部导航）
-        self.nav_layout = self.sidebar.items_layout
         self.nav_today_btn = self.sidebar.item(PageKey.TODAY)
         self.nav_routes_btn = self.sidebar.item(PageKey.ROUTES)
         self.nav_practice_btn = self.sidebar.item(PageKey.PRACTICE)
@@ -578,11 +577,6 @@ class MainWindow(QMainWindow):
             return self.agent_approval_service.list_pending_views_for_session(session_id)
         except Exception:
             return ()
-
-    def _on_agent_back(self) -> None:
-        """Return to Today; leaving the Workspace never closes the Session."""
-        self.refresh(preserve_scroll=True)
-        self._switch_to_today()
 
     def _reload_agent_session(self, session_id: int, error: str | None = None) -> None:
         page = getattr(self, "agent_workspace_page", None)

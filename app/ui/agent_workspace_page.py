@@ -81,7 +81,6 @@ APPROVAL_ACTIONS = {
 class AgentWorkspacePage(QWidget):
     """Task-bound conversation Workspace with a product-grade interaction shell."""
 
-    back_requested = Signal()
     send_requested = Signal(int, str)
     approval_approve_requested = Signal(int)
     approval_reject_requested = Signal(int)
