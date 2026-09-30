@@ -21,6 +21,8 @@ EXTRACTION_SYSTEM_PROMPT = (
     "不推断、不扩写、不创造事实，不从一次行为推断身份、能力、Mastery 或 Capability。"
     "拒绝一次性要求、当前项目约束、临时状态、疑问、第三人信息、引用文本、"
     "credentials / secrets / API key / password / token 和敏感私人信息（用户自身的敏感自述）。"
+    "密码学、密钥交换、token 机制、API key 管理、OAuth、password hashing 等安全学习主题"
+    "本身不是 credential 泄露；出现实际凭据值、赋值、自述或 private key block 则必须拒绝。"
     "医学诊断、糖尿病、政治、宗教等学习主题本身不是用户私人信息；"
     "使用相关数据集或课程案例的长期学习偏好可以生成候选，不能因此推断用户自身的疾病或立场。"
     "需要历史上下文才能理解、含歧义或无法确认长期价值时不生成候选。\n"

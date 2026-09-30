@@ -406,6 +406,75 @@ def test_model_cannot_rewrite_topics_into_private_disclosures(field, disclosure,
     assert disclosure not in caplog.text
 
 
+@pytest.mark.parametrize(('source', 'kind', 'reason'), [
+    ('以后讲密码学时默认从密钥交换开始。', 'long_term_preference', '长期偏好密码学和密钥交换教学顺序。'),
+    ('以后讲 JWT 时先解释 token 机制。', 'long_term_preference', '长期 JWT token 机制教学偏好。'),
+    ('我主要学习 API key 管理和 OAuth。', 'stable_background', 'API key 管理和 OAuth 是主要学习方向。'),
+    ('以后安全案例默认使用 password hashing。', 'long_term_preference', '长期 password hashing 安全案例偏好。'),
+    ('以后默认用 password hashing 作为安全案例。', 'long_term_preference', '安全案例主题是 password hashing。'),
+    ('以后默认讲令牌认证和口令管理。', 'long_term_preference', '令牌认证和口令管理学习主题。'),
+    ('I prefer password hashing and token mechanisms as examples.', 'long_term_preference', 'Password hashing and token mechanisms are learning topics.'),
+    ('I primarily study API key management and OAuth.', 'stable_background', 'API key management and OAuth learning background.'),
+    ('I prefer secret management and credential rotation examples.', 'long_term_preference', 'Secret management and credential rotation learning topics.'),
+    ('以后默认以密钥为例讲安全管理。', 'long_term_preference', '以密钥为例的学习主题。'),
+    ('I prefer Bearer authentication examples.', 'long_term_preference', 'Bearer authentication learning topic.'),
+    ('I prefer PASSWORD HASHING and API KEY MANAGEMENT examples.', 'long_term_preference', 'PASSWORD HASHING and API KEY MANAGEMENT learning topics.'),
+])
+def test_security_learning_topics_allowed_in_all_candidate_fields(source, kind, reason):
+    model = FakeModel([item(content=source, evidence=source, kind=kind, reason=reason)])
+    candidate, = extract(model, source)
+    assert len(model.requests) == 1
+    assert candidate.content == candidate.evidence == source
+    assert candidate.reason == reason
+    assert '本身不是 credential 泄露' in model.requests[0].messages[0].content
+
+
+@pytest.mark.parametrize('source', [
+    '我的密码是 abc123。', '我的 API key 是 sk-test123。', 'token: abcdef123456。',
+    '请记住我的密钥：abcdef。', 'Bearer eyJxxxxx。', '-----BEGIN PRIVATE KEY-----',
+    '-----BEGIN RSA PRIVATE KEY-----\nPRIVATEvalue\n-----END RSA PRIVATE KEY-----',
+    '我的银行卡号是……', '我的身份证号是……',
+    'password=abc123', 'api_key: abcdef', 'secret = abcdef', 'credential: abcdef',
+    '口令为 abc123。', '令牌：abcdef。', 'my password is abc123',
+    'api key is abcdef', 'token abcdef123456', 'token eyJabcdef',
+    '用户的API key是abcdef。', '用户的password是abc123。',
+    'API key\n=\nabcdef',
+])
+def test_actual_credential_values_and_identifiers_still_withheld(source, caplog):
+    model = FakeModel([item()])
+    with caplog.at_level(logging.WARNING):
+        assert extract(model, source) == []
+    assert model.requests == []
+    assert 'source_excluded' in caplog.text
+    assert source not in caplog.text
+
+
+@pytest.mark.parametrize('field', ['content', 'evidence', 'reason'])
+@pytest.mark.parametrize('disclosure', [
+    '用户的密码是 xxx。', '用户密码为 abc123。', '用户的 API key 是 xxx。',
+    '用户的API key是abc123。', "The user's token is abcdef.", 'password PRIVATEsecret',
+])
+def test_model_rewriting_credentials_cannot_bypass_screening(field, disclosure, caplog):
+    source = '以后安全案例默认使用 password hashing。'
+    candidate = item(content=source, evidence=source, reason='password hashing 学习偏好。')
+    candidate[field] = disclosure
+    with caplog.at_level(logging.WARNING):
+        assert extract(FakeModel([candidate]), source) == []
+    assert 'candidate_excluded' in caplog.text
+    assert disclosure not in caplog.text
+
+
+@pytest.mark.parametrize('source', [
+    '以后讲密码学时默认从密钥交换开始。我的密码是 abc123。',
+    '我主要学习 API key 管理和 OAuth。\ntoken: abcdef123456',
+    '以后安全案例默认使用 password hashing。Bearer eyJxxxxx',
+])
+def test_security_preference_mixed_with_actual_secret_rejected_source_wide(source):
+    model = FakeModel([item()])
+    assert extract(model, source) == []
+    assert model.requests == []
+
+
 def test_versions_unchanged():
     from app.database.schema import SCHEMA_VERSION
     from app.diagnostics.release_migration import FINGERPRINT_VERSION

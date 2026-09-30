@@ -179,6 +179,24 @@ including existing secret/credential cases, allowed learning topics, rejected
 personal self-disclosures, mixed sources and hostile candidate field rewrites.
 `git diff --check` passed; no runtime/thread/consent/UI/DB/schema changes or broad suite.
 
+E-A.2 likewise distinguishes security learning topics from actual credential
+exposure. Bare password/token/secret/credential/API key and 密码/密钥/口令/令牌
+terms no longer trigger source-wide exclusion. Credential assignments (`:`, `=`,
+是/为, is/are with a value), `sk-…`, Bearer values, private-key block headers and
+unpunctuated value-shaped credentials remain fail-closed across source, content,
+evidence and reason. Explicit references to a concrete personal credential and
+existing identifier protections remain conservative; opaque values without labels
+cannot be classified exhaustively by lexical rules. Password hashing, token
+mechanisms, API key management/OAuth, cryptography and key exchange are valid
+learning topics. The stable-background cue includes 主要学习 as well as 主要使用.
+Mixed learning preferences plus actual leaked credentials are withheld entirely;
+model rewrites referring to the user's credentials do not bypass screening. This
+refinement adds no runtime/thread/consent/UI/DB/schema integration. E-A.2 validation:
+**239 directly affected extractor tests passed**, including all earlier credential,
+sensitive-disclosure and learning-topic tests; assignment/value/block detection,
+candidate field rewrites and mixed cases. `git diff --check` passed. Versions remain
+27 / 7 / 2; no broad suite was run.
+
 Validation is atomic for the whole response: strict JSON array, exact fields and
 string types, whitelisted kind, no duplicate JSON keys or non-finite constants,
 maximum **3 candidates before deduplication**. Three limits first-version output

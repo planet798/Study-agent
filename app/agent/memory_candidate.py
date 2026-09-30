@@ -25,11 +25,26 @@ VALIDATION_CODES = frozenset({
 
 # Deliberately conservative screening, not a comprehensive privacy/NLP classifier.
 # Suspicious source messages are withheld from the extraction model altogether.
+_CREDENTIAL_TERM = (
+    r"(?:(?<![a-z0-9_])(?:api[ _-]?key|password|passwd|token|secret|credentials?)(?![a-z0-9_])|"
+    r"密码|密钥|口令|令牌)"
+)
 _HARD_SECRET_OR_IDENTIFIER = re.compile(
-    r"api[ _-]?key|password|passwd|\btoken\b|\bsecret\b|credential|"
-    r"\bsk-[a-z0-9_-]+|-----BEGIN .*PRIVATE KEY|bearer\s+\S+|"
-    r"密码|密钥|口令|令牌|身份证|护照|住址|家庭地址|手机号|银行卡|"
-    r"银行账号|银行账户|信用卡|社保|"
+    # Concrete value shapes / key blocks, not standalone security topic words.
+    r"\bsk-[a-z0-9_.-]+|-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----|"
+    r"\bbearer\s+(?!(?:authentication|authorization|scheme|tokens?|mechanism)\b)[a-z0-9_./+=-]+|"
+    # Labelled assignments still fail closed, including model phrasing about users.
+    + _CREDENTIAL_TERM + r"\s*(?:[:：=]|(?:是|为)(?!例|主题|案例)|\bis\b|\bare\b)\s*\S|"
+    # Unpunctuated but value-shaped credentials (case-sensitive shape inside /i).
+    + _CREDENTIAL_TERM + r"\s+(?=[a-z0-9_./+=-]{8,}(?!\w))"
+    r"(?:eyJ[a-z0-9_./+=-]+|[a-f0-9]{24,}|"
+    r"(?-i:(?=[A-Za-z0-9_./+=-]*[a-z])[A-Z]{3,}[A-Za-z0-9_./+=-]+)|"
+    r"(?=[a-z0-9_./+=-]*[a-z])(?=[a-z0-9_./+=-]*\d)[a-z0-9_./+=-]+)|"
+    # Explicit requests/references to the user's concrete credential, even when
+    # its value is omitted. This does not match '密钥交换' or 'password hashing'.
+    r"(?:使用|保存|记住)\s*(?:这个|该|我的|用户的)\s*" + _CREDENTIAL_TERM + r"\s*(?=[。；.!?]|$)|"
+    # Keep existing identifier protections independent of security course topics.
+    r"身份证|护照|住址|家庭地址|手机号|银行卡|银行账号|银行账户|信用卡|社保|"
     r"\b(?:passport|ssn|bank account|home address|phone number)\b|"
     r"[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?<!\d)\d{7,}(?!\d)", re.IGNORECASE,
 )
@@ -80,7 +95,7 @@ _PREFERENCE = re.compile(
     r"\b(?:prefer|preference|by default|default|always|usually|from now on|in future)\b", re.IGNORECASE,
 )
 _BACKGROUND = re.compile(
-    r"长期|一直|日常|通常|平时|主要使用|\b(?:long.term|usually|primarily|regularly)\b", re.IGNORECASE,
+    r"长期|一直|日常|通常|平时|主要(?:使用|学习)|\b(?:long.term|usually|primarily|regularly)\b", re.IGNORECASE,
 )
 _SELF = re.compile(r"我|\b(?:I|my)\b", re.IGNORECASE)
 _IDENTITY = re.compile(r"我(?:目前)?是|\bI am\b", re.IGNORECASE)
