@@ -42,7 +42,7 @@ def test_diagnostic_minimal_read_only_and_optional_degradation(conn, tmp_path):
     code, report = run_agent_diagnostic(path, ai_config_service=AI(),
         mcp_config_path=mcp, sandbox_config_path=sandbox)
     assert code == 0 and report["result"] == "OK"
-    assert (report["schema"], report["fingerprint"]) == (25, 7)
+    assert (report["schema"], report["fingerprint"]) == (26, 7)
     assert (report["native_tools"], report["skills"], report["approval_actions"]) == (6, 6, 3)
     assert report["sessions"] == report["messages"] == report["pending_approvals"] == 0
     assert conn.total_changes == before
