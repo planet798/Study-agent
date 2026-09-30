@@ -162,6 +162,23 @@ screening deliberately trades recall for safety; it is not an exhaustive languag
 or privacy classifier and may reject otherwise valid messages (including negative
 preferences or messages mixing quotes/private text with valid preferences).
 
+E-A.1 separates source-wide hard secrets/identifiers from sensitive personal
+self-disclosures. Medical/diagnosis/diabetes, political, religious and similar
+**learning topics are not private disclosures by themselves**. Long-term preferences
+for diabetes datasets, political text classification, or studying medical diagnosis
+datasets can proceed. Chinese/English personal assertion patterns (e.g. 我患有…,
+我的诊断是…, 我的政治立场是…, 我是…患者, I have diabetes, My income is…) remain
+excluded. Model phrasing about “the user” is screened as well. The same check covers
+content, evidence and reason after NFC/whitespace normalization; valid topic words
+in candidate explanations no longer trigger rejection. A mixed source containing
+both a learning preference and a sensitive personal disclosure is still withheld
+in full. This remains conservative lexical screening, not a complete privacy NLP
+classifier; credentials/identifier fail-closed rules and extractive evidence checks
+are unchanged. E-A.1 validation: **184 directly affected extractor tests passed**,
+including existing secret/credential cases, allowed learning topics, rejected
+personal self-disclosures, mixed sources and hostile candidate field rewrites.
+`git diff --check` passed; no runtime/thread/consent/UI/DB/schema changes or broad suite.
+
 Validation is atomic for the whole response: strict JSON array, exact fields and
 string types, whitelisted kind, no duplicate JSON keys or non-finite constants,
 maximum **3 candidates before deduplication**. Three limits first-version output

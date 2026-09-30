@@ -335,6 +335,77 @@ def test_no_database_reads_writes_messages_or_prompt_registry_changes(conn, prom
     assert list(inspect.signature(PersonalMemoryExtractor.__init__).parameters) == ['self', 'model_client']
 
 
+@pytest.mark.parametrize(('source', 'kind', 'reason'), [
+    ('以后默认使用糖尿病数据集讲分类。', 'long_term_preference', '长期偏好糖尿病数据集作为分类案例。'),
+    ('以后 NLP 示例默认使用政治文本分类。', 'long_term_preference', '明确表达政治文本分类案例偏好。'),
+    ('我主要使用医学诊断数据集学习。', 'stable_background', '稳定使用医学诊断数据集的学习背景。'),
+    ('以后讲机器学习时，可以用糖尿病数据集作为分类案例。', 'long_term_preference', '长期分类教学案例偏好。'),
+    ('以后 NLP 示例可以使用政治文本分类。', 'long_term_preference', '持续的 NLP 案例偏好。'),
+    ('以后默认使用宗教文本数据集讲分类。', 'long_term_preference', '宗教是文本学习主题而非个人信仰自述。'),
+    ('以后默认使用收入数据集讲统计。', 'long_term_preference', '收入统计是学习主题。'),
+    ('I primarily use medical diagnosis datasets for studying.', 'stable_background', 'Medical diagnosis dataset learning background.'),
+    ('I prefer diabetes datasets for classification examples.', 'long_term_preference', 'Diabetes dataset example preference.'),
+    ('I prefer political text classification examples.', 'long_term_preference', 'Political text learning preference.'),
+    ('I prefer religion datasets as examples.', 'long_term_preference', 'Religion dataset topic preference.'),
+    ('I regularly use diabetes datasets for studying.', 'stable_background', 'Regular learning dataset background.'),
+    ('I prefer HIV datasets as learning examples.', 'long_term_preference', 'HIV is a learning topic.'),
+])
+def test_sensitive_learning_topics_are_not_personal_disclosures(source, kind, reason):
+    model = FakeModel([item(content=source, kind=kind, evidence=source, reason=reason)])
+    candidate, = extract(model, source)
+    assert len(model.requests) == 1
+    assert candidate.content == candidate.evidence == source
+    assert candidate.reason == reason
+    assert '学习主题本身不是用户私人信息' in model.requests[0].messages[0].content
+
+
+@pytest.mark.parametrize('source', [
+    '我患有糖尿病。', '我被诊断为抑郁症。', '我的诊断是糖尿病。',
+    '我的宗教信仰是……', '我的政治立场是……', '我的性取向是……',
+    '我的收入是……', '我是癌症患者。', '我的种族是私人信息。',
+    'I have diabetes.', 'I was diagnosed with depression.', 'My diagnosis is diabetes.',
+    'I regularly suffer from depression.',
+    'My religious beliefs are private.', 'My political affiliation is private.',
+    'My sexual orientation is private.', 'My income is private.', 'I am a cancer patient.',
+])
+def test_personal_sensitive_disclosures_still_withheld(source, caplog):
+    model = FakeModel([item(content=source, evidence=source, kind='stable_background')])
+    with caplog.at_level(logging.WARNING):
+        assert extract(model, source) == []
+    assert model.requests == []
+    assert 'source_excluded' in caplog.text
+    assert source not in caplog.text
+
+
+@pytest.mark.parametrize('source', [
+    '以后默认使用糖尿病数据集讲分类。\n我患有糖尿病。',
+    '我被诊断为抑郁症。以后示例默认使用 C++。',
+    'I prefer political text classification examples. My political affiliation is private.',
+    '以后默认使用政治文本分类。\n我的\n政治立场\n是私人信息。',
+])
+def test_mixed_learning_preference_and_private_disclosure_rejected_source_wide(source):
+    model = FakeModel([item()])
+    assert extract(model, source) == []
+    assert model.requests == []
+
+
+@pytest.mark.parametrize('field', ['content', 'evidence', 'reason'])
+@pytest.mark.parametrize('disclosure', [
+    '用户患有糖尿病。', '用户的诊断是抑郁症。', '用户是癌症患者。',
+    '用户的宗教信仰是私人信息。', '用户的政治立场是私人信息。',
+    '用户的性取向是私人信息。', '用户的收入是私人信息。',
+    'The user has diabetes.', "The user's political affiliation is private.",
+])
+def test_model_cannot_rewrite_topics_into_private_disclosures(field, disclosure, caplog):
+    source = '以后默认使用糖尿病数据集讲分类。'
+    candidate = item(content=source, evidence=source, reason='长期学习案例偏好。')
+    candidate[field] = disclosure
+    with caplog.at_level(logging.WARNING):
+        assert extract(FakeModel([candidate]), source) == []
+    assert 'candidate_excluded' in caplog.text
+    assert disclosure not in caplog.text
+
+
 def test_versions_unchanged():
     from app.database.schema import SCHEMA_VERSION
     from app.diagnostics.release_migration import FINGERPRINT_VERSION

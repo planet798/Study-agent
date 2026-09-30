@@ -25,16 +25,45 @@ VALIDATION_CODES = frozenset({
 
 # Deliberately conservative screening, not a comprehensive privacy/NLP classifier.
 # Suspicious source messages are withheld from the extraction model altogether.
-_PRIVATE = re.compile(
+_HARD_SECRET_OR_IDENTIFIER = re.compile(
     r"api[ _-]?key|password|passwd|\btoken\b|\bsecret\b|credential|"
     r"\bsk-[a-z0-9_-]+|-----BEGIN .*PRIVATE KEY|bearer\s+\S+|"
     r"密码|密钥|口令|令牌|身份证|护照|住址|家庭地址|手机号|银行卡|"
-    r"病史|诊断|抑郁|疾病|患有|感染|糖尿病|癌症|宗教|信仰|政治|种族|民族|性取向|性生活|收入|财产|"
-    r"银行账号|银行账户|信用卡|社保|\bHIV\b|"
-    r"\b(?:medical|diagnosis|depression|religion|sexual|passport|ssn|"
-    r"bank account|home address|phone number|political affiliation)\b|"
+    r"银行账号|银行账户|信用卡|社保|"
+    r"\b(?:passport|ssn|bank account|home address|phone number)\b|"
     r"[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?<!\d)\d{7,}(?!\d)", re.IGNORECASE,
 )
+# Sensitive *topics* are permitted. These patterns require a personal disclosure
+# relationship, including application/model paraphrases referring to 'the user'.
+_SENSITIVE_PERSONAL_DISCLOSURE = re.compile(
+    r"(?:我|用户|使用者)\s*(?:本人\s*)?(?:长期|一直|曾经|已经|目前|现在|正在)?\s*"
+    r"(?:患有|患上|感染|得了|被诊断为|被诊断患有|确诊为|确诊患有)|"
+    r"(?:我|用户|使用者)\s*(?:的\s*)?(?:个人\s*)?"
+    r"(?:病史|诊断|宗教(?:信仰)?|信仰|政治(?:立场|倾向|观点)|种族|民族|性取向|性生活|收入|财产)"
+    r"\s*(?:是|为|包括|记录了|显示|[:：=…])|"
+    r"(?:我|用户|使用者)\s*(?:目前\s*)?是[^。！？!?；;\n\r]{0,30}(?:患者|病人|信徒|教徒)|"
+    r"\b(?:I|the user|user)\s+(?:(?:currently|regularly|usually|previously|personally|also)\s+)?"
+    r"(?:have|has|suffer from|suffers from|"
+    r"was diagnosed with|am diagnosed with|is diagnosed with|am living with|is living with)\s+"
+    r"(?:diabetes|cancer|depression|HIV|a medical condition)\b"
+    r"(?!\s*(?:datasets?\b|data\b|examples?\b|classification\b))|"
+    r"\b(?:I am|the user is|user is)\s+(?:HIV[- ]positive|diabetic|"
+    r"(?:a\s+)?(?:cancer|diabetes)\s+patient|(?:a\s+)?(?:religious\s+)?believer)\b|"
+    r"\b(?:my|the user's|user's)\s+(?:medical history|(?:medical\s+)?diagnosis|religion|"
+    r"religious beliefs|faith|political affiliation|political views|race|ethnicity|"
+    r"sexual orientation|sex life|income|salary|assets)\s*(?:is\b|are\b|includes\b|[:=])",
+    re.IGNORECASE,
+)
+
+
+def _has_private_information(text: str) -> bool:
+    # Also inspect whitespace-normalized text so a line break inside a personal
+    # assertion cannot hide it from source/content/evidence/reason screening.
+    normalized = " ".join(unicodedata.normalize("NFC", text).split())
+    return bool(_HARD_SECRET_OR_IDENTIFIER.search(normalized)
+                or _SENSITIVE_PERSONAL_DISCLOSURE.search(normalized))
+
+
 _QUOTED = re.compile(r'引用|原文|转述|[“”「」『』]|"[^"\n]*"|\'[^\'\n]+\'|`|(?m:^\s*>)|\b(?:quoted|quotation)\b', re.IGNORECASE)
 _THIRD_PERSON = re.compile(r"我(?:的)?(?:朋友|同学|同事|家人|老师)|他|她|他们|她们|\b(?:my friend|he|she|they)\b", re.IGNORECASE)
 _TEMPORARY = re.compile(
@@ -124,7 +153,7 @@ def validate_source(user_message: str, source_session_id: int, source_message_id
     """Only one raw user message; no lookup, provenance claims come from the caller."""
     _source_ids(source_session_id, source_message_id)
     text = _text(user_message)
-    if _PRIVATE.search(text) or _QUOTED.search(text) or _THIRD_PERSON.search(text):
+    if _has_private_information(text) or _QUOTED.search(text) or _THIRD_PERSON.search(text):
         raise MemoryCandidateValidationError("source_excluded")
     if not any(_qualifies(part, kind) for part in _statements(text) for kind in KINDS):
         raise MemoryCandidateValidationError("no_explicit_long_term_evidence")
@@ -177,6 +206,8 @@ def parse_memory_candidates(
         content = _text(item["content"], 1000)
         evidence = _text(item["evidence"], 1000)
         reason = _text(item["reason"], 500)
+        if any(_has_private_information(text) for text in (content, evidence, reason)):
+            raise MemoryCandidateValidationError("candidate_excluded")
         if evidence not in source:
             raise MemoryCandidateValidationError("evidence_not_found")
         # Check the full statement too: a model cannot omit 'this time' or a
@@ -185,8 +216,7 @@ def parse_memory_candidates(
             evidence in part and _qualifies(part, kind) for part in _statements(source)
         ):
             raise MemoryCandidateValidationError("evidence_not_long_term")
-        if (_PRIVATE.search(reason) or _PRIVATE.search(content) or _QUOTED.search(content)
-                or _THIRD_PERSON.search(content) or _TEMPORARY.search(content)
+        if (_QUOTED.search(content) or _THIRD_PERSON.search(content) or _TEMPORARY.search(content)
                 or _UNCERTAIN.search(content) or _NEGATION.search(content)):
             raise MemoryCandidateValidationError("candidate_excluded")
         key = normalized_memory_key(content)
