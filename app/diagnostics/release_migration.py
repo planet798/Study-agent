@@ -273,7 +273,7 @@ def fingerprint(conn: sqlite3.Connection) -> dict:
     - ``ids_hash`` / ``fields_hash``：整表 hash（保留给旧 snapshot 兼容比较）；
     - ``rows``：``{id: immutable_fields_hash}``，用于历史**子集**语义：
       before 的每个 id 必须在 after 中存在且字段 hash 不变；after 新 id 合法。
-    旧 schema 缺列/缺表时自动跳过对应列/表。
+    旧 schema 缺列时投影 NULL 并记录实际存在列；缺表时跳过该表。
     """
     out: dict[str, dict] = {}
     for table, wanted in FINGERPRINT_COLUMNS.items():
@@ -315,6 +315,10 @@ def fingerprint(conn: sqlite3.Connection) -> dict:
         out[table] = {
             "count": len(rows),
             "columns": list(wanted),
+            # Which fingerprinted fields the source schema actually had.
+            # Missing old columns hash as NULL; a known migration default may
+            # later replace that placeholder without changing user history.
+            "present_columns": [c for c in wanted if c in cols],
             "ids_hash": ids_hash,
             "fields_hash": fields_hash,
             # v3：显式标记具备 per-row 校验能力（空表也能区分旧 snapshot）
@@ -322,6 +326,96 @@ def fingerprint(conn: sqlite3.Connection) -> dict:
             "rows": row_hashes,
         }
     return out
+
+
+# The only absent-column -> non-NULL defaults we accept as migration-owned.
+# New exceptions require a documented migration and a targeted old-DB test.
+_MIGRATION_DEFAULTS = {
+    ("tasks", "task_type"): (4, "new"),
+    ("assessment_attempts", "judge_status"): (3, "pending"),
+}
+
+
+def _comparable_after_rows(conn: sqlite3.Connection, table: str, before_fp: dict,
+                           before_version: int | None, after_version: int | None,
+                           before_fp_version: int | None) -> tuple[dict[str, str], str, list] | None:
+    """Rehash after rows in the before snapshot's observable projection.
+
+    A v7 current-schema snapshot must compare the full current fingerprint.
+    Older fingerprint versions can have a shorter *fingerprint* projection;
+    older schemas may have NULL placeholders for migration-added defaults.
+    Only those two explicit provenance cases permit a different projection.
+    """
+    wanted = FINGERPRINT_COLUMNS[table]
+    columns = before_fp.get("columns")
+    if not isinstance(columns, list) or not columns or columns[0] != "id" \
+            or len(columns) != len(set(columns)) \
+            or any(c not in wanted for c in columns):
+        return None
+    if columns != list(wanted):
+        if before_fp_version is not None:
+            if before_fp_version >= FINGERPRINT_VERSION:
+                return None  # malformed current snapshot; fail closed
+        elif (before_version is None or after_version is None
+              or before_version >= after_version):
+            return None  # unversioned current-schema snapshots stay strict
+    present = before_fp.get("present_columns")
+    if present is not None and (not isinstance(present, list)
+                                or any(c not in columns for c in present)):
+        return None
+    # Snapshots predating present_columns use only the explicitly documented
+    # schema-version introductions below; no generic missing-column exemption.
+    defaults = {}
+    for (owned_table, col), (introduced, expected) in _MIGRATION_DEFAULTS.items():
+        if (owned_table == table and before_version is not None
+                and before_version < introduced
+                and (present is None or col not in present)):
+            # Also enforce defaults absent from an older fingerprint's shorter
+            # columns list: the old Task/Attempt ID is still protected.
+            defaults[col] = expected
+    # Unknown missing columns stay strictly compared with their after value;
+    # this is fail-closed for migration behavior we have not audited.
+    masked = set(defaults).intersection(columns)
+    if columns == list(wanted) and not masked and not defaults:
+        return None
+    select_cols = [f"NULL AS {col}" if col in masked else col for col in columns]
+    rows = conn.execute(
+        f"SELECT {','.join(select_cols)} FROM {table} ORDER BY id"
+    ).fetchall()
+    hashes = {
+        str(row[0]): hashlib.sha256(
+            ",".join("" if value is None else str(value) for value in row).encode("utf-8")
+        ).hexdigest() for row in rows
+    }
+    fields_hash = hashlib.sha256(
+        "|".join(
+            ",".join("" if value is None else str(value) for value in row)
+            for row in rows
+        ).encode("utf-8")
+    ).hexdigest()
+    # Before could not fingerprint these defaults, but a migrated old row
+    # must have the exact migration-created value. Otherwise it was changed.
+    invalid_ids = []
+    known_ids = before_fp.get("rows") or {}
+    if (not known_ids and not before_fp.get("row_level")
+            and before_fp.get("count") == len(rows)
+            and before_fp.get("ids_hash") == hashlib.sha256(
+                "|".join(hashes).encode("utf-8")
+            ).hexdigest()):
+        # Legacy v1/v2 lacks per-row hashes. At equal counts with identical
+        # ID sets, all after IDs were present before and can check defaults.
+        known_ids = hashes
+    for row_id in known_ids:
+        if row_id not in hashes:
+            continue  # reported as missing by the ordinary ID comparison
+        for column, expected in defaults.items():
+            actual = conn.execute(
+                f"SELECT {column} FROM {table} WHERE id = ?", (row_id,)
+            ).fetchone()
+            if actual is None or actual[0] != expected:
+                invalid_ids.append(row_id)
+                break
+    return hashes, fields_hash, invalid_ids
 
 
 def _normalize_id(key):
@@ -709,6 +803,11 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
                 result["history_decreases"][table] = {"before": b, "after": a}
         before_fp = before.get("fingerprints") or {}
         after_fp = after.get("fingerprints") or {}
+        before_version = before.get("schema_version")
+        before_version = before_version if type(before_version) is int else None
+        before_fp_version = before.get("fingerprint_version")
+        before_fp_version = (before_fp_version if type(before_fp_version) is int
+                             else None)
         for table, bfp in before_fp.items():
             afp = after_fp.get(table)
             if afp is None:
@@ -725,19 +824,25 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
                 continue
             b_count = bfp.get("count")
             a_count = afp.get("count")
+            comparable = _comparable_after_rows(
+                conn, table, bfp, before_version, after["schema_version"],
+                before_fp_version,
+            ) if table in FINGERPRINT_COLUMNS else None
             row_level = bool(bfp.get("row_level")) and bool(afp.get("row_level"))
             if row_level:
                 # v3 子集语义：before IDs 必须 ⊆ after IDs 且字段 hash 不变；
                 # after 新增 ID 完全合法，不计入 history_id_changes。
                 rows_b = bfp.get("rows") or {}
-                rows_a = afp.get("rows") or {}
+                rows_a = comparable[0] if comparable is not None else afp.get("rows") or {}
+                invalid_defaults = set(comparable[2]) if comparable is not None else set()
                 missing = sorted(
                     (k for k in rows_b if k not in rows_a), key=_id_sort_key
                 )
                 modified = sorted(
                     (
                         k for k in rows_b
-                        if k in rows_a and rows_a[k] != rows_b[k]
+                        if k in rows_a and (rows_a[k] != rows_b[k]
+                                            or k in invalid_defaults)
                     ),
                     key=_id_sort_key,
                 )
@@ -777,8 +882,11 @@ def verify(conn: sqlite3.Connection, before: Optional[dict] = None) -> dict:
                             "before_count": b_count,
                             "after_count": a_count,
                         }
-                    if columns_match and \
-                            bfp.get("fields_hash") != afp.get("fields_hash"):
+                    compared_fields_hash = (comparable[1] if comparable is not None
+                                            else afp.get("fields_hash"))
+                    if (columns_match or comparable is not None) and \
+                            (bfp.get("fields_hash") != compared_fields_hash
+                             or (comparable is not None and comparable[2])):
                         result["history_fingerprint_changes"][table] = {
                             "before_count": b_count,
                             "after_count": a_count,
