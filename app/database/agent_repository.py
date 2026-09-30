@@ -201,6 +201,13 @@ class AgentRepository:
         ).fetchone()
         return dict(row) if row is not None else None
 
+    def has_user_message_between(self, session_id: int, user_id: int, assistant_id: int) -> bool:
+        """Indexed existence check, not a full Session-history materialization."""
+        return self.conn.execute(
+            "SELECT 1 FROM agent_messages WHERE session_id = ? AND role = 'user' "
+            "AND id > ? AND id < ? LIMIT 1", (session_id, user_id, assistant_id),
+        ).fetchone() is not None
+
     def list_messages(self, session_id: int) -> list[dict]:
         """按 message id 升序返回会话全部消息（多轮顺序稳定）。"""
         rows = self.conn.execute(

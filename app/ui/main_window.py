@@ -130,6 +130,7 @@ class MainWindow(QMainWindow):
         agent_approval_service_factory=None,
         task_workspace_service=None,
         personalization_service=None,
+        memory_extraction_service_factory=None,
     ):
         super().__init__()
         # 主题偏好（QSettings；测试可注入隔离实例）；UI-2 runtime，不改 DB。
@@ -154,6 +155,15 @@ class MainWindow(QMainWindow):
         # 验收后台 worker 的线程安全依赖：只传 db_path + 工厂，不跨线程传连接。
         # 未显式提供工厂时回退到主线程 service（仅用于单线程测试）。
         self.db_path = db_path
+        self.memory_extraction_coordinator = None
+        self._memory_exit_requested = False
+        self._memory_close_deferred = False
+        if memory_extraction_service_factory is not None and db_path is not None:
+            from .memory_extraction_worker import MemoryExtractionCoordinator
+            self.memory_extraction_coordinator = MemoryExtractionCoordinator(
+                db_path, memory_extraction_service_factory, self,
+            )
+            self.memory_extraction_coordinator.drained.connect(self._on_memory_extraction_drained)
         self.assessment_service_factory = (
             assessment_service_factory
             if assessment_service_factory is not None
@@ -815,7 +825,10 @@ class MainWindow(QMainWindow):
             session_id=session_id,
             user_text=user_text,
             parent=self,
+            capture_memory_consent=self.memory_extraction_coordinator is not None,
         )
+        if self.memory_extraction_coordinator is not None:
+            worker.extraction_requested.connect(self.memory_extraction_coordinator.enqueue)
         worker.succeeded.connect(
             lambda result, sid=session_id: self._on_agent_turn_finished(sid, None)
         )
@@ -1661,7 +1674,11 @@ class MainWindow(QMainWindow):
     def quit_app(self) -> None:
         """托盘“退出”：真正退出程序（集中清理后结束事件循环）。"""
         self._quit_requested = True
+        self._memory_exit_requested = True
         self._shutdown()
+        if self._memory_extraction_running():
+            self.hide()
+            return
         app = QApplication.instance()
         if app is not None:
             app.quit()
@@ -1676,16 +1693,38 @@ class MainWindow(QMainWindow):
         self._clear_today_scroll_restore()
         if self._quit_requested or self._tray is None:
             self._shutdown()
+            if self._memory_extraction_running():
+                self._memory_close_deferred = True
+                self.hide()
+                event.ignore()  # keep the running worker's QObject owner alive
+                return
             event.accept()
             return
         # 点 X：隐藏窗口（不退出，不清理托盘/AI 线程）
         event.ignore()
         self.hide()
 
+    def _memory_extraction_running(self) -> bool:
+        coordinator = self.memory_extraction_coordinator
+        return coordinator is not None and coordinator.is_running
+
+    def _on_memory_extraction_drained(self) -> None:
+        if not self._quit_requested:
+            return
+        if self._memory_close_deferred:
+            self._memory_close_deferred = False
+            self.close()
+        if self._memory_exit_requested:
+            app = QApplication.instance()
+            if app is not None:
+                app.quit()
+
     def _shutdown(self) -> None:
         """退出前集中清理：托盘、AI 线程、打开的 AI 对话框。"""
         self._quit_requested = True
         self._clear_today_scroll_restore()
+        if self.memory_extraction_coordinator is not None:
+            self.memory_extraction_coordinator.shutdown()
 
         # Release page-owned scroll callbacks and any Workspace menu popup
         # before the parent window (or QApplication) starts tearing down Qt.

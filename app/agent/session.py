@@ -90,6 +90,26 @@ class AgentSessionService:
         self.get(session_id)
         return self.repo.list_messages_after(int(session_id), int(message_id))
 
+    def completed_turn_user_message(self, session_id: int, user_id: int, assistant_id: int) -> dict:
+        """Validate a successful-turn event against exact immutable message rows.
+
+        Event success comes from the turn worker, not from mining past history.
+        No assistant content is returned to extraction as a factual source.
+        """
+        self.get(session_id)
+        user = self.repo.get_message(user_id)
+        assistant = self.repo.get_message(assistant_id)
+        if (user is None or assistant is None or user["role"] != "user"
+                or assistant["role"] != "assistant"
+                or user["session_id"] != session_id or assistant["session_id"] != session_id
+                or user_id >= assistant_id or not user["content"].strip()
+                or not assistant["content"].strip()
+                or assistant["tool_calls_json"] not in ("", "[]")
+                or assistant["tool_call_id"] or assistant["tool_name"]
+                or self.repo.has_user_message_between(session_id, user_id, assistant_id)):
+            raise AgentSessionError("invalid_completed_turn_source")
+        return user
+
     def count_messages(self, session_id: int) -> int:
         return self.repo.count_messages(int(session_id))
 

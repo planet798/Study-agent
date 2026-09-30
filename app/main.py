@@ -1305,6 +1305,28 @@ def build_agent_runtime(
     )
 
 
+def build_memory_extraction_service(fresh_conn, db_path=None):
+    """Independent optional extraction dependencies; no Runtime/tool/summary graph."""
+    from app.agent.memory_extraction import MemoryExtractionService, EXTRACTION_NETWORK_TIMEOUT
+    from app.agent.personal_memory_extractor import PersonalMemoryExtractor
+    from app.agent.session import AgentSessionService
+    from app.ai.agent_client import AdaptiveAgentModelClient
+    from app.ai.config_service import AIConfigService
+    from app.database.agent_repository import AgentRepository
+    from app.database.personalization_repository import PersonalizationRepository
+    from app.database.repository import TaskRepository
+    from app.services.personalization_service import PersonalizationService
+    from app.services.task_service import TaskService
+
+    config = AIConfigService(db_path=str(db_path or resolve_db_path()))
+    model = AdaptiveAgentModelClient(config.get_runtime_config, timeout=EXTRACTION_NETWORK_TIMEOUT)
+    return MemoryExtractionService(
+        PersonalizationService(PersonalizationRepository(fresh_conn)),
+        AgentSessionService(AgentRepository(fresh_conn), TaskService(TaskRepository(fresh_conn))),
+        PersonalMemoryExtractor(model),
+    )
+
+
 def build_assessment_service_for_connection(conn, db_path=None):
     """Fresh, worker-owned Assessment dependencies with the existing AI Profile."""
     from app.ai.client import AdaptiveAIClient
@@ -1444,6 +1466,9 @@ def main() -> int:
 
     def agent_runtime_factory(fresh_conn):
         return build_agent_runtime(fresh_conn, db_path=agent_db_path)
+
+    def memory_extraction_service_factory(fresh_conn):
+        return build_memory_extraction_service(fresh_conn, db_path=agent_db_path)
 
     # 学习计划：确保默认研一计划已创建，供每日任务生成与阶段显示；
     # 注入 assessment_repo（Phase 8）让规则生成能读取掌握证据（薄弱优先/不重复）。
@@ -1823,6 +1848,7 @@ def main() -> int:
         practice_service=practice_service,
         agent_session_service=agent_session_service,
         agent_runtime_factory=agent_runtime_factory,
+        memory_extraction_service_factory=memory_extraction_service_factory,
         task_workspace_service=task_workspace_service,
         agent_approval_service=agent_approval_service,
         agent_approval_service_factory=agent_approval_service_factory,

@@ -1,11 +1,13 @@
-# Personalization — P-1B / P-1C / P-1D / P-1E-A
+# Personalization — P-1B / P-1C / P-1D / P-1E-A / P-1E-B
 
 Current versions: **schema 27 / fingerprint 7 / evaluator 2**.
 
 P-1B established persistence; P-1C added Settings UI and manual memory management.
 P-1D adds **Agent personalization context injection** through worker-owned dependencies.
-There is still **no automatic Session extraction**. Structured workflows, Skill
-selection, Session compaction, PromptRegistry and Prompt Manager semantics are unchanged.
+P-1E-B adds consent-gated background extraction of **transient candidates only**
+from new successful turns. There is still **no automatic memory saving or candidate
+confirmation UI**. Structured workflows, Skill selection, Session compaction,
+PromptRegistry and Prompt Manager semantics are unchanged.
 
 ## Separate concepts
 
@@ -18,8 +20,8 @@ selection, Session compaction, PromptRegistry and Prompt Manager semantics are u
 - **Personal Memory:** distilled cross-session user preferences stored locally in
   SQLite application data. Editable, disable-able and physically deletable. Content
   is non-empty stripped plain text, at most 1000 characters, with the same character
-  safety rules. Callers supply distilled content; there is no raw conversation
-  copying, model inference or automatic classification/extraction. This is not
+  safety rules. Saved memories remain manually/user-controlled; E-B candidates are
+  separate in-memory suggestions, never copied or automatically saved here. This is not
   Mastery, Capability, Evidence, LearningOutcome, Task or conversation history.
 - **Session Memory:** existing `agent_session_memory`, introduced in v22, remains
   Session-scoped rolling conversation compaction. It is neither renamed nor reused.
@@ -33,14 +35,15 @@ The real `_migrate_v27` adds `agent_personalization_settings`, constrained to
 singleton `id=1`, with default instructions `''`, memory off, auto-memory off and
 `updated_at=''`. Existing users therefore retain identical behavior. Both toggles
 are independent persisted preferences: P-1D uses `memory_enabled` to gate context
-injection; `auto_memory_enabled` remains consent for future extraction only.
+injection; E-B requires **both** switches for automatic candidate extraction,
+without changing the stored auto preference when the master is off.
 
 `agent_personal_memories` has an autoincrement id, content, source type, optional
 Session/Message references, enabled flag and creation/update timestamps. Manual
 items have no provenance ids; Session items require an existing Session. An optional
 Message must exist and belong to that Session (repository validation). Future
-extraction should prefer user Messages; no role restriction or extraction is added
-now. Edits preserve provenance and creation time. Listing is ascending id order,
+extraction uses exact user Messages in E-B, but saved-memory provenance APIs remain
+unchanged and no automatic saving is added. Edits preserve provenance and creation time. Listing is ascending id order,
 including disabled items by default. Missing edits/toggles raise ValueError;
 deletion is idempotent and physically removes only the personal-memory row.
 
@@ -72,8 +75,9 @@ background polling or refresh during typing.
 The memory master checkbox persists only `memory_enabled`. Turning it off disables
 the auto-memory consent checkbox without clearing its checked preference or any
 memory rows. Re-enabling restores interaction; 管理记忆 remains available while off.
-The second checkbox stores consent for future extraction, not an operational feature.
-No Sessions are scanned and no model calls or background jobs are added.
+The second checkbox was preference-only in P-1C; E-B now uses it to gate transient
+candidate extraction from new successful turns. It still does not authorize silent
+memory saving. No old Sessions are scanned; confirmation UI is deferred to E-C.
 
 `PersonalMemoriesDialog` is a modal manager listing all memories, including disabled
 ones. Source labels are 手动添加 / 学习会话, never raw source IDs. The empty state says
@@ -232,6 +236,88 @@ consent orchestration, confirmation UI, QThreads or persistence.** It must not b
 wired into automatic turns until E-B supplies the consent boundary. Personal
 Instructions, Session Memory/compaction and PromptRegistry are unchanged. Schema /
 fingerprint / evaluator stay **27 / 7 / 2**.
+
+## Incremental background extraction (P-1E-B)
+
+Production chain:
+
+```text
+AgentTurnWorker begins: capture consent from its own fresh connection
+  → Runtime completes and persists a final assistant answer
+  → succeeded(result) delivers the normal answer first
+  → extraction_requested(CompletedMemoryExtractionTurn)
+  → MainWindow-owned MemoryExtractionCoordinator
+  → MemoryExtractionWorker opens a DIFFERENT fresh read-only connection
+  → build_memory_extraction_service(fresh_conn, db_path)
+  → exact source validation → independent E-A extractor request
+  → consent rechecks → MemoryCandidateBatch (process memory only)
+```
+
+`app/agent/memory_extraction.py` owns event/batch DTOs, the shared consent predicate,
+safe diagnostics and read-only orchestration. `app/ui/memory_extraction_worker.py`
+owns bounded scheduling and worker lifecycle. The production factory reuses
+AIConfigService by path and AdaptiveAgentModelClient, not the Runtime/tool graph.
+The extraction connection is `mode=ro` + `query_only=ON`, no migration, with a
+200ms SQLite busy timeout. Model network timeout is 5 seconds (transport IO timeout,
+not a claim of forcibly interrupting arbitrary injected model implementations).
+No Settings service, Runtime connection or QWidget is passed to extraction.
+
+Hard gate: `memory_enabled AND auto_memory_enabled`. Checkpoints are turn-worker
+start (before Runtime construction/call), worker start, immediately before model
+call, after extraction and again at actual GUI-thread publication (queued signals
+may arrive late). A false start snapshot stays false even if settings change later.
+Worker-start revocation prevents model calls; in-flight revocation discards results.
+Settings read failures fail closed. The existing settings `updated_at` is carried
+as a read-only revision so off→on cannot revive an old job between checkpoints.
+Conservatively, ANY settings edit (including Instructions) during pending/in-flight
+extraction discards that job/result; saving/applying Instructions and normal turns
+are unaffected. No revision is written by extraction and no schema field is added.
+The shared `consent_allowed(service)` interface
+is also mandatory for future E-C confirmation/save; E-B implements no save path.
+
+Events originate ONLY from a successful `send_message()` result. Failed turns,
+opening/resuming/closing Sessions and enabling consent do not schedule extraction.
+The source Service verifies exact user/assistant rows exist, both belong to the
+event Session, user role is `user`, the later final answer is a non-empty assistant
+message without tool calls, and no intervening user turn separates them. The latter
+is an indexed existence query, not history materialization. Success is attested by
+the worker result, not inferred by scanning old history or requiring optional Trace
+persistence. Only original user content is passed to E-A; assistant text, Task
+Context, Session summary, Instructions and existing memories are not model inputs.
+
+Queue policy: **8 pending + 1 active**, serial admitted jobs using the existing
+QThread pattern; no unlimited thread fanout. Source-message IDs are remembered for
+the process lifetime, including dropped/failed attempts. Duplicate events, full
+queues and failures are dropped without retries. There is no history replay,
+persistent cursor, rejected-candidate storage, merge or DB dedupe. Transient batches
+are bounded to **16 batches** (oldest evicted), expose `candidates_ready(batch)` and
+are accessible through MainWindow's coordinator for future E-C. Empty or revoked
+results never publish; no popups or candidate confirmation UI exists.
+
+Shutdown clears pending tasks and transient batches, closes scheduling and requests
+cooperative interruption. Workers close connections in `finally`. Extraction never
+uses an unbounded GUI-thread `wait()` or unsafe QThread `terminate()`: MainWindow
+retains the owner and defers actual close/quit until `drained`, while the GUI event
+loop continues processing. Timed HTTP calls finish/timeout before release; custom
+model factories must also return/cooperate. Existing non-extraction worker shutdown
+behavior is unchanged. A running extraction thread is never deleted or detached
+from its owner; results arriving during shutdown are ignored.
+
+All extraction failures (settings/source/connection/model/protocol/queue/shutdown)
+remain separate from normal Agent success. Logs contain only safe status codes,
+exception types and code function/line, never raw messages, candidates, secrets or
+paths. Extraction does not add Agent Trace/Evaluation rows or change their versions.
+There are **no extraction writes** to messages, Sessions, tasks, Session Memory,
+Personal Memory, Prompt Overrides or settings. No schema change: **27 / 7 / 2**.
+
+E-B validation: **402 targeted tests passed** across the new extraction worker/
+coordinator tests, AgentTurnWorker, Agent Workspace integration, MainWindow and
+exit lifecycle, E-A extraction, Agent personalization and PersonalizationService.
+Coverage includes start/queued/in-flight consent revocation (including off→on),
+read-only fresh-connection ownership and close calls on success/failure, exact source
+validation, normal answer first, bounded queue/duplicate drops, transient publishing,
+no history/summary/context reads, unchanged DB snapshots and asynchronous shutdown.
+`git diff --check` passed. No broad suite was run.
 
 ## Release verifier
 

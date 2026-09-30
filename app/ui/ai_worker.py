@@ -174,14 +174,28 @@ class AgentTurnWorker(QThread):
 
     succeeded = Signal(object)
     failed = Signal(str)
+    extraction_requested = Signal(object)
 
     def __init__(self, db_path, runtime_factory, session_id: int, user_text: str,
-                 parent=None):
+                 parent=None, *, capture_memory_consent=False):
         super().__init__(parent)
         self._db_path = db_path
         self._runtime_factory = runtime_factory
         self._session_id = int(session_id)
         self._user_text = user_text
+        self._capture_memory_consent = capture_memory_consent
+        self.consent_at_turn_start = False
+        self.consent_revision_at_turn_start = ""
+
+    def _request_extraction(self, result):
+        from ..agent.memory_extraction import CompletedMemoryExtractionTurn, log_extraction_skip
+        try:
+            if self.consent_at_turn_start and not self.isInterruptionRequested():
+                self.extraction_requested.emit(CompletedMemoryExtractionTurn.from_result(
+                    result, self.consent_at_turn_start, self.consent_revision_at_turn_start,
+                ))
+        except Exception as error:
+            log_extraction_skip("completed_event_unavailable", error)
 
     def run(self) -> None:  # noqa: D102
         from ..agent.errors import map_agent_error
@@ -190,12 +204,18 @@ class AgentTurnWorker(QThread):
         before_count = None
         try:
             conn = get_connection(self._db_path)
+            if self._capture_memory_consent:
+                from ..agent.memory_extraction import capture_consent_snapshot
+                snapshot = capture_consent_snapshot(conn)
+                self.consent_at_turn_start = snapshot.allowed
+                self.consent_revision_at_turn_start = snapshot.revision
             runtime = self._runtime_factory(conn)
             service = getattr(runtime, "session_service", None)
             if service is not None:
                 before_count = service.count_messages(self._session_id)
             result = runtime.send_message(self._session_id, self._user_text)
-            self.succeeded.emit(result)
+            self.succeeded.emit(result)  # normal answer delivery precedes scheduling
+            self._request_extraction(result)
         except Exception as error:  # noqa: BLE001 - no raw exception/secrets to the UI
             persisted = False
             configured = None

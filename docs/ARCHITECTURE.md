@@ -51,7 +51,7 @@ learning_routes (R1..R6 + JOB_PREP group) ── route-scoped plan / topic / tas
   `skill_service`。JD 30-day / market / skill priority 是 Planner 后台信号，不占据 Today UI。
 - **Today (S3)**：execution-focused learning surface；只呈现日期、当前阶段、Planner、路线筛选、两项 Summary、今日学习任务与添加入口。
 - **Settings**：默认 个性化（Agent 说明 / 手动本地记忆管理）→ 模型 / API → 高级。
-  `PersonalizationPanel` 仅调用 Service；P-1D 通过 worker-owned Service 注入 Agent context，尚无自动记忆提取。
+  `PersonalizationPanel` 仅调用 Service；P-1D 通过 worker-owned Service 注入 Agent context；P-1E-B 在 consent gate 下异步提取当前成功 turn 的 transient candidates，不自动保存。
   `ai/config_service` + `ai/secrets` + `ai/prompt_registry` + `ai/prompt_defaults`
   保持语义不变；PromptManagerPanel 移至高级，历史 override 保留在 DB。
 - **Monthly retired (S2)**：Monthly UI、Summary/Stats services、Monthly AI 与 cache production path 已移除；`weekly_summaries` / `monthly_summaries` 仅为 LEGACY HISTORY，迁移与 verifier 继续保留。
@@ -124,7 +124,7 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
   与真实路径在空库上的结果逐字一致（含 `learning_routes` 种子）。
 - 关键历史节点：v12 canonical routes seed / v13 KP route 唯一 / v15 单 active plan /
   v16 legacy theory backfill / v18 capability / v19 practice evidence / v20 requirements /
-  v21 `agent_sessions` + `agent_messages` / v22 `agent_session_memory`（derived memory）/ v23 `agent_turn_traces`, `agent_trace_events`, `agent_turn_evaluations`（operational telemetry）/ v24 `agent_approval_requests`, `agent_approval_events`（authorization history）/ v25 `task_workspaces`（Task-scoped managed/local Workspace binding identity）/ v26 Session management metadata（`display_title`, `pinned_at`, `archived_at`）/ v27 mutable Personal Instructions + Personal Memory persistence（详见 `docs/PERSONALIZATION.md`；P-1C UI / P-1D Agent context 已实现，无自动提取）。
+  v21 `agent_sessions` + `agent_messages` / v22 `agent_session_memory`（derived memory）/ v23 `agent_turn_traces`, `agent_trace_events`, `agent_turn_evaluations`（operational telemetry）/ v24 `agent_approval_requests`, `agent_approval_events`（authorization history）/ v25 `task_workspaces`（Task-scoped managed/local Workspace binding identity）/ v26 Session management metadata（`display_title`, `pinned_at`, `archived_at`）/ v27 mutable Personal Instructions + Personal Memory persistence（详见 `docs/PERSONALIZATION.md`；P-1C UI / P-1D Agent context / P-1E-B transient candidate extraction 已实现，无自动保存或候选确认 UI）。
 - Memory / Trace / Evaluation 表进入 verifier `GROWTH_TABLES` 与 inventory，不进入 immutable `HISTORY_TABLES` / fingerprint；当前 `FINGERPRINT_VERSION = 7`：v5 引入 Agent Session/Message immutable history，v6 加入 Approval request identity / immutable Events，v7 加入 Task Workspace bindings（含 local path / creation identity）。当前 `EVALUATOR_VERSION = 2`。
 
 ## 5. 依赖边界（不要越界）
