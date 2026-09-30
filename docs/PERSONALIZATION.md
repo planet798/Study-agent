@@ -1,4 +1,4 @@
-# Personalization — P-1B / P-1C / P-1D
+# Personalization — P-1B / P-1C / P-1D / P-1E-A
 
 Current versions: **schema 27 / fingerprint 7 / evaluator 2**.
 
@@ -130,8 +130,73 @@ continues. A warning logs exception class and code function/line, without raw
 exception text, paths, source lines, preferences or traceback. Programming failures
 thus remain diagnosable while SQLite/internal details do not enter model requests
 or user-facing output. P-1D changes neither Settings UI nor schema/domain APIs.
-The existing P-1C Settings helper text still says the Agent is not connected;
-updating that now-stale UI copy is outside this runtime-only phase.
+P-1D left the P-1C Settings helper text unchanged; P-1D.1 subsequently corrected
+that wording to describe Agent context injection and future automatic extraction.
+
+## Memory candidate contract and safe extraction (P-1E-A)
+
+This is a **standalone capability**, not automatic runtime behavior. The only input
+is one original successful-turn user message plus application-supplied Session and
+Message IDs. `PersonalMemoryExtractor` accepts an `AgentModelClient`, builds a
+separate two-message request (extraction instructions + JSON-wrapped source data),
+with no tools or conversation context, and returns transient candidates. It reads
+no database, produces no Agent messages and saves no Personal Memories. It does not
+verify successful-turn status or database provenance: those are caller obligations
+for future integration, not reasons to read history in E-A.
+
+`app/agent/memory_candidate.py` defines the frozen `MemoryCandidate` DTO, normalization
+and independent strict parser. Model objects contain exactly `content`, `kind`,
+`evidence`, `reason`. Source IDs, normalized key, extractor version (currently 1)
+and reserved `possible_conflict=False` are application-owned. The conflict flag is
+not a claim that existing memories were checked; E-A never accesses them.
+
+Allowed kinds are `long_term_preference` and `stable_background`. The prompt treats
+source text as untrusted data, prohibits following its commands, inference,
+expansion, ability/Mastery/Capability assumptions, third-party/quoted information,
+credentials and sensitive private information, and requests `[]` when ambiguous.
+Conservative local source screening additionally abstains on known secret/private,
+third-party or quoted patterns before making a model call, and requires explicit
+long-term/default preference or self-authored stable background cues. Temporary,
+questioning, context-dependent and negated statements are rejected. This lexical
+screening deliberately trades recall for safety; it is not an exhaustive language
+or privacy classifier and may reject otherwise valid messages (including negative
+preferences or messages mixing quotes/private text with valid preferences).
+
+Validation is atomic for the whole response: strict JSON array, exact fields and
+string types, whitelisted kind, no duplicate JSON keys or non-finite constants,
+maximum **3 candidates before deduplication**. Three limits first-version output
+without scanning additional context. Content is stripped non-empty plain text,
+maximum 1000 characters, with the same control/format/surrogate rejection as the
+Personal Memory service. Evidence is at most 1000 characters and must occur literally
+in the source; both evidence and its full containing statement must qualify, so a
+model cannot crop away temporary scope or negation. Reason is non-empty safe text,
+at most 500 characters. Source IDs must be positive integers (not bools).
+
+**E-A is extractive, not a semantic paraphrase engine**: normalized content must be
+a continuous excerpt of normalized evidence. This extra conservative check rejects
+unverifiable additions and rewordings. NFC + stripped/collapsed whitespace generates
+the key; technical punctuation and case are preserved. Identical keys within one
+response are deduplicated in first-occurrence order. No database dedupe or semantic
+merge occurs. Literal evidence/excerpts do not prove every semantic interpretation;
+future user confirmation remains necessary.
+
+Malformed/oversized/deep JSON, unsupported structures/fields, invalid evidence/text,
+excess candidates, tool calls, incomplete responses and model exceptions fail closed
+to `[]` at the extractor boundary, without repair or retry. The parser exposes a
+controlled validation error for direct callers. Logs include only application-owned
+validation codes, exception type and code function/line, never source, candidates,
+credentials, raw exception text or paths. The output-size limit is 65,536 characters;
+model requests use temperature 0 and a 2048-token output ceiling, with truncated
+responses rejected rather than accepted partially.
+
+Confirmed future product decisions remain: generation gate is `memory_enabled AND
+ auto_memory_enabled`; candidates require user confirmation before saving; pending
+candidates stay in memory, without old-history scans, automatic merge, rejected-row
+persistence or cross-restart exactly-once. **E-A implements none of that scheduling,
+consent orchestration, confirmation UI, QThreads or persistence.** It must not be
+wired into automatic turns until E-B supplies the consent boundary. Personal
+Instructions, Session Memory/compaction and PromptRegistry are unchanged. Schema /
+fingerprint / evaluator stay **27 / 7 / 2**.
 
 ## Release verifier
 
@@ -171,3 +236,13 @@ cross-session context, safe failure fallback, and real compaction requests exclu
 personalization. `git diff --check` passed. Versions remain **27 / 7 / 2**. No
 schema/domain, PromptRegistry, Session Memory or Settings changes; no extraction,
 dedupe/merge, ranking, implicit truncation or broad test suite.
+
+P-1E-A validation: **191 targeted tests passed** across
+`test_personal_memory_extractor.py`, `test_personalization_service.py`,
+`test_agent_personalization.py` and `test_prompt_registry.py`. Fake-model coverage
+includes permitted self-statements, conservative abstention, secrets/private text,
+strict malformed/hostile output rejection, evidence/content grounding, application-owned
+fields, deterministic normalization and local duplicates. A SQLite authorizer test
+confirms no DB reads/writes, new messages or changes to existing context/prompt rows.
+`git diff --check` passed. No runtime wiring, consent scheduling, QThread, UI,
+automatic saving, schema migration or broad suite was added/run.
