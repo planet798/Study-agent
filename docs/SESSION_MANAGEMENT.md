@@ -1,4 +1,4 @@
-# Session Management-1B
+# Session Management-1B / 1C
 
 Versions: schema **26**, fingerprint **7**, evaluator **2**.
 
@@ -27,5 +27,16 @@ receive empty override and NULL timestamps; historical data is unchanged.
 
 The new columns are mutable projections, excluded from immutable fingerprints.
 `id / task_id / title / created_at` and all historical messages remain protected.
-No Session menu, Sidebar rendering change, archive UI, or Delete API is added.
-SM-1C will wire these domain APIs into UI.
+SM-1C exposes expanded Sidebar row menus for rename/reset, pin/unpin and
+confirmed archive. Titles are resolved only through the Service. The Sidebar
+shows all pins plus 10 recent visible Sessions, retaining the current unarchived
+Session if needed. The dynamic list scrolls without moving static navigation or
+Settings; collapsed rows remain icon-only (expand to manage).
+
+Renaming the open Session immediately updates its global header. Archiving it
+navigates to Today without closing or deleting history. A conditional archived
+entry opens a small Restore dialog, not a static page. Restore refreshes the
+list without opening or re-pinning; an empty dialog shows `暂无已归档会话`.
+All metadata mutations are disabled during Agent turns or approval execution,
+and handlers recheck busy state after modal dialogs. No Delete API/UI,
+automatic titles, search, folders, tags or bulk actions are provided.

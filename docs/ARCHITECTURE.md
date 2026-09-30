@@ -72,7 +72,7 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - tool-call / tool-result 经 `AgentSessionService` 持久化；Runtime 从存储重建 `ModelMessage`，最多执行 4 个 tool rounds。无 Registry 时保持 Agent-1 no-tool 行为。
 - legacy `AIClient`（`app/ai/interface.py`）保持不变，继续服务 Planner / Assessment / JD / TaskReview / Route Builder；Agent 使用独立的 `AgentModelClient.complete(ModelRequest)`。
 - Agent-3：Today active Task → [开始学习]/[继续学习] → task-bound Session → internal Agent Workspace。`AgentTaskContextBuilder` 每 user turn 复用六个 read-only tools 构建一次 compact snapshot；`AgentTurnWorker` 在 worker thread 用 fresh SQLite connection 构建 Runtime 并执行，失败后从持久化 history reload。
-- Agent Workspace 仍是 internal stack page，不是静态 `PageKey` / `PAGE_SPECS` 页面。Learning Shell-1 在 Sidebar 增加动态「学习会话」：最近 10 个 active Session 按 `updated_at DESC` 排序，当前会话可额外保留入口；点击按 `session_id` 直接打开原 Workspace。Session 可访问性不取决于 origin Task 的 active/done/not_done/cancelled；离开不关闭 Session，`agent_sessions.task_id` 是不可改写的 origin 身份。忙碌期间禁止切换到另一 Session。普通 UI 只显示 user 与最终 assistant 文本，不展示 tool protocol。
+- Agent Workspace 仍是 internal stack page，不是静态 `PageKey` / `PAGE_SPECS` 页面。Learning Shell-1 在 Sidebar 增加动态「学习会话」：所有 active non-archived pinned Session 优先，随后最近 10 个 unpinned visible Session 按 `updated_at DESC` 排序，当前未归档会话可额外保留入口；点击按 `session_id` 直接打开原 Workspace。Session 可访问性不取决于 origin Task 的 active/done/not_done/cancelled；离开不关闭 Session，`agent_sessions.task_id` 是不可改写的 origin 身份。忙碌期间禁止切换到另一 Session。普通 UI 只显示 user 与最终 assistant 文本，不展示 tool protocol。
 - Agent-4 提供静态 `AgentSkill` / `AgentSkillRegistry` / `AgentSkillSelector`：从同一 turn 的 `Task Context.task.activity_kind` 确定性选择教学策略，一轮选择一次、无模型分类调用、无 DB access、不授予 Tool 权限、不持久化 Skill key。
 - Agent Skill prompt 是可信静态 instruction，置于 Task Context JSON 数据之前；Career `SkillService` / `skills` 表仍属于职业/技术技能域，二者严格分离。
 - Agent-5 通过官方 `mcp>=2,<3` SDK 增加 per-user-turn stdio / Streamable HTTP MCP Tools。只有本地精确 `allowed_tools` 与 `readOnlyHint=True` 双重满足才暴露；MCP 是外部不可信数据，Native tools 始终保留且不允许 MCP mutation tools。
@@ -85,7 +85,8 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - Agent-9 提供 Task completion Approval；Agent-10 已加入 Assessment start/resume 与 bounded Learning Note save Approval。用户明确批准后才由 worker-owned SQLite connection 调用 canonical Services；Assessment startup 不提交答案/判分，Learning Note 是 SQLite application data，不是 Workspace 文件写入。
 - Agent-11 提供生产 Session UX、safe errors、忙碌状态串行化、resilient reload/shutdown 与离线 `agent-diagnostic`。
 - Workspace-1 提供 schema v25 的 Task-scoped managed/local binding。managed 支持 list/read/write/mkdir 及按 Sandbox 配置的可选 Docker execution；local 仅 list/read、敏感文件拒绝，无写入/执行。模型不接收 host absolute path。绑定入口是 conversation header 的 compact selector/menu，不是大型 body Card。
-- 当前版本：schema 26 / fingerprint 7 / evaluator 2。Agent-10 三个固定请求不等于通用 application writes；Session rename/pin/archive UI/search/folders、Agent 提交验收答案、任意笔记编辑、local writes/execution 与 diff approval 均未实现。详见 `docs/PRODUCT_BASELINE.md`、`docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/WORKSPACES.md`。
+- Session Management-1C 通过展开侧栏的独立 ⋯ 菜单提供 rename/reset、pin/unpin 与确认 archive；归档当前会话返回 Today。轻量归档列表支持 Restore，不自动打开或重新固定；Agent turn / approval execution 忙碌期间禁止 metadata mutation。无 Delete UI/API。详见 `docs/SESSION_MANAGEMENT.md`。
+- 当前版本：schema 26 / fingerprint 7 / evaluator 2。Agent-10 三个固定请求不等于通用 application writes；Session search/folders、Agent 提交验收答案、任意笔记编辑、local writes/execution 与 diff approval 均未实现。详见 `docs/PRODUCT_BASELINE.md`、`docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/WORKSPACES.md`。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。Agent learning behavior 配置位于独立 `app/agent/skills/` 命名空间，绝不复用或重解释 Career Skill 表。详见 `docs/AGENT_ARCHITECTURE.md`。
 

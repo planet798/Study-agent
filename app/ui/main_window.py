@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QInputDialog,
+    QLineEdit,
     QLabel,
     QMainWindow,
     QMenu,
@@ -39,6 +41,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..agent.session import AgentSessionError
+from .archived_sessions_dialog import ArchivedSessionsDialog
 from ..services.date_service import DateService
 from ..services.manual_task_service import ManualTaskService
 from ..services.task_review_service import TaskReviewService
@@ -239,6 +243,16 @@ class MainWindow(QMainWindow):
         self.nav_ai_btn = self.sidebar.item(PageKey.SETTINGS)
         self.sidebar.page_requested.connect(self._on_nav_requested)
         self.sidebar.session_requested.connect(self._on_open_agent_session)
+        self.sidebar.session_rename_requested.connect(self._on_session_rename)
+        self.sidebar.session_reset_title_requested.connect(
+            lambda sid: self._mutate_session_metadata("reset_title", sid))
+        self.sidebar.session_pin_requested.connect(
+            lambda sid: self._mutate_session_metadata("pin", sid))
+        self.sidebar.session_unpin_requested.connect(
+            lambda sid: self._mutate_session_metadata("unpin", sid))
+        self.sidebar.session_archive_requested.connect(self._on_session_archive)
+        self.sidebar.archived_sessions_requested.connect(self._on_archived_sessions)
+        self._archived_sessions_dialog = None
 
         # ----- 今日页（View 已抽到 TodayPage，MainWindow 只做编排） -----
         self.today_page = TodayPage()
@@ -442,14 +456,104 @@ class MainWindow(QMainWindow):
         if self.agent_session_service is None or page is None:
             return
         try:
-            sessions = self.agent_session_service.list_recent_active_sessions(10)
+            sessions = self.agent_session_service.list_sidebar_sessions(10)
             selected = (page.current_session_id if self.stack.currentWidget() is page else None)
             if selected is not None and not any(s["id"] == selected for s in sessions):
-                sessions.append(self.agent_session_service.get(selected))
-            self.sidebar.set_sessions(sessions, selected,
-                                      bool(self._agent_inflight_sessions or self._approval_inflight))
+                current = self.agent_session_service.get(selected)
+                if current["status"] == "active" and current["archived_at"] is None:
+                    sessions.append(current)
+            archived = self.agent_session_service.list_archived_sessions()
+            self.sidebar.set_sessions(
+                [self._session_visual_record(s) for s in sessions], selected,
+                self._session_management_busy(), bool(archived))
+            if self._archived_sessions_dialog is not None:
+                self._archived_sessions_dialog.set_busy(self._session_management_busy())
+                self._archived_sessions_dialog.set_sessions(
+                    [self._session_visual_record(s) for s in archived])
         except Exception:
             self.statusBar().showMessage("无法加载学习会话列表", 4000)
+
+    def _session_visual_record(self, session: dict) -> dict:
+        return {
+            "id": session["id"],
+            "visible_title": self.agent_session_service.effective_title(session),
+            "has_title_override": bool(session["display_title"].strip()),
+            "pinned": session["pinned_at"] is not None,
+            "archived_at": session["archived_at"],
+        }
+
+    def _session_management_busy(self) -> bool:
+        return bool(self._agent_inflight_sessions or self._approval_inflight)
+
+    def _mutate_session_metadata(self, operation: str, session_id: int, *args) -> bool:
+        # Recheck after modal dialogs as worker state can change in their event loop.
+        if self.agent_session_service is None or self._session_management_busy():
+            return False
+        try:
+            session = getattr(self.agent_session_service, operation)(int(session_id), *args)
+        except AgentSessionError:
+            message = ("会话名称无效，请输入 1–120 个字符。" if operation == "rename"
+                       else "无法更新学习会话，请重试。")
+            self.statusBar().showMessage(message, 4000)
+            return False
+        except Exception:
+            self.statusBar().showMessage("无法更新学习会话，请重试。", 4000)
+            return False
+        page = self.agent_workspace_page
+        if page is not None and page.current_session_id == int(session_id):
+            if operation == "archive":
+                self._switch_to_today()
+            elif self.stack.currentWidget() is page:
+                self.page_header.set_title(self.agent_session_service.effective_title(session))
+        self._refresh_learning_sessions()
+        return True
+
+    def _on_session_rename(self, session_id: int) -> None:
+        if self._session_management_busy():
+            return
+        try:
+            session = self.agent_session_service.get(int(session_id))
+            dialog = QInputDialog(self)
+            dialog.setWindowTitle("重命名学习会话")
+            dialog.setLabelText("会话名称")
+            dialog.setTextValue(self.agent_session_service.effective_title(session))
+            dialog.setOkButtonText("保存")
+            dialog.setCancelButtonText("取消")
+            dialog.findChild(QLineEdit).setMaxLength(120)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._mutate_session_metadata("rename", session_id, dialog.textValue())
+            dialog.deleteLater()
+        except Exception:
+            self.statusBar().showMessage("无法更新学习会话，请重试。", 4000)
+
+    def _on_session_archive(self, session_id: int) -> None:
+        if self._session_management_busy():
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("归档学习会话")
+        box.setText("归档后，会话将从侧栏收起，但聊天记录不会删除，可稍后恢复。")
+        archive = box.addButton("归档", QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        if box.clickedButton() is archive:
+            self._mutate_session_metadata("archive", session_id)
+        box.deleteLater()
+
+    def _on_archived_sessions(self) -> None:
+        if self._session_management_busy() or self.agent_session_service is None:
+            return
+        dialog = ArchivedSessionsDialog(self)
+        self._archived_sessions_dialog = dialog
+        dialog.restore_requested.connect(
+            lambda sid: self._mutate_session_metadata("restore", sid))
+        try:
+            self._refresh_learning_sessions()
+            dialog.exec()
+        finally:
+            self._archived_sessions_dialog = None
+            dialog.deleteLater()
 
     def _on_start_study(self, task_id: int) -> None:
         """Today action creates/resumes only active Tasks; history uses session ID."""
@@ -474,7 +578,7 @@ class MainWindow(QMainWindow):
             return
         try:
             session = self.agent_session_service.get(int(session_id))
-            if session["status"] != "active":
+            if session["status"] != "active" or session["archived_at"] is not None:
                 self._refresh_learning_sessions()
                 return
             task = self.task_service.get_task(int(session["task_id"]))
@@ -492,7 +596,7 @@ class MainWindow(QMainWindow):
             )
             self._clear_today_scroll_restore()
             self.stack.setCurrentIndex(self.agent_workspace_page_index)
-            self.page_header.set_title(session["title"] or task.title)
+            self.page_header.set_title(self.agent_session_service.effective_title(session))
             self.page_header.set_subtitle(self._route_name_for_task(task) or "学习会话")
             self.page_header.set_icon(None)
             self._refresh_learning_sessions()

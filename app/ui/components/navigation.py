@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -103,7 +105,7 @@ class SANavigationItem(QPushButton):
         self.setProperty("collapsed", "true" if self._collapsed else "false")
         # collapsed 只显示 icon；展开恢复文本。
         label = (self.fontMetrics().elidedText(self._label, Qt.TextElideMode.ElideRight,
-                                               EXPANDED_WIDTH - 62)
+                                               EXPANDED_WIDTH - 126)
                  if self._key.startswith("session:") else self._label)
         self.setText("" if self._collapsed else label)
         self.setToolTip(self._label)
@@ -166,6 +168,12 @@ class SANavigationSidebar(QWidget):
 
     page_requested = Signal(str)      # PageKey value
     session_requested = Signal(int)
+    session_rename_requested = Signal(int)
+    session_reset_title_requested = Signal(int)
+    session_pin_requested = Signal(int)
+    session_unpin_requested = Signal(int)
+    session_archive_requested = Signal(int)
+    archived_sessions_requested = Signal()
     collapsed_changed = Signal(bool)
 
     def __init__(self, specs, parent: QWidget | None = None):
@@ -220,18 +228,38 @@ class SANavigationSidebar(QWidget):
             self._add_item(spec)
         root.addLayout(self.items_layout)
 
+        # Pins are unbounded: keep the dynamic section scrollable while static
+        # navigation and the Settings footer remain in place.
+        sessions_scroll = QScrollArea(self)
+        sessions_scroll.setWidgetResizable(True)
+        sessions_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        sessions_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sessions_body = QWidget(sessions_scroll)
+        sessions_root = QVBoxLayout(sessions_body)
+        sessions_root.setContentsMargins(0, 0, 0, 0)
+        sessions_root.setSpacing(_spacing.XS)
+        sessions_scroll.setWidget(sessions_body)
+        root.addWidget(sessions_scroll, 1)
         self.sessions_heading = QLabel("学习会话")
         self.sessions_heading.setObjectName("SASessionsHeading")
         self.sessions_heading.setContentsMargins(_spacing.SM, _spacing.MD, 0, _spacing.XS)
-        root.addWidget(self.sessions_heading)
+        sessions_root.addWidget(self.sessions_heading)
         self.sessions_layout = QVBoxLayout()
         self.sessions_layout.setContentsMargins(0, 0, 0, 0)
         self.sessions_layout.setSpacing(_spacing.XS)
-        root.addLayout(self.sessions_layout)
+        sessions_root.addLayout(self.sessions_layout)
         self._session_items: dict[int, SANavigationItem] = {}
+        self._session_rows: dict[int, QWidget] = {}
+        self.archived_sessions_btn = QPushButton("已归档会话", self)
+        self.archived_sessions_btn.setToolTip("已归档会话")
+        self.archived_sessions_btn.setAccessibleName("已归档会话")
+        self.archived_sessions_btn.setIcon(_icons.icon(_icons.IconName.BOOK, size=20))
+        self.archived_sessions_btn.clicked.connect(self.archived_sessions_requested)
+        sessions_root.addWidget(self.archived_sessions_btn)
+        self.archived_sessions_btn.hide()
         self.sessions_heading.hide()
 
-        root.addStretch()
+        sessions_root.addStretch()
 
         # ---- divider + settings ----
         divider = QFrame()
@@ -269,32 +297,72 @@ class SANavigationSidebar(QWidget):
         return item
 
     def set_sessions(self, sessions: list[dict], current_id: int | None = None,
-                     busy: bool = False) -> None:
-        """Render a bounded recent list; session IDs never appear in visible text."""
+                     busy: bool = False, has_archived: bool = False) -> None:
+        """Render visual records with service-resolved visible_title, without a cap."""
         previous_key = self.current_key()
         for item in self._session_items.values():
             self._group.removeButton(item)
             self._items.pop(item.key(), None)
-            self.sessions_layout.removeWidget(item)
-            item.hide()
-            item.deleteLater()
+            row = self._session_rows[int(item.key().split(":")[1])]
+            self.sessions_layout.removeWidget(row)
+            row.hide()
+            item.management_menu.close()
+            row.deleteLater()
         self._session_items.clear()
-        self.sessions_heading.setVisible(bool(sessions) and not self._collapsed)
-        for session in sessions[:11]:
+        self._session_rows.clear()
+        self.archived_sessions_btn.setVisible(has_archived)
+        self.archived_sessions_btn.setEnabled(not busy)
+        self.sessions_heading.setVisible(bool(sessions or has_archived) and not self._collapsed)
+        for session in sessions:
             sid = int(session["id"])
-            title = str(session.get("title") or "学习会话")
+            title = session["visible_title"]
             item = SANavigationItem(f"session:{sid}", title, _icons.IconName.BOOK, self)
             # Reuse Fluent navigation selected/hover/disabled QSS.
             item.setMinimumWidth(0)
             item.setToolTip(title)
             item.setText(item.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight,
-                                                       EXPANDED_WIDTH - 62))
+                                                       EXPANDED_WIDTH - 126))
             item.setEnabled(not busy or sid == current_id)
             item.set_collapsed(self._collapsed)
             self._group.addButton(item)
             self._items[item.key()] = item
             self._session_items[sid] = item
-            self.sessions_layout.addWidget(item)
+            row = QWidget(self)
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+            layout.addWidget(item, 1)
+            more = SAIconButton(_icons.IconName.MORE, icon_size=16,
+                                tooltip="会话操作", accessible_name=f"{title}：会话操作")
+            more.setFixedSize(28, 32)
+            more.setEnabled(not busy)
+            more.setVisible(not self._collapsed)
+            layout.addWidget(more)
+            menu = QMenu(more)
+            actions = [("重命名", self.session_rename_requested)]
+            if session.get("has_title_override"):
+                actions.append(("恢复原始名称", self.session_reset_title_requested))
+            actions.append(("取消固定" if session.get("pinned") else "固定",
+                            self.session_unpin_requested if session.get("pinned")
+                            else self.session_pin_requested))
+            actions.append(("归档", self.session_archive_requested))
+            for text, signal in actions:
+                action = menu.addAction(text)
+                action.setEnabled(not busy)
+                action.triggered.connect(lambda _checked=False, id=sid, sig=signal: sig.emit(id))
+            more.clicked.connect(lambda _checked=False, m=menu, b=more:
+                                 m.popup(b.mapToGlobal(b.rect().bottomLeft())))
+            item.management_button = more
+            item.management_menu = menu
+            if session.get("pinned"):
+                # No PIN asset exists; a subtle visible marker plus menu state.
+                marker = QLabel("固定", row)
+                marker.setToolTip("已固定")
+                marker.setVisible(not self._collapsed)
+                layout.insertWidget(1, marker)
+                item.pin_marker = marker
+            self._session_rows[sid] = row
+            self.sessions_layout.addWidget(row)
             item.clicked.connect(lambda _checked=False, id=sid: self._on_session_clicked(id))
         if current_id in self._session_items:
             self.set_current(f"session:{current_id}")
@@ -356,7 +424,14 @@ class SANavigationSidebar(QWidget):
         self.brand_icon.setVisible(True)
         for item in self._items.values():
             item.set_collapsed(collapsed)
-        self.sessions_heading.setVisible(bool(self._session_items) and not collapsed)
+        for item in self._session_items.values():
+            item.management_button.setVisible(not collapsed)
+            if hasattr(item, "pin_marker"):
+                item.pin_marker.setVisible(not collapsed)
+        self.archived_sessions_btn.setText("" if collapsed else "已归档会话")
+        self.sessions_heading.setVisible(
+            bool(self._session_items or not self.archived_sessions_btn.isHidden()) and not collapsed
+        )
         if collapsed:
             self.collapse_btn.setToolTip("展开侧栏")
             self.collapse_btn.setAccessibleName("展开侧栏")
