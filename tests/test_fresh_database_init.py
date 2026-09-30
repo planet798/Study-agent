@@ -87,6 +87,9 @@ def test_fresh_db_sets_current_schema_version(tmp_path):
         conn.close()
 
 
+@pytest.mark.migration
+@pytest.mark.slow  # builds/computes real upgrade DDL for comparison
+
 def test_fresh_db_schema_matches_real_migration_path(tmp_path):
     real_path = resolve_db_path(tmp_path / "real.db")
     raw = sqlite3.connect(str(real_path))
@@ -104,6 +107,9 @@ def test_fresh_db_schema_matches_real_migration_path(tmp_path):
         fast.close()
         raw.close()
 
+
+@pytest.mark.migration
+@pytest.mark.slow
 
 def test_fresh_db_reproduces_real_migration_seed_rows(tmp_path):
     real_path = resolve_db_path(tmp_path / "real.db")
@@ -160,6 +166,8 @@ def test_fast_initializer_does_not_run_migrations(tmp_path, monkeypatch):
 # ------------------------------------------------------------
 
 
+@pytest.mark.migration
+
 def test_initialize_refuses_already_migrated_db(tmp_path):
     path = resolve_db_path(tmp_path / "prod.db")
     raw = sqlite3.connect(str(path))
@@ -182,6 +190,9 @@ def test_initialize_refuses_db_with_existing_tables(tmp_path):
 # 6：legacy v14 -> v20 仍逐级真实执行
 # ------------------------------------------------------------
 
+
+@pytest.mark.migration
+@pytest.mark.slow  # two real historical upgrade stages
 
 def test_legacy_v14_to_v20_still_runs_every_step(tmp_path):
     path = resolve_db_path(tmp_path / "v14.db")
@@ -222,6 +233,8 @@ def test_release_migration_module_does_not_use_fast_initializer():
     assert "initialize_fresh_database" not in src
     assert "get_fresh_connection" not in src
 
+
+@pytest.mark.migration
 
 def test_production_get_connection_migrates_empty_db(tmp_path):
     conn = get_connection(tmp_path / "prod.db")

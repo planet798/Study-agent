@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import pytest
 
+# Scheduler composes route-local planners, Task/plan repositories and services.
+pytestmark = pytest.mark.integration
+
 from app.database.assessment_repository import AssessmentRepository
 from app.database.learning_route_repository import LearningRouteRepository
 from app.database.repository import TaskRepository
@@ -181,6 +184,7 @@ class TestFairness:
         counts = _created_by_route(env, out)
         assert counts.get(high.id, 0) >= counts.get(low.id, 0)
 
+    @pytest.mark.slow  # 120 topics, four routes, ten simulated scheduling days
     def test_low_priority_not_starved_over_time(self, env):
         high = _add_route(env, "高", [f"T{i}" for i in range(40)], priority=5)
         mid = _add_route(env, "中", [f"T{i}" for i in range(40)], priority=4)

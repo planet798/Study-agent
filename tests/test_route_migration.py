@@ -15,6 +15,11 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
+# Each case constructs/upgrades historical route-bound databases.
+pytestmark = [pytest.mark.migration, pytest.mark.integration, pytest.mark.slow]
+
 from app.database import schema as schema_module
 from app.database.connection import get_connection
 from app.database.learning_route_repository import (

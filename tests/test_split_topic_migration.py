@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import pytest
 
+# Canonical migration actions on seeded legacy topics; no schema replay per case.
+pytestmark = [pytest.mark.migration, pytest.mark.integration]
+
 from app.database.assessment_repository import AssessmentRepository
 from app.services import canonical_routes as C
 from app.services.canonical_route_service import CanonicalRouteService

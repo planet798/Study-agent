@@ -49,6 +49,8 @@ def test_three_actions_bind_json_object_arguments_without_copying_note_body(conn
         repository.create_request(session["id"], task.id, forged["id"], "cross", ACTION_SAVE_NOTE)
 
 
+@pytest.mark.migration  # release fingerprint contract
+
 def test_request_and_event_are_atomic_and_bound_to_persisted_call(conn):
     task, session, call = approval_fixture(conn)
     repository = AgentApprovalRepository(conn)
@@ -110,6 +112,7 @@ def test_atomic_rollback_and_valid_transitions(conn):
 @pytest.mark.parametrize("column,value", [
     ("event_type", "failed"), ("actor", "agent"), ("code", "execution_failed"),
 ])
+@pytest.mark.migration
 def test_verifier_detects_event_tampering(conn, column, value):
     task, session, call = approval_fixture(conn)
     repo = AgentApprovalRepository(conn)
@@ -124,6 +127,7 @@ def test_verifier_detects_event_tampering(conn, column, value):
     assert "agent_approval_events" in verify(conn, before)["history_modified_rows"]
 
 
+@pytest.mark.migration
 def test_verifier_detects_deleted_approval_event(conn):
     task, session, call = approval_fixture(conn)
     repo = AgentApprovalRepository(conn)
@@ -138,6 +142,7 @@ def test_verifier_detects_deleted_approval_event(conn):
     assert row["id"] in result["approval_consistency_problems"]
 
 
+@pytest.mark.migration
 def test_request_ownership_and_history_tamper_detection(conn):
     task, session, call = approval_fixture(conn)
     other_task, other_session, other_call = approval_fixture(conn)

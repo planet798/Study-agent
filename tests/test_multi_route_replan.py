@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import pytest
 
+# Replan preparation, route planners/scheduler and persistent learning graph.
+pytestmark = pytest.mark.integration
+
 from app.database.assessment_repository import AssessmentRepository
 from app.database.learning_route_repository import LearningRouteRepository
 from app.database.repository import TaskRepository

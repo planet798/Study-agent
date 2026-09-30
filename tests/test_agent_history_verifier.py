@@ -6,6 +6,9 @@ import sqlite3
 
 import pytest
 
+# Release-history verifier contracts; most use the cheap fresh-schema fixture.
+pytestmark = pytest.mark.migration
+
 from app.database.agent_repository import AgentRepository
 from app.database.repository import TaskRepository
 from app.database.schema import migrate_stepwise
@@ -84,6 +87,8 @@ def test_memory_summary_updates_are_derived_not_immutable_history(conn):
     assert result["history_fingerprint_changes"] == {}
 
 
+@pytest.mark.slow  # populated v20 DB upgrade, not fresh-schema-only setup
+@pytest.mark.integration
 def test_v20_before_inventory_uses_none_then_v24_migration_verifies(tmp_path):
     conn = sqlite3.connect(str(tmp_path / "v20.db"))
     try:

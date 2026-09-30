@@ -226,6 +226,8 @@ class TestAssessmentEntry:
         assert "暂不支持验收" in w.statusBar().currentMessage()
 
 
+@pytest.mark.threaded
+@pytest.mark.integration
 class TestAssessmentDialog:
     class _FakeService:
         def submit_answers(self, attempt_id, answers, today=None):

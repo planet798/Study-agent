@@ -12,6 +12,9 @@ import json
 import threading
 
 import pytest
+
+# Every case exercises real worker-thread SQLite/resources or delivery.
+pytestmark = [pytest.mark.ui, pytest.mark.threaded, pytest.mark.integration]
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QLabel
 
@@ -347,6 +350,7 @@ def _close_assessment_window(qtbot, window):
     QCoreApplication.processEvents()
 
 
+@pytest.mark.slow  # MainWindow + real worker DBs + assessment generation/judging
 class TestMainWindowIntegration:
     def test_click_start_assessment_no_thread_error(
         self, qtbot, main_conn, db_path, monkeypatch

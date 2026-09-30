@@ -385,6 +385,8 @@ def test_task_a_session_cannot_read_task_b_by_argument_and_other_session_is_isol
     assert all("Task A" not in m.content for m in client.requests[2].messages)
 
 
+@pytest.mark.migration
+@pytest.mark.integration
 def test_tool_conversation_is_legal_verifier_history_growth(agent_env):
     env = agent_env
     from app.diagnostics import release_migration as rm

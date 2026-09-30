@@ -1,7 +1,10 @@
 """Practice detail scroll restoration: one generation, user intent, safe teardown."""
 from __future__ import annotations
 
+import pytest
 import shiboken6
+
+pytestmark = pytest.mark.ui  # dialog layout/range/user-input lifecycle
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication

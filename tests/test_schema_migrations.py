@@ -15,6 +15,9 @@ import sqlite3
 
 import pytest
 
+# Repeated real historical-schema upgrades and idempotency checks.
+pytestmark = [pytest.mark.migration, pytest.mark.slow]
+
 from app.database import schema as schema_module
 from app.database.connection import get_connection
 from app.database.schema import (

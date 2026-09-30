@@ -53,6 +53,7 @@ class TestSchemaV19:
         assert "usage_description" in row
         assert "NOT NULL" in row.upper()
 
+    @pytest.mark.migration
     def test_migration_idempotent(self, tmp_path):
         from app.database.connection import get_connection
         from app.database.schema import migrate
@@ -62,6 +63,9 @@ class TestSchemaV19:
         assert migrate(c) >= 19
         c.close()
 
+    @pytest.mark.migration
+    @pytest.mark.integration
+    @pytest.mark.slow  # real migration plus canonical history/seed pipeline
     def test_v18_to_v19_sequential(self, tmp_path):
         """从 v18 数据库升级到 v19：仅新增表/列，无自动 evidence。"""
         from app.database.connection import get_connection

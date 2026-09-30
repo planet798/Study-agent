@@ -209,6 +209,8 @@ def test_short_session_makes_no_summary_call_and_preserves_agent6_request(conn):
     assert AgentMemoryRepository(conn).get_for_session(session["id"]) is None
 
 
+@pytest.mark.migration  # release-history verifier after compaction
+@pytest.mark.integration
 def test_first_compaction_summarizes_old_prefix_and_keeps_recent_turns_and_current(conn):
     sessions, session = _service(conn)
     turns = [_append_turn(sessions, session["id"], f"turn-{i}", metadata=(i == 1))

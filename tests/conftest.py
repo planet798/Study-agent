@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -447,31 +446,20 @@ def practice_readiness_env(practice_env):
 
 
 # ============================================================
-# Category markers（只加标签，默认仍跑完整 suite）
+# Category markers (classification only; default full collection unchanged)
 # ============================================================
-# 开发时可以：
-#   pytest -m "not slow"            # 快速迭代（跳过迁移/集成类）
-#   pytest -m migration             # 只跑迁移相关
-#   pytest -m ui                    # 只跑 GUI/offscreen
-#   pytest -m integration           # 只跑端到端/调度集成
-# 默认 ``pytest -q`` 语义完全不变。
-
-_MIGRATION_RE = re.compile(r"migration|verifier|legacy|schema_migrations")
-_SLOW_RE = re.compile(
-    r"end_to_end|phase6_regression|multi_route_scheduler|stabilization_legacy"
-    r"|release_migration|migration_verifier"
-)
+# Specialized marks live beside the tests, not in filename regexes.
+# pytest -m "not slow" -q   broad development regression
+# pytest -m migration -q    real upgrades / release-history verification
+# pytest -m ui -q           Qt widget/application/event-loop behavior
+# pytest -m threaded -q     background-worker lifecycle/resources
+# pytest -m integration -q  composed production subsystems
+# pytest -q                 full release gate
 
 
 def pytest_collection_modifyitems(config, items):
+    # fixturenames includes transitive/autouse dependencies (e.g. shell ->
+    # qapp and make_window -> qtbot). Subprocess Qt tests mark ui explicitly.
     for item in items:
-        nodeid = item.nodeid.lower()
-        if _MIGRATION_RE.search(nodeid):
-            item.add_marker(pytest.mark.migration)
-        if "qtbot" in getattr(item, "fixturenames", ()):
+        if {"qtbot", "qapp"}.intersection(getattr(item, "fixturenames", ())):
             item.add_marker(pytest.mark.ui)
-        if _SLOW_RE.search(nodeid):
-            item.add_marker(pytest.mark.integration)
-            item.add_marker(pytest.mark.slow)
-        elif _MIGRATION_RE.search(nodeid):
-            item.add_marker(pytest.mark.slow)

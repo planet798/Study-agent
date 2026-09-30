@@ -5,6 +5,11 @@
 
 from __future__ import annotations
 
+import pytest
+
+# Layout/range/user-input regressions; bounded tests, no stress tier.
+pytestmark = pytest.mark.ui
+
 from PySide6.QtCore import Qt
 
 from app.ui.main_window import TodayViewState

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -332,6 +334,7 @@ class TestAIReviewDialog:
             qtbot.mouseClick(dlg.postpone_btn, Qt.MouseButton.LeftButton)
 
 
+@pytest.mark.threaded
 class TestAIReviewWorker:
     def test_worker_success_emits_result(self, qtbot, task_service):
         from app.ai.schemas import TaskReview
@@ -365,6 +368,8 @@ class TestAIReviewWorker:
         worker.wait(2000)
 
 
+@pytest.mark.integration
+@pytest.mark.threaded
 class TestAIReviewFlow:
     def test_async_does_not_block_main_thread(
         self, make_window, task_service, qtbot

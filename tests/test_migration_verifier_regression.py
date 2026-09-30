@@ -11,6 +11,9 @@ import json
 
 import pytest
 
+# Populated historical DB upgrades through real migration/release paths.
+pytestmark = [pytest.mark.migration, pytest.mark.integration, pytest.mark.slow]
+
 
 def _build_v14_with_movable_task(path) -> tuple[int, str]:
     """v14 + 一个 topic-linked done 正式任务（会被 MOVE + theory backfill）。"""

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.database.assessment_repository import AssessmentRepository
 from app.database.capability_repository import CapabilityEvidenceRepository
 from app.database.skill_repository import LearningOutcomeRepository
@@ -138,6 +140,9 @@ class TestApply:
         assert stats["aware_from_tasks"] == 0
 
 
+@pytest.mark.migration
+@pytest.mark.integration
+@pytest.mark.slow  # builds populated legacy DB, canonical migration and backfill
 class TestSequentialMigration:
     def test_phase1_phase2_phase3_sequential(self, tmp_path):
         """v14 legacy → Phase1 routes → Phase2 activity → Phase3 capability。"""

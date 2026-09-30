@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
+pytestmark = [pytest.mark.ui, pytest.mark.threaded]
+
 from app.ui.ai_worker import AgentTurnWorker
 
 

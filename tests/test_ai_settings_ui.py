@@ -231,6 +231,7 @@ class TestPromptPanel:
 
 
 class TestConnectionWorkerNonBlocking:
+    @pytest.mark.threaded
     def test_worker_emits_result(self, qtbot, monkeypatch):
         import app.ai.config_service as cfg_mod
         from app.ui.ai_worker import AIConnectionTestWorker

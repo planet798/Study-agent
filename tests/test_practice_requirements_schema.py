@@ -35,6 +35,7 @@ class TestSchemaV20:
         assert "UNIQUE(project_id, topic_id)" in sql
         assert "BETWEEN 1 AND 4" in sql
 
+    @pytest.mark.migration
     def test_migration_idempotent(self, tmp_path):
         from app.database.connection import get_connection
         from app.database.schema import SCHEMA_VERSION, migrate
@@ -44,6 +45,9 @@ class TestSchemaV20:
         assert migrate(c) == SCHEMA_VERSION
         c.close()
 
+    @pytest.mark.migration
+    @pytest.mark.integration
+    @pytest.mark.slow  # real migration plus canonical route/curriculum seeding
     def test_v19_to_v20_sequential_no_auto_requirement(self, tmp_path):
         from app.database.connection import get_connection
         from app.database.repository import TaskRepository

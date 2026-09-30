@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.agent.runtime import AgentRuntime
 from app.agent.workspace import AgentWorkspaceSpec
 
@@ -118,6 +120,8 @@ def _business_state(conn, task_service, assessment_repo, task_id, kp_id):
     }
 
 
+@pytest.mark.migration  # release verifier appended history check
+@pytest.mark.integration
 def test_native_mcp_and_sandbox_compose_with_sandbox_scope_only(
     conn, repo, task_service, tmp_path
 ):

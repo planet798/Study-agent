@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import pytest
+
+# qapp-only palette/widget/event-loop behavior is UI, not slow by name.
+pytestmark = pytest.mark.ui
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QPushButton
 

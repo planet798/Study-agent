@@ -127,7 +127,9 @@ def _add_blockers(env):
     return project, vllm
 
 
+@pytest.mark.integration
 class TestSchedulerRegression:
+    @pytest.mark.slow  # multiple real DBs and multi-day scheduler comparison
     def test_route_allocation_unchanged_by_practice(self, tmp_path):
         baseline = _build_env(tmp_path, "base")
         seq_base, created_base, _ = _simulate(baseline, days=14)
@@ -141,6 +143,7 @@ class TestSchedulerRegression:
         assert [tuple(x) for x in seq_base] == [tuple(x) for x in seq_p]
         assert created_base == created_p
 
+    @pytest.mark.slow
     def test_practice_changes_topic_not_allocation(self, tmp_path):
         withp = _build_env(tmp_path, "topics")
         project, vllm = _add_blockers(withp)
@@ -161,6 +164,7 @@ class TestSchedulerRegression:
         if r3_tasks:
             assert r3_tasks[0].topic_id == vllm.id
 
+    @pytest.mark.slow
     def test_global_budget(self, tmp_path):
         env = _build_env(tmp_path, "budget")
         _add_blockers(env)
@@ -172,6 +176,7 @@ class TestSchedulerRegression:
         )
         assert minutes <= 180
 
+    @pytest.mark.slow
     def test_route_priority_not_modified(self, tmp_path):
         env = _build_env(tmp_path, "prio")
         _add_blockers(env)
@@ -231,6 +236,7 @@ class TestOtherRegressions:
         # 无 feedback → 空串
         assert variables["planner_feedback_section"] == ""
 
+    @pytest.mark.integration
     def test_capability_evidence_unchanged(self, practice_readiness_env):
         env = practice_readiness_env
         # requirement / readiness 不写 capability
@@ -242,6 +248,7 @@ class TestOtherRegressions:
             "SELECT COUNT(*) FROM capability_evidence"
         ).fetchone()[0] == 0
 
+    @pytest.mark.integration
     def test_six_routes_unchanged(self, practice_readiness_env):
         env = practice_readiness_env
         keys = {
@@ -251,6 +258,7 @@ class TestOtherRegressions:
             assert any(k.startswith(f"R{i}_") for k in keys)
         assert not any(k.startswith("R7") for k in keys)
 
+    @pytest.mark.integration
     def test_practice_evidence_history_not_regressed(
         self, practice_capability_env
     ):
@@ -268,6 +276,7 @@ class TestOtherRegressions:
         with pytest.raises(PracticeError):
             env.service.delete_output(r.repo["id"])
 
+    @pytest.mark.integration
     def test_activity_not_regressed(self, practice_readiness_env):
         env = practice_readiness_env
         vllm = env.plan_repo.find_topic_by_name_in_route(

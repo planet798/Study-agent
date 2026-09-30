@@ -128,6 +128,8 @@ class TestQuitApp:
         assert tray.hidden is True
         assert tray.deleted is True
 
+    @pytest.mark.threaded
+    @pytest.mark.integration
     def test_quit_app_joins_running_ai_worker(
         self, make_window, qtbot, task_service
     ):
@@ -168,6 +170,8 @@ class TestQuitApp:
 
 
 class TestXCloseDoesNotCleanup:
+    @pytest.mark.threaded
+    @pytest.mark.integration
     def test_x_close_does_not_stop_running_ai_worker(
         self, make_window, qtbot, task_service
     ):
@@ -217,6 +221,9 @@ class TestXCloseDoesNotCleanup:
         dlg.close()
 
 
+@pytest.mark.ui  # QApplication is in a subprocess, not a pytest Qt fixture
+@pytest.mark.integration
+@pytest.mark.slow  # subprocess GUI startup + real DB initialization/event loop
 @pytest.mark.parametrize("today", ["2026-09-05", None])
 def test_subprocess_quit_app_exits_event_loop(tmp_path, today):
     """子进程实测：托盘退出（quit_app）后 app.exec() 正常返回，进程可结束。"""

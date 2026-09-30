@@ -227,6 +227,7 @@ class TestPromptRuntimeContext:
         assert "搜广推" not in text
 
 
+@pytest.mark.migration  # directly exercises v15 dedupe/index migration
 class TestActivePlanDedupe:
     def test_dedupe_active_plans(self, conn):
         from app.database import schema

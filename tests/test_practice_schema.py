@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 
 class TestSchemaV18:
     def test_version_and_tables(self, conn):
@@ -84,7 +86,10 @@ def _integrity(conn):
     return _cm()
 
 
+@pytest.mark.migration
 class TestSequentialMigrationV18:
+    @pytest.mark.integration
+    @pytest.mark.slow  # real DB + canonical legacy migration pipeline
     def test_phase1_to_phase4_no_auto_projects(self, tmp_path):
         from app.database.connection import get_connection
         from app.database.learning_route_repository import (

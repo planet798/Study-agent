@@ -1,4 +1,9 @@
 """Today → Workspace → model request → explicit user click → canonical completion."""
+import pytest
+
+# Native Runtime requests -> Qt worker -> approval Service -> canonical action.
+pytestmark = [pytest.mark.integration, pytest.mark.ui, pytest.mark.threaded]
+
 from PySide6.QtWidgets import QFrame
 from app.agent.approval.provider import AgentApprovalProvider
 from app.agent.approval.service import AgentApprovalService

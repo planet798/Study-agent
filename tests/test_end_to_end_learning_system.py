@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+# Broad multi-service end-to-end scenarios with canonical curriculum setup.
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
 from app.database.schema import SCHEMA_VERSION
 from app.services.capability import EXPLAIN, IMPLEMENT, PROJECT, UNLEARNED
 from app.services.practice_readiness import (
@@ -72,6 +75,7 @@ def _build_v14_db(path: Path) -> None:
     conn.close()
 
 
+@pytest.mark.migration
 class TestSyntheticV14ToV20Migration:
     def test_full_flow(self, tmp_path):
         from app.database.connection import get_raw_connection

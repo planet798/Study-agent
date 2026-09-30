@@ -154,6 +154,7 @@ def test_event_details_are_bounded_and_allowlisted(conn):
     assert conn.execute("SELECT COUNT(*) FROM agent_turn_traces").fetchone()[0] == 0
 
 
+@pytest.mark.migration  # release verifier derived-growth contract
 def test_trace_and_evaluation_growth_is_derived_not_historical(conn):
     from app.database.agent_evaluation_repository import AgentEvaluationRepository
     from app.diagnostics.release_migration import inventory, verify

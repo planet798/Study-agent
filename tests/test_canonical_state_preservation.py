@@ -263,6 +263,7 @@ class TestEnsureDefaultPlanSemantics:
         assert len(plan_repo.list_phases(plan.id)) == 6
 
 
+@pytest.mark.migration
 class TestMigrationGateFailClosed:
     def test_unreadable_existing_db_blocked(self, tmp_path):
         import app.main as m
@@ -318,6 +319,7 @@ class TestMigrationGateFailClosed:
         assert bad.read_bytes() == b"garbage" * 64
 
 
+@pytest.mark.migration  # release backup/read-only preflight API contracts
 class TestHardeningStillIntact:
     """aa14cda 迁移加固不回归（关键不变量）。"""
 

@@ -1,5 +1,10 @@
 """Approval execution owns a worker-thread connection and sanitizes failures."""
 import threading
+
+import pytest
+
+# Worker-thread connection ownership, not a historical-schema migration test.
+pytestmark = [pytest.mark.ui, pytest.mark.threaded]
 from app.ui.agent_approval_worker import AgentApprovalWorker
 from app.database.connection import get_connection
 

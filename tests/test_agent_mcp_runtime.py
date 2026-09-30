@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 from types import SimpleNamespace
 
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
@@ -143,6 +145,8 @@ def _environment(conn, task_repository, task_service, task_id):
     return sessions, session, native_registry, provider, selector, builder, bridges
 
 
+@pytest.mark.migration  # release verifier checks appended tool history
+@pytest.mark.integration
 def test_native_plus_mcp_tool_loop_reuses_turn_scope_and_persists_history(conn, repo, task_service):
     FakeMCPClient.instances.clear()
     task = repo.create(

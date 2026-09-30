@@ -4,6 +4,10 @@ from __future__ import annotations
 import threading
 
 import pytest
+
+# Blocking-service synchronization, dialog QThreads and parent shutdown.
+# Focused execution is short; threaded does not automatically mean slow.
+pytestmark = [pytest.mark.ui, pytest.mark.threaded, pytest.mark.integration]
 import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QDialog

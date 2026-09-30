@@ -2,12 +2,19 @@
 
 import copy
 
+import pytest
+
+# Actual v24 upgrade and v7 binding-history verifier contracts.
+pytestmark = pytest.mark.migration
+
 from app.database.connection import get_raw_connection, get_fresh_connection
 from app.database.schema import SCHEMA_VERSION, get_schema_version, migrate_stepwise
 from app.database.task_workspace_repository import TaskWorkspaceRepository
 from app.diagnostics.release_migration import FINGERPRINT_VERSION, inventory, verify
 
 
+@pytest.mark.slow  # builds a real v24 DB then upgrades populated history
+@pytest.mark.integration
 def test_v24_to_v25_preserves_agent_and_learning_history(tmp_path):
     conn = get_raw_connection(tmp_path / "v24.db")
     assert migrate_stepwise(conn, target=24) == 24

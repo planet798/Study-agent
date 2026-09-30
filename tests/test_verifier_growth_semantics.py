@@ -16,6 +16,9 @@ import sqlite3
 
 import pytest
 
+# Repeated real DB migrations plus release-history growth/tamper checks.
+pytestmark = [pytest.mark.migration, pytest.mark.slow]
+
 TASK_COLS = (
     "title", "description", "category", "estimated_minutes", "priority",
     "status", "scheduled_date", "created_at", "updated_at",

@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+# Real DB backups, upgrade preflight, CLI and release verification.
+pytestmark = [pytest.mark.migration, pytest.mark.integration, pytest.mark.slow]
+
 
 def _md5(path) -> str:
     return hashlib.md5(Path(path).read_bytes()).hexdigest()

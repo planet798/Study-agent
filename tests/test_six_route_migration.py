@@ -12,6 +12,9 @@ import shutil
 
 import pytest
 
+# Backup/canonical migration of populated historical user data.
+pytestmark = [pytest.mark.migration, pytest.mark.integration, pytest.mark.slow]
+
 from app.database.assessment_repository import AssessmentRepository
 from app.database.connection import get_connection
 from app.database.learning_route_repository import (

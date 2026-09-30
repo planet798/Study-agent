@@ -1,5 +1,7 @@
 """Offline Agent diagnostics: no migrations, external IO, or secret disclosure."""
 import json
+
+import pytest
 from types import SimpleNamespace
 from app.agent.status import build_agent_capability_status
 from app.diagnostics.agent_diagnostic import run_agent_diagnostic, format_agent_diagnostic
@@ -59,6 +61,7 @@ def test_diagnostic_minimal_read_only_and_optional_degradation(conn, tmp_path):
     assert conn.total_changes == before
 
 
+@pytest.mark.migration  # creates v23 and verifies migration gate, not all diagnostics
 def test_diagnostic_rejects_old_or_missing_database_without_migration(tmp_path):
     import sqlite3
     from app.database.connection import get_raw_connection

@@ -274,6 +274,8 @@ class TestCompletion:
         assert env.tl.get_next_required_component(lora.id) is None
 
 
+@pytest.mark.migration  # actual migration-owned legacy theory/history backfill
+@pytest.mark.integration
 class TestLegacyBackfill:
     def test_backfill_only_theory(self, activity_env):
         env = activity_env

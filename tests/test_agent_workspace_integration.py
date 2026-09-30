@@ -7,6 +7,9 @@ import threading
 
 import pytest
 
+# Composed Session/Task/UI/Runtime services; only worker cases are threaded.
+pytestmark = pytest.mark.integration
+
 from app.agent.session import AgentSessionService
 from app.database.agent_repository import AgentRepository
 from app.ui.agent_message_widget import AgentMessageWidget
@@ -247,6 +250,7 @@ def test_existing_history_shows_continue_and_manual_learning_is_eligible(
     window.close()
 
 
+@pytest.mark.threaded
 def test_worker_failure_reloads_persisted_user_message_and_shows_error(
     qtbot, conn, repo, task_service, date_service
 ):
@@ -274,6 +278,7 @@ def test_worker_failure_reloads_persisted_user_message_and_shows_error(
     window.close()
 
 
+@pytest.mark.threaded
 def test_stale_worker_completion_never_renders_into_another_session(
     qtbot, conn, repo, task_service, date_service
 ):
@@ -305,6 +310,7 @@ def test_stale_worker_completion_never_renders_into_another_session(
     window.close()
 
 
+@pytest.mark.threaded
 def test_reenter_inflight_session_keeps_busy_until_worker_finishes(
     qtbot, conn, repo, task_service, date_service
 ):
@@ -359,6 +365,7 @@ def test_workspace_status_and_optional_config_degradation_are_nonblocking(
     window.close()
 
 
+@pytest.mark.threaded
 def test_shutdown_waits_for_running_worker_and_clears_references(
     qtbot, conn, repo, task_service, date_service
 ):
@@ -423,6 +430,8 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
     assert registry.get("get_capability").capability_service.conn is conn
 
 
+@pytest.mark.slow  # production factory builds native/memory/trace/tool graph
+@pytest.mark.threaded
 def test_production_invalid_optional_configs_keep_native_agent_turn(
     conn, repo, task_service, tmp_path
 ):
@@ -450,6 +459,9 @@ def test_production_invalid_optional_configs_keep_native_agent_turn(
     assert "SECRET_ENDPOINT" not in result.assistant_message["content"]
 
 
+@pytest.mark.slow  # full worker/tool/trace/evaluation/history graph, not a widget smoke
+@pytest.mark.threaded
+@pytest.mark.migration  # release-verifier history-growth contract
 def test_full_workspace_worker_context_tool_loop_and_verifier_growth(
     qtbot, conn, repo, task_service, date_service, tmp_path
 ):

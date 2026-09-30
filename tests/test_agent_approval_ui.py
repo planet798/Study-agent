@@ -1,6 +1,8 @@
 """Workspace approval card uses static application text and explicit signals."""
 from types import SimpleNamespace
 
+import pytest
+
 from PySide6.QtWidgets import QFrame, QLabel
 from app.ui.agent_workspace_page import AgentWorkspacePage
 from app.database.repository import TaskRepository
@@ -23,6 +25,8 @@ def test_main_window_approval_lookup_uses_only_public_service_api():
     assert service.calls == [(17, 23)]
 
 
+@pytest.mark.threaded
+@pytest.mark.integration
 def test_failed_worker_execution_never_reports_success(qtbot, conn, repo, task_service, date_service):
     from app.agent.session import AgentSessionService
     from app.database.agent_repository import AgentRepository
@@ -75,6 +79,8 @@ def test_three_pending_card_types_plain_text_preview_and_independent_labels(qtbo
             for card in cards] == buttons
 
 
+@pytest.mark.threaded
+@pytest.mark.integration
 def test_reenter_during_approval_disables_chat_and_other_decisions(
     qtbot, conn, repo, task_service, date_service
 ):

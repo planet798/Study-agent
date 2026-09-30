@@ -158,6 +158,8 @@ def test_client_scope_closes_all_clients_even_when_turn_raises():
     assert bridge._loop is None
 
 
+@pytest.mark.threaded  # real owner thread and cross-thread rejection
+
 def test_bridge_rejects_cross_thread_client_use():
     bridge = MCPClientBridge((_stdio(),), client_factory=FakeAsyncClient)
     ready = threading.Event()

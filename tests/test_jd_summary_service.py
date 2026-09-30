@@ -61,6 +61,7 @@ class TestMigration:
         assert "jd_daily_skill_stats" in tables
         assert len(jd.list_all()) == before  # 历史 JD 未被破坏
 
+    @pytest.mark.migration
     def test_migration_idempotent(self, conn):
         assert migrate(conn) == SCHEMA_VERSION
         assert migrate(conn) == SCHEMA_VERSION

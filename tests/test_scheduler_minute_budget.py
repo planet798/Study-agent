@@ -19,6 +19,8 @@ from collections import defaultdict
 
 import pytest
 
+pytestmark = pytest.mark.integration  # actual route/planner/task budget composition
+
 from app.database.assessment_repository import AssessmentRepository
 from app.database.learning_route_repository import LearningRouteRepository
 from app.database.repository import TaskRepository
