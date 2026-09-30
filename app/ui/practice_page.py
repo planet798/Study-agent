@@ -6,7 +6,7 @@ Project Detail 更新 milestone/output 后保持自身滚动位置。
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -346,6 +346,9 @@ class PracticeProjectDetailDialog(QDialog):
         self.plan_repo = plan_repo
         self.capability_service = capability_service
         self.readiness_service = readiness_service
+        self._scroll_restore_epoch = 0
+        self._scroll_restore_handler = None
+        self._closing = False
         self.setWindowTitle("实践项目")
         self.setModal(True)
         self.resize(680, 640)
@@ -362,6 +365,11 @@ class PracticeProjectDetailDialog(QDialog):
         self.body_layout.setContentsMargins(0, 0, 6, 0)
         self.body_layout.setSpacing(6)
         self.scroll.setWidget(self.body)
+        self._scroll_viewport = self.scroll.viewport()
+        self._scroll_bar = self.scroll.verticalScrollBar()
+        self._scroll_viewport.installEventFilter(self)
+        self._scroll_bar.installEventFilter(self)
+        self._scroll_bar.sliderPressed.connect(self._clear_scroll_restore)
         root.addWidget(self.scroll, stretch=1)
 
         btns = QHBoxLayout()
@@ -389,7 +397,8 @@ class PracticeProjectDetailDialog(QDialog):
         lay.addLayout(row)
 
     def refresh(self) -> None:
-        value = self.scroll.verticalScrollBar().value()
+        value = self._scroll_bar.value()
+        self._clear_scroll_restore()
         _clear_layout(self.body_layout)
         detail = self.service.get_project_detail(self.project_id)
         p = detail["project"]
@@ -420,22 +429,71 @@ class PracticeProjectDetailDialog(QDialog):
         self._outputs_section(detail["outputs"])
         self._evidence_section()
         self.body_layout.addStretch()
-        QTimer.singleShot(0, lambda: self._restore_scroll(value))
-        QTimer.singleShot(60, lambda: self._restore_scroll(value))
+        self._restore_scroll(value)
+
+    def _clear_scroll_restore(self) -> None:
+        """Invalidate queued restores and disconnect the only range handler."""
+        self._scroll_restore_epoch += 1
+        handler = self._scroll_restore_handler
+        self._scroll_restore_handler = None
+        if handler is not None:
+            try:
+                self._scroll_bar.rangeChanged.disconnect(handler)
+            except (RuntimeError, TypeError):
+                pass
 
     def _restore_scroll(self, value: int) -> None:
-        value = int(value)
-        if value <= 0:
+        self._clear_scroll_restore()
+        if self._closing:
             return
+        target = max(0, int(value))
+        if target == 0:
+            self._scroll_bar.setValue(0)
+            return
+        epoch = self._scroll_restore_epoch
+        bar = self._scroll_bar
 
-        def _apply() -> None:
-            bar = self.scroll.verticalScrollBar()
-            if bar.maximum() >= value:
-                bar.setValue(value)
+        def _apply(*_args) -> None:
+            if self._closing or epoch != self._scroll_restore_epoch:
+                return
+            if bar.maximum() <= 0:
+                return  # wait for a real range/layout update
+            bar.setValue(min(target, bar.maximum()))
+            self._clear_scroll_restore()
 
-        # 布局可能晚于 refresh 完成：多帧重试（不依赖信号连接，避免累积/警告）
-        for delay in (0, 50, 150, 400):
-            QTimer.singleShot(delay, _apply)
+        self._scroll_restore_handler = _apply
+        bar.rangeChanged.connect(_apply)
+        QTimer.singleShot(0, self, _apply)
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt API
+        if (watched is getattr(self, "_scroll_viewport", None)
+                or watched is getattr(self, "_scroll_bar", None)) and event.type() in (
+                    QEvent.Type.Wheel, QEvent.Type.MouseButtonPress,
+                    QEvent.Type.TouchBegin,
+                ):
+            self._clear_scroll_restore()
+        return super().eventFilter(watched, event)
+
+    def _finish_scroll_lifecycle(self) -> None:
+        self._closing = True
+        self._clear_scroll_restore()
+
+    def done(self, result):  # noqa: N802 - accept/reject can hide the dialog
+        self._finish_scroll_lifecycle()
+        super().done(result)
+
+    def closeEvent(self, event):  # noqa: N802 - Qt API
+        self._finish_scroll_lifecycle()
+        super().closeEvent(event)
+
+    def showEvent(self, event):  # noqa: N802 - a hidden dialog may reopen
+        self._closing = False
+        super().showEvent(event)
+
+    def event(self, event):
+        if event.type() == QEvent.Type.DeferredDelete:
+            self._finish_scroll_lifecycle()
+        return super().event(event)
 
     def _routes_section(self, routes, lay=None) -> None:
         if lay is None:
