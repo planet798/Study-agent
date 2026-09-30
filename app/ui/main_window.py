@@ -462,7 +462,10 @@ class MainWindow(QMainWindow):
                 current = self.agent_session_service.get(selected)
                 if current["status"] == "active" and current["archived_at"] is None:
                     sessions.append(current)
-            archived = self.agent_session_service.list_archived_sessions()
+            if self._archived_sessions_dialog is None:
+                archived = self.agent_session_service.list_archived_sessions(1)
+            else:
+                archived = self.agent_session_service.list_archived_sessions()
             self.sidebar.set_sessions(
                 [self._session_visual_record(s) for s in sessions], selected,
                 self._session_management_busy(), bool(archived))

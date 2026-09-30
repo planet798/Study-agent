@@ -1,5 +1,6 @@
 """Learning Session controls, modal flows, and worker-busy regressions."""
 import threading
+from unittest.mock import Mock, call
 
 import pytest
 from PySide6.QtCore import Qt, QTimer
@@ -24,6 +25,61 @@ def setup(qtbot, conn, repo, task_service, date_service):
     window = _window(qtbot, task_service, date_service, service)
     yield window, service, session["id"], other["id"], task
     window.close()
+
+
+def test_closed_archive_dialog_uses_bounded_preview_only(setup, monkeypatch):
+    window, service, sid, other, _ = setup
+    service.archive(sid)
+    service.archive(other)
+    archived_spy = Mock(wraps=service.list_archived_sessions)
+    sidebar_spy = Mock(wraps=service.list_sidebar_sessions)
+    visual_spy = Mock(wraps=window._session_visual_record)
+    monkeypatch.setattr(service, "list_archived_sessions", archived_spy)
+    monkeypatch.setattr(service, "list_sidebar_sessions", sidebar_spy)
+    monkeypatch.setattr(window, "_session_visual_record", visual_spy)
+
+    window._refresh_learning_sessions()
+
+    archived_spy.assert_called_once_with(1)
+    sidebar_spy.assert_called_once_with(10)
+    visual_spy.assert_not_called()  # No visible Sessions; archive preview is not rendered.
+    assert not window.sidebar.archived_sessions_btn.isHidden()
+    service.restore(sid)
+    service.restore(other)
+    archived_spy.reset_mock()
+    window._refresh_learning_sessions()
+    archived_spy.assert_called_once_with(1)
+    assert window.sidebar.archived_sessions_btn.isHidden()
+
+
+def test_open_archive_dialog_loads_full_list_once_per_refresh(setup, monkeypatch):
+    window, service, sid, other, _ = setup
+    service.archive(sid)
+    service.archive(other)
+    window._refresh_learning_sessions()
+    expected_order = [s["id"] for s in service.list_archived_sessions()]
+    archived_spy = Mock(wraps=service.list_archived_sessions)
+    monkeypatch.setattr(service, "list_archived_sessions", archived_spy)
+
+    def execute(dialog):
+        archived_spy.assert_called_once_with()
+        assert list(dialog.restore_buttons) == expected_order
+        assert set(dialog.restore_buttons) == {sid, other}
+        dialog.restore_buttons[sid].click()
+        assert sid not in dialog.restore_buttons
+        assert not window.sidebar.archived_sessions_btn.isHidden()
+        dialog.restore_buttons[other].click()
+        assert not dialog.restore_buttons
+        assert window.sidebar.archived_sessions_btn.isHidden()
+        assert archived_spy.call_args_list == [call(), call(), call()]
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(ArchivedSessionsDialog, "exec", execute)
+    window.sidebar.archived_sessions_btn.click()
+    assert window._archived_sessions_dialog is None
+    archived_spy.reset_mock()
+    window._refresh_learning_sessions()
+    archived_spy.assert_called_once_with(1)
 
 
 def action(window, sid, text):
