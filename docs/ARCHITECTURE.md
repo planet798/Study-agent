@@ -85,7 +85,7 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 - Agent-9 提供 Task completion Approval；Agent-10 已加入 Assessment start/resume 与 bounded Learning Note save Approval。用户明确批准后才由 worker-owned SQLite connection 调用 canonical Services；Assessment startup 不提交答案/判分，Learning Note 是 SQLite application data，不是 Workspace 文件写入。
 - Agent-11 提供生产 Session UX、safe errors、忙碌状态串行化、resilient reload/shutdown 与离线 `agent-diagnostic`。
 - Workspace-1 提供 schema v25 的 Task-scoped managed/local binding。managed 支持 list/read/write/mkdir 及按 Sandbox 配置的可选 Docker execution；local 仅 list/read、敏感文件拒绝，无写入/执行。模型不接收 host absolute path。绑定入口是 conversation header 的 compact selector/menu，不是大型 body Card。
-- 当前版本：schema 25 / fingerprint 7 / evaluator 2。Agent-10 三个固定请求不等于通用 application writes；Session rename/pin/archive UI/search/folders、Agent 提交验收答案、任意笔记编辑、local writes/execution 与 diff approval 均未实现。详见 `docs/PRODUCT_BASELINE.md`、`docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/WORKSPACES.md`。
+- 当前版本：schema 26 / fingerprint 7 / evaluator 2。Agent-10 三个固定请求不等于通用 application writes；Session rename/pin/archive UI/search/folders、Agent 提交验收答案、任意笔记编辑、local writes/execution 与 diff approval 均未实现。详见 `docs/PRODUCT_BASELINE.md`、`docs/AGENT_APPROVALS.md`、`docs/AGENT_ARCHITECTURE.md` 与 `docs/WORKSPACES.md`。
 
 现有 `SkillService` / `skills` 表属于职业/技术技能域。Agent learning behavior 配置位于独立 `app/agent/skills/` 命名空间，绝不复用或重解释 Career Skill 表。详见 `docs/AGENT_ARCHITECTURE.md`。
 
@@ -111,11 +111,11 @@ Task → AgentSessionService → AgentRuntime → AgentToolRegistry
 10. **不改 schema 语义**：新增表/列 = 新 migration + 提升 `SCHEMA_VERSION`；
    测试快路径只是「预置等价 schema」，不是新的迁移逻辑。
 
-## 4. 当前 DB schema 版本（v25）
+## 4. 当前 DB schema 版本（v26）
 
-- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 25`（`app/database/schema.py`）。
+- `PRAGMA user_version` 持久化版本；`SCHEMA_VERSION = 26`（`app/database/schema.py`）。
 - `_MIGRATIONS`: v2..v25 幂等迁移；`migrate_stepwise(conn, on_step=...)` 暴露逐级过程。
-- 空库真实路径：`create_schema()`（基础表） + v2..v25 逐级执行。
+- 空库真实路径：`create_schema()`（基础表） + v2..v26 逐级执行。
 - **测试快路径**：`initialize_fresh_database(conn)` → 运行时从真实迁移反推当前完整
   DDL + 种子，一次性建好并写 `user_version=25`，**不重放**历史迁移。
   与真实路径在空库上的结果逐字一致（含 `learning_routes` 种子）。

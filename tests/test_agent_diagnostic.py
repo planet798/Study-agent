@@ -89,4 +89,4 @@ def test_cli_runs_before_gui_and_prints_only_static_counts(conn, capsys, monkeyp
     payload = json.loads(capsys.readouterr().out)
     assert code in (0, 2)  # CI may not configure an AI Profile
     assert payload["database"] == "ok"
-    assert payload["schema"] == 25
+    assert payload["schema"] == 26

@@ -159,7 +159,7 @@ def create_schema(conn) -> None:
 # 当前数据库结构版本（通过 SQLite 的 PRAGMA user_version 持久化）。
 # 旧数据库（此机制引入之前创建的）user_version = 0，被视为 v1：
 # 其基础表已由上方 SCHEMA_SQL 中的 CREATE TABLE IF NOT EXISTS 幂等保证。
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 # 迁移动态表：{目标版本: 迁移函数}。
 # 以后新增表/字段时：
@@ -1566,6 +1566,18 @@ def _migrate_v25(conn: sqlite3.Connection) -> None:
 
 
 _MIGRATIONS[25] = _migrate_v25
+
+
+def _migrate_v26(conn: sqlite3.Connection) -> None:
+    """Add mutable Session-management projections; preserve original history."""
+    add_column_if_not_exists(
+        conn, "agent_sessions", "display_title", "TEXT NOT NULL DEFAULT ''"
+    )
+    add_column_if_not_exists(conn, "agent_sessions", "pinned_at", "TEXT")
+    add_column_if_not_exists(conn, "agent_sessions", "archived_at", "TEXT")
+
+
+_MIGRATIONS[26] = _migrate_v26
 
 
 def get_schema_version(conn) -> int:

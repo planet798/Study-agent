@@ -75,8 +75,8 @@ def test_v24_to_v25_preserves_agent_and_learning_history(tmp_path):
     before = inventory(conn)
     assert before["counts"]["task_workspaces"] is None
     steps = []
-    assert migrate_stepwise(conn, on_step=steps.append) == 25
-    assert steps == [25] and get_schema_version(conn) == SCHEMA_VERSION
+    assert migrate_stepwise(conn, target=25, on_step=steps.append) == 25
+    assert steps == [25] and get_schema_version(conn) == 25
     assert inventory(conn)["counts"]["task_workspaces"] == 0
     assert verify(conn, before)["ok"]
     for table in ("tasks", "assessment_attempts", "learning_outcomes", "agent_sessions",
@@ -88,7 +88,7 @@ def test_v24_to_v25_preserves_agent_and_learning_history(tmp_path):
 
 def test_binding_fingerprint_detects_immutable_changes_and_redacts_path(tmp_path):
     conn = get_fresh_connection(tmp_path / "fresh.db")
-    assert get_schema_version(conn) == 25
+    assert get_schema_version(conn) == SCHEMA_VERSION == 26
     assert FINGERPRINT_VERSION == 7
     ids = [conn.execute(
         "INSERT INTO tasks(title, scheduled_date, created_at, updated_at) "

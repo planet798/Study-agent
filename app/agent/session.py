@@ -13,6 +13,7 @@ Task-bound 学习会话的领域服务：
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 from ..database.agent_repository import AgentRepository
@@ -62,6 +63,21 @@ class AgentSessionService:
     def list_recent_active_sessions(self, limit: int = 10) -> list[dict]:
         return self.repo.list_recent_active_sessions(limit)
 
+    def list_sidebar_sessions(self, limit: int = 10) -> list[dict]:
+        return self.repo.list_sidebar_sessions(limit)
+
+    def list_archived_sessions(self, limit: int | None = None) -> list[dict]:
+        return self.repo.list_archived_sessions(limit)
+
+    @staticmethod
+    def effective_title(session: dict) -> str:
+        """Resolve a visible title without persisting fallback text."""
+        return (
+            (session.get("display_title") or "").strip()
+            or session.get("title")
+            or "学习会话"
+        )
+
     def list_sessions_for_task(self, task_id: int) -> list[dict]:
         return self.repo.list_sessions_for_task(int(task_id))
 
@@ -96,6 +112,48 @@ class AgentSessionService:
             if fallback is not None:
                 return fallback
             raise
+
+    # ---------- mutable Session metadata (not conversation activity) ----------
+
+    def rename(self, session_id: int, title: str) -> dict:
+        self._require_open(session_id)
+        if not isinstance(title, str):
+            raise AgentSessionError("Session title must be text")
+        # Check before stripping so surrounding newlines/NUL cannot be hidden.
+        if any(unicodedata.category(char) in {"Cc", "Cf", "Cs"} for char in title):
+            raise AgentSessionError("Session title cannot contain control characters")
+        title = title.strip()
+        if not 1 <= len(title) <= 120:
+            raise AgentSessionError("Session title must contain 1..120 characters")
+        self.repo.set_display_title(int(session_id), title)
+        return self.get(session_id)
+
+    def reset_title(self, session_id: int) -> dict:
+        self._require_open(session_id)
+        self.repo.set_display_title(int(session_id), "")
+        return self.get(session_id)
+
+    def pin(self, session_id: int) -> dict:
+        session = self._require_open(session_id)
+        if session["archived_at"] is not None:
+            raise AgentSessionError("Restore an archived Session before pinning")
+        self.repo.set_pinned(int(session_id), True)
+        return self.get(session_id)
+
+    def unpin(self, session_id: int) -> dict:
+        self._require_open(session_id)
+        self.repo.set_pinned(int(session_id), False)
+        return self.get(session_id)
+
+    def archive(self, session_id: int) -> dict:
+        self._require_open(session_id)
+        self.repo.set_archived(int(session_id), True)
+        return self.get(session_id)
+
+    def restore(self, session_id: int) -> dict:
+        self._require_open(session_id)
+        self.repo.set_archived(int(session_id), False)
+        return self.get(session_id)
 
     # ---------- 消息 ----------
 

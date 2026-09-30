@@ -62,6 +62,65 @@ class AgentRepository:
     def list_recent_active_sessions(self, limit: int = 10) -> list[dict]:
         return self.list_active_sessions(limit)
 
+    def list_sidebar_sessions(self, limit: int = 10) -> list[dict]:
+        """All visible pins plus the latest N visible unpinned conversations."""
+        if int(limit) < 0:
+            raise ValueError("limit must be non-negative")
+        rows = self.conn.execute(
+            "SELECT * FROM ("
+            " SELECT * FROM agent_sessions WHERE status = ?"
+            " AND archived_at IS NULL AND pinned_at IS NOT NULL"
+            " UNION ALL SELECT * FROM ("
+            " SELECT * FROM agent_sessions WHERE status = ?"
+            " AND archived_at IS NULL AND pinned_at IS NULL"
+            " ORDER BY updated_at DESC, id DESC LIMIT ?))"
+            " ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC,"
+            " CASE WHEN pinned_at IS NULL THEN updated_at END DESC, id DESC",
+            (STATUS_ACTIVE, STATUS_ACTIVE, int(limit)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_archived_sessions(self, limit: int | None = None) -> list[dict]:
+        sql = ("SELECT * FROM agent_sessions WHERE status = ?"
+               " AND archived_at IS NOT NULL ORDER BY archived_at DESC, id DESC")
+        params = (STATUS_ACTIVE,)
+        if limit is not None:
+            if int(limit) < 0:
+                raise ValueError("limit must be non-negative")
+            sql += " LIMIT ?"
+            params += (int(limit),)
+        return [dict(row) for row in self.conn.execute(sql, params).fetchall()]
+
+    def set_display_title(self, session_id: int, title: str) -> dict | None:
+        self.conn.execute(
+            "UPDATE agent_sessions SET display_title = ? WHERE id = ? AND status = ?",
+            (title, int(session_id), STATUS_ACTIVE),
+        )
+        self.conn.commit()
+        return self.get_session(session_id)
+
+    def set_pinned(self, session_id: int, pinned: bool) -> dict | None:
+        self.conn.execute(
+            "UPDATE agent_sessions SET pinned_at = "
+            "CASE WHEN ? THEN COALESCE(pinned_at, ?) ELSE NULL END"
+            " WHERE id = ? AND status = ? AND (archived_at IS NULL OR NOT ?)",
+            (pinned, now_iso(), int(session_id), STATUS_ACTIVE, pinned),
+        )
+        self.conn.commit()
+        return self.get_session(session_id)
+
+    def set_archived(self, session_id: int, archived: bool) -> dict | None:
+        # Archive and unpin are one atomic SQL update. Restore never re-pins.
+        self.conn.execute(
+            "UPDATE agent_sessions SET archived_at = "
+            "CASE WHEN ? THEN COALESCE(archived_at, ?) ELSE NULL END,"
+            " pinned_at = CASE WHEN ? THEN NULL ELSE pinned_at END"
+            " WHERE id = ? AND status = ?",
+            (archived, now_iso(), archived, int(session_id), STATUS_ACTIVE),
+        )
+        self.conn.commit()
+        return self.get_session(session_id)
+
     def list_sessions_for_task(self, task_id: int) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM agent_sessions WHERE task_id = ? ORDER BY id",

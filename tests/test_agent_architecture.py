@@ -264,7 +264,7 @@ def test_workspace_schema_v25_and_fingerprint_v7():
     from app.database.schema import SCHEMA_VERSION
     from app.diagnostics.release_migration import FINGERPRINT_VERSION
 
-    assert SCHEMA_VERSION == 25
+    assert SCHEMA_VERSION == 26
     assert FINGERPRINT_VERSION == 7
 
 

@@ -102,4 +102,4 @@ Production wiring creates `AgentMemoryRepository` from the worker-owned fresh SQ
 
 ## Historical introduction and current versions
 
-Session Memory was introduced in schema v22; current `SCHEMA_VERSION = 25`, `FINGERPRINT_VERSION = 7`, and `EVALUATOR_VERSION = 2`. Trace/Evaluation is a separate derived v23 layer documented in `docs/AGENT_TRACE_EVAL.md`; Approval persistence was introduced in v24 and Workspace bindings in v25. None changes Agent-7 memory semantics or puts Memory into immutable history fingerprints.
+Session Memory was introduced in schema v22; current `SCHEMA_VERSION = 26`, `FINGERPRINT_VERSION = 7`, and `EVALUATOR_VERSION = 2`. Trace/Evaluation is a separate derived v23 layer documented in `docs/AGENT_TRACE_EVAL.md`; Approval persistence was introduced in v24 and Workspace bindings in v25. None changes Agent-7 memory semantics or puts Memory into immutable history fingerprints.

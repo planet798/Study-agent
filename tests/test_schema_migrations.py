@@ -609,13 +609,13 @@ def _make_v20_db(path):
     conn.close()
 
 
-def test_v20_db_migrates_stepwise_to_v25(tmp_path):
+def test_v20_db_migrates_stepwise_to_v26(tmp_path):
     path = tmp_path / "v20.db"
     _make_v20_db(path)
 
     conn = get_connection(path)
     try:
-        assert get_schema_version(conn) == SCHEMA_VERSION == 25
+        assert get_schema_version(conn) == SCHEMA_VERSION == 26
 
         # 新表 + 索引存在
         tables = {
@@ -654,13 +654,13 @@ def test_v20_db_migrates_stepwise_to_v25(tmp_path):
         ).fetchone()[0] == 1
 
         # 迁移幂等
-        assert migrate(conn) == 25
-        assert migrate(conn) == 25
+        assert migrate(conn) == 26
+        assert migrate(conn) == 26
     finally:
         conn.close()
 
 
-def test_real_v21_database_migrates_to_v25_without_changing_agent_history(tmp_path):
+def test_real_v21_database_migrates_to_v26_without_changing_agent_history(tmp_path):
     from app.database.agent_repository import AgentRepository
     from app.database.connection import get_raw_connection
     from app.database.repository import TaskRepository
@@ -695,8 +695,8 @@ def test_real_v21_database_migrates_to_v25_without_changing_agent_history(tmp_pa
 
         migrate_stepwise(conn)
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 25
-        assert get_schema_version(conn) == 25
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 26
+        assert get_schema_version(conn) == 26
         assert conn.execute(
             "SELECT COUNT(*) FROM agent_session_memory"
         ).fetchone()[0] == 0
@@ -716,7 +716,7 @@ def test_real_v21_database_migrates_to_v25_without_changing_agent_history(tmp_pa
         conn.close()
 
 
-def test_real_v22_database_migrates_to_v25_preserving_memory_and_history(tmp_path):
+def test_real_v22_database_migrates_to_v26_preserving_memory_and_history(tmp_path):
     from app.database.agent_memory_repository import AgentMemoryRepository
     from app.database.agent_repository import AgentRepository
     from app.database.connection import get_raw_connection
@@ -745,7 +745,7 @@ def test_real_v22_database_migrates_to_v25_preserving_memory_and_history(tmp_pat
 
         migrate_stepwise(conn)
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 25
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 26
         assert AgentMemoryRepository(conn).get_for_session(session["id"]) == memory
         assert [row["id"] for row in repo.list_messages(session["id"])] == [
             user["id"], assistant["id"],
@@ -801,13 +801,13 @@ def test_real_v23_to_v24_preserves_agent_memory_trace_and_evaluation(tmp_path):
         conn.close()
 
 
-def test_v24_agent_tables_columns(tmp_path):
+def test_v26_agent_tables_columns(tmp_path):
     conn = get_connection(tmp_path / "v21cols.db")
     try:
         session_cols = [r[1] for r in conn.execute("PRAGMA table_info(agent_sessions)")]
         assert session_cols == [
             "id", "task_id", "title", "status", "created_at", "updated_at",
-            "closed_at",
+            "closed_at", "display_title", "pinned_at", "archived_at",
         ]
         message_cols = [r[1] for r in conn.execute("PRAGMA table_info(agent_messages)")]
         assert message_cols == [
