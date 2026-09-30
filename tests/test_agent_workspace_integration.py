@@ -414,6 +414,9 @@ def test_production_runtime_factory_builds_sqlite_services_from_fresh_conn(conn,
     assert isinstance(runtime.trace_service, AgentTraceService)
     assert runtime.trace_service.trace_repository.conn is conn
     assert runtime.trace_service.evaluation_repository.conn is conn
+    from app.agent.personalization_context import AgentPersonalizationContextBuilder
+    assert isinstance(runtime.personalization_context_builder, AgentPersonalizationContextBuilder)
+    assert runtime.personalization_context_builder.service.repository.conn is conn
     assert runtime.memory_compactor.session_service is runtime.session_service
     assert runtime.memory_compactor.memory_repository.conn is conn
     assert runtime.memory_compactor.model_client is runtime.model_client

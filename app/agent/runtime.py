@@ -9,6 +9,8 @@ Tools are opt-in via a registry. Without one, Agent-1's no-tool behavior remains
 from __future__ import annotations
 
 import json
+import logging
+import traceback
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
     from .trace.collector import AgentTraceCollector
     from .trace.service import AgentTraceService
     from .approval.provider import AgentApprovalProvider
+    from .personalization_context import AgentPersonalizationContextBuilder
 
 from ..ai.agent_protocol import (
     AgentModelClient,
@@ -93,6 +96,7 @@ class AgentRuntime:
         trace_service=None,
         approval_provider: AgentApprovalProvider | None = None,
         workspace_service=None,
+        personalization_context_builder: AgentPersonalizationContextBuilder | None = None,
     ):
         self.session_service = session_service
         self.model_client = model_client
@@ -106,11 +110,27 @@ class AgentRuntime:
         self.trace_service = trace_service
         self.approval_provider = approval_provider
         self.workspace_service = workspace_service
+        self.personalization_context_builder = personalization_context_builder
         if isinstance(max_tool_rounds, bool) or int(max_tool_rounds) < 1:
             raise ValueError("max_tool_rounds must be a positive integer")
         self.max_tool_rounds = int(max_tool_rounds)
 
     # ---------- prompt / request ----------
+
+    def _build_personalization_context(self) -> str:
+        if self.personalization_context_builder is None:
+            return ""
+        try:
+            return self.personalization_context_builder.build() or ""
+        except Exception as error:
+            # Optional preferences must not block a turn. Retain type and code
+            # location for diagnosis, not raw exception text, paths or source lines.
+            frame = traceback.extract_tb(error.__traceback__)[-1]
+            logging.getLogger(__name__).warning(
+                "Personalization context unavailable; continuing without it (%s at %s:%d).",
+                type(error).__name__, frame.name, frame.lineno,
+            )
+            return ""
 
     def build_system_message(
         self,
@@ -123,6 +143,7 @@ class AgentRuntime:
         session_memory: str = "",
         memory_omitted_earlier: bool = False,
         workspace_spec: AgentWorkspaceSpec | None = None,
+        personalization_context: str | None = None,
     ) -> ModelMessage:
         """Task title, optional bounded snapshot, and accurate tool availability."""
         title = (session.get("title") or "").strip()
@@ -209,6 +230,10 @@ class AgentRuntime:
                 f"{agent_skill.instruction}\n"
                 "END_AGENT_SKILL"
             )
+        if personalization_context is None:
+            personalization_context = self._build_personalization_context()
+        if personalization_context:
+            content += "\n\n" + personalization_context
         if task_context is not None:
             try:
                 context_json = json.dumps(
@@ -263,6 +288,7 @@ class AgentRuntime:
         conversation_window: ConversationWindow | None = None,
         trace_collector: AgentTraceCollector | None = None,
         workspace_spec: AgentWorkspaceSpec | None = None,
+        personalization_context: str | None = None,
     ) -> ModelRequest:
         """Rebuild the request from immutable persisted rows and one fixed window."""
         summary = ""
@@ -305,6 +331,7 @@ class AgentRuntime:
             session_memory=summary,
             memory_omitted_earlier=memory_omitted,
             workspace_spec=workspace_spec,
+            personalization_context=personalization_context,
         )]
         messages.extend(self._to_model_message(row) for row in history)
         tools = registry.model_tools() if registry and registry.names() else ()
@@ -631,6 +658,8 @@ class AgentRuntime:
     ) -> AgentTurnResult:
         tool_rounds = 0
         tool_messages: list[dict] = []
+        # One read-only preferences snapshot per turn, stable across tool rounds.
+        personalization_context = self._build_personalization_context()
         while True:
             request = self.build_request(
                 session,
@@ -642,6 +671,7 @@ class AgentRuntime:
                 conversation_window=conversation_window,
                 trace_collector=trace_collector,
                 workspace_spec=workspace_spec,
+                personalization_context=personalization_context,
             )
             response = self._complete_model(request, trace_collector)
             if not response.tool_calls:

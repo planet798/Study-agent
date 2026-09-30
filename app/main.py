@@ -1178,6 +1178,7 @@ def build_agent_runtime(
     from app.agent.eval.evaluator import AgentTurnEvaluator
     from app.agent.memory.compactor import AgentMemoryCompactor
     from app.agent.memory.policy import AgentMemoryPolicy
+    from app.agent.personalization_context import AgentPersonalizationContextBuilder
     from app.agent.mcp.config import MCPConfigError, load_mcp_config
     from app.agent.mcp.provider import MCPToolProvider
     from app.agent.runtime import AgentRuntime, MAX_TOOL_ROUNDS
@@ -1196,6 +1197,8 @@ def build_agent_runtime(
     from app.database.agent_memory_repository import AgentMemoryRepository
     from app.database.agent_repository import AgentRepository
     from app.database.agent_trace_repository import AgentTraceRepository
+    from app.database.personalization_repository import PersonalizationRepository
+    from app.services.personalization_service import PersonalizationService
     from app.database.assessment_repository import AssessmentRepository
     from app.database.capability_repository import CapabilityEvidenceRepository
     from app.database.learning_route_repository import LearningRouteRepository
@@ -1290,6 +1293,9 @@ def build_agent_runtime(
         mcp_provider=mcp_provider,
         sandbox_provider=sandbox_provider,
         workspace_service=workspace_service,
+        personalization_context_builder=AgentPersonalizationContextBuilder(
+            PersonalizationService(PersonalizationRepository(fresh_conn))
+        ),
         memory_compactor=memory_compactor,
         trace_service=trace_service,
         approval_provider=AgentApprovalProvider(AgentApprovalService(
