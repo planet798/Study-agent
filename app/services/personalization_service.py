@@ -1,4 +1,4 @@
-"""Plain-text personalization contract (P-1B persistence only)."""
+"""Plain-text preferences for Settings and Agent context injection; no automatic extraction."""
 
 import unicodedata
 

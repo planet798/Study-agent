@@ -62,6 +62,11 @@ def test_structure_default_advanced_and_appearance(qtbot, ai_config_service, pro
     assert page.theme_combo.isEnabled()
     normal_text = ' '.join(label.text() for label in page.personalization_panel.findChildren(QLabel))
     assert all(word not in normal_text for word in ['system prompt', 'user prompt', 'PromptRegistry', '{{variables}}'])
+    assert (
+        'Agent 会在新的学习对话中使用已保存的说明和已启用记忆；'
+        '根据学习会话自动生成记忆将在后续提供。'
+    ) in normal_text
+    assert '尚未接入 Agent' not in normal_text
     from app.ui.app_shell import PAGE_SPECS_BY_KEY
     assert PAGE_SPECS_BY_KEY['settings'].subtitle == '个性化、模型与外观设置'
 

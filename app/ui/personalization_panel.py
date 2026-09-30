@@ -57,7 +57,10 @@ class PersonalizationPanel(QWidget):
         self.auto_memory_checkbox = QCheckBox("允许根据学习会话生成记忆")
         memory.add_widget(self.memory_checkbox)
         memory.add_widget(self.auto_memory_checkbox)
-        note = QLabel("当前仅保存偏好，尚未接入 Agent；根据学习会话生成记忆将在后续提供。")
+        note = QLabel(
+            "Agent 会在新的学习对话中使用已保存的说明和已启用记忆；"
+            "根据学习会话自动生成记忆将在后续提供。"
+        )
         note.setObjectName("TaskMeta")
         note.setWordWrap(True)
         memory.add_widget(note)
