@@ -270,6 +270,46 @@ class TestConnectionWorkerNonBlocking:
         worker.wait()
         assert results and results[0].ok is True
 
+    @pytest.mark.threaded
+    @pytest.mark.parametrize(
+        "response, expected_ok, expected_message",
+        [
+            ({"content": "", "contentTypes": ["thinking"],
+              "finishReason": "stop", "errorMessage": "",
+              "credential": {"type": "oauth"}}, True, "服务已响应"),
+            ({"content": "", "contentTypes": [],
+              "finishReason": "error", "errorMessage": "订阅额度不足",
+              "credential": {"type": "oauth"}}, False, "订阅额度不足"),
+        ],
+    )
+    def test_oauth_test_uses_provider_status_not_text_presence(
+        self, qtbot, monkeypatch, response, expected_ok, expected_message
+    ):
+        from app.ai import pi_ai_bridge
+        from app.ui.ai_worker import AIConnectionTestWorker
+
+        captured = {}
+
+        class FakeBridge:
+            def complete(self, **kwargs):
+                captured.update(kwargs)
+                return response
+
+        monkeypatch.setattr(pi_ai_bridge, "PiAIBridge", FakeBridge)
+        worker = AIConnectionTestWorker(
+            base_url="", model="gpt-6-luna", api_key="", oauth_provider="openai-codex",
+            oauth_credential={"type": "oauth", "access": "test-token"},
+        )
+        results = []
+        worker.succeeded.connect(results.append)
+        with qtbot.waitSignal(worker.succeeded, timeout=3000):
+            worker.start()
+        worker.wait()
+        assert results[0].ok is expected_ok
+        assert expected_message in results[0].message
+        assert captured["max_tokens"] == 64
+        assert captured["temperature"] > 0
+
     def test_worker_never_receives_repo(self):
         from app.ui.ai_worker import AIConnectionTestWorker
         import inspect

@@ -122,6 +122,15 @@ class PiAIBridge:
                 text = text.replace(secret, "***")
             return re.sub(r"(?i)bearer\s+\S+", "Bearer ***", text)
 
+        def scrub_payload(value):
+            if isinstance(value, dict):
+                return {key: scrub_payload(child) for key, child in value.items()}
+            if isinstance(value, list):
+                return [scrub_payload(child) for child in value]
+            if isinstance(value, str):
+                return scrub(value)
+            return value
+
         try:
             process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
             process.stdin.flush()
@@ -166,7 +175,7 @@ class PiAIBridge:
                 raise PiAIBridgeError(scrub(stderr).strip() or "pi-ai 桥接进程执行失败")
             if result is None:
                 raise PiAIBridgeError("pi-ai 桥接进程未返回结果")
-            return result
+            return scrub_payload(result)
         except subprocess.TimeoutExpired as exc:
             process.kill()
             process.wait()

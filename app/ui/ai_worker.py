@@ -115,14 +115,28 @@ class AIConnectionTestWorker(QThread):
                     provider=self._oauth_provider, model=self._model,
                     credential=self._oauth_credential,
                     messages=[{"role": "user", "content": "Reply with OK."}],
-                    temperature=0, max_tokens=5,
+                    temperature=0.3, max_tokens=64,
                 )
+                content = (response.get("content") or "").strip()
+                finish_reason = str(response.get("finishReason") or "")
+                error_message = str(response.get("errorMessage") or "").strip()
+                failed = bool(error_message) or finish_reason in {"error", "aborted"}
+                if failed:
+                    message = error_message or f"模型请求失败（{finish_reason or '未知原因'}）"
+                elif content:
+                    message = "连接成功"
+                else:
+                    content_types = ", ".join(response.get("contentTypes") or []) or "无可见内容"
+                    message = (
+                        f"连接成功（服务已响应，但没有文本；stopReason={finish_reason or '未知'}，"
+                        f"内容类型={content_types}）"
+                    )
                 result = ConnectionTestResult(
-                    ok=bool((response.get("content") or "").strip()),
-                    message="连接成功" if (response.get("content") or "").strip() else "模型未返回文本",
+                    ok=not failed,
+                    message=message,
                     model=self._model,
                     latency_ms=int((time.monotonic() - started) * 1000),
-                    source=(response.get("content") or "").strip()[:50],
+                    source=content[:50],
                     oauth_credential=response.get("credential"),
                 )
             else:

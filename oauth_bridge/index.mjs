@@ -144,8 +144,10 @@ async function run(request) {
     }));
     return {
       content: text,
+      contentTypes: message.content.map((block) => block.type),
       toolCalls,
       finishReason: message.stopReason ?? '',
+      errorMessage: message.errorMessage ?? '',
       model: message.model ?? modelId,
       usage: message.usage ?? null,
       credential: await credentials.read(provider),
