@@ -58,7 +58,19 @@ class AddAIProfileDialog(QDialog):
         form = QFormLayout()
 
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("例如：USTC DeepSeek")
+        self.name_edit.setPlaceholderText("例如：DeepSeek 订阅")
+        self.vendor_combo = QComboBox()
+        self.vendor_combo.addItem("自定义 OpenAI 兼容接口", None)
+        for label, preset in [
+            ("OpenAI", {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"}),
+            ("DeepSeek", {"name": "DeepSeek", "base_url": "https://api.deepseek.com", "model": "deepseek-chat"}),
+            ("OpenRouter", {"name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model": "openai/gpt-4o-mini"}),
+            ("硅基流动 SiliconFlow", {"name": "SiliconFlow", "base_url": "https://api.siliconflow.cn/v1", "model": "Qwen/Qwen3-8B"}),
+            ("月之暗面 Moonshot", {"name": "Moonshot", "base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2-0905-preview"}),
+            ("阿里云百炼 DashScope", {"name": "DashScope", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus"}),
+        ]:
+            self.vendor_combo.addItem(label, preset)
+        self.vendor_combo.currentIndexChanged.connect(self._apply_vendor_preset)
         self.base_url_edit = QLineEdit()
         self.base_url_edit.setPlaceholderText("例如：https://api.llm.ustc.edu.cn/v1")
         self.model_edit = QLineEdit()
@@ -69,6 +81,7 @@ class AddAIProfileDialog(QDialog):
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setPlaceholderText("API Key（写入系统凭据存储）")
 
+        form.addRow("模型服务", self.vendor_combo)
         form.addRow("名称 *", self.name_edit)
         form.addRow("Base URL *", self.base_url_edit)
         form.addRow("Model *", self.model_edit)
@@ -77,8 +90,9 @@ class AddAIProfileDialog(QDialog):
         layout.addLayout(form)
 
         hint = QLabel(
-            "API Key 不会写入 SQLite / 日志，而是保存到系统凭据存储"
-            "（Windows 凭据管理器）。"
+            "选择已有模型服务的订阅/API 套餐后，填入该服务控制台生成的 API Key；"
+            "本应用不会代购或创建订阅。API Key 不会写入 SQLite / 日志，"
+            "而是保存到系统凭据存储。预设服务均通过 OpenAI 兼容接口接入。"
         )
         hint.setObjectName("TaskMeta")
         hint.setWordWrap(True)
@@ -108,6 +122,15 @@ class AddAIProfileDialog(QDialog):
             QMessageBox.warning(self, "缺少 API Key", "请填写 API Key。")
             return
         self.accept()
+
+    def _apply_vendor_preset(self, _index: int) -> None:
+        preset = self.vendor_combo.currentData()
+        if not preset:
+            return
+        self.base_url_edit.setText(preset["base_url"])
+        self.model_edit.setText(preset["model"])
+        if not self.name_edit.text().strip():
+            self.name_edit.setText(preset["name"])
 
     def values(self) -> dict:
         return {

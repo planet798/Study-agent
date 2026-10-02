@@ -110,6 +110,25 @@ class TestProfilePanel:
         qtbot.addWidget(dlg)
         assert dlg.api_key_edit.echoMode() == QLineEdit.EchoMode.Password
 
+    def test_provider_preset_fills_endpoint_and_model(self, qtbot):
+        dlg = AddAIProfileDialog()
+        qtbot.addWidget(dlg)
+        index = dlg.vendor_combo.findText("DeepSeek")
+        dlg.vendor_combo.setCurrentIndex(index)
+        assert dlg.base_url_edit.text() == "https://api.deepseek.com"
+        assert dlg.model_edit.text() == "deepseek-chat"
+        assert dlg.name_edit.text() == "DeepSeek"
+        assert dlg.values()["provider_type"] == "openai_compatible"
+
+    def test_custom_provider_preset_preserves_user_endpoint(self, qtbot):
+        dlg = AddAIProfileDialog()
+        qtbot.addWidget(dlg)
+        dlg.base_url_edit.setText("https://custom.example/v1")
+        dlg.model_edit.setText("my-model")
+        dlg.vendor_combo.setCurrentIndex(0)
+        assert dlg.base_url_edit.text() == "https://custom.example/v1"
+        assert dlg.model_edit.text() == "my-model"
+
     def test_legacy_banner_when_no_profile(self, conn, fake_keyring, prompt_registry,
                                             preview_service, qtbot):
         from app.ai.client import ENV_API_KEY, ENV_MODEL

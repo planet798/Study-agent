@@ -81,7 +81,7 @@ class AIProfilesPanel(QWidget):
 
         top = QHBoxLayout()
         self.add_btn = SAButton(
-            "添加 API 配置", variant="primary",
+            "添加模型 / 订阅", variant="primary",
             icon_name=_icons.IconName.ADD,
         )
         self.add_btn.clicked.connect(self._on_add)
@@ -226,7 +226,7 @@ class AIProfilesPanel(QWidget):
                 )
             else:
                 self.source_label.setText(
-                    "当前无可用 AI 配置。请点击【添加 API 配置】。"
+                    "当前无可用 AI 配置。请点击【添加模型 / 订阅】，选择服务并填写 API Key。"
                 )
         else:
             self.legacy_btn.setVisible(False)
