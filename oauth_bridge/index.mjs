@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
+import { buildCompletionOptions } from './request-options.mjs';
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let requestResolve;
@@ -134,10 +135,9 @@ async function run(request) {
         };
       }),
     };
-    const message = await models.complete(model, context, {
-      temperature: request.temperature ?? 0.3,
-      maxTokens: request.maxTokens,
-    });
+    const message = await models.complete(
+      model, context, buildCompletionOptions(model, request),
+    );
     const text = message.content.filter((block) => block.type === 'text').map((block) => block.text).join('');
     const toolCalls = message.content.filter((block) => block.type === 'toolCall').map((block) => ({
       id: block.id, type: 'function', function: { name: block.name, arguments: JSON.stringify(block.arguments ?? {}) },

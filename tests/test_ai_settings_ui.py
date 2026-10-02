@@ -308,7 +308,6 @@ class TestConnectionWorkerNonBlocking:
         assert results[0].ok is expected_ok
         assert expected_message in results[0].message
         assert captured["max_tokens"] == 64
-        assert captured["temperature"] > 0
 
     @pytest.mark.threaded
     def test_oauth_test_keeps_rotated_credential_when_completion_fails(
