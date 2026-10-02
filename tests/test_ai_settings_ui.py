@@ -310,6 +310,40 @@ class TestConnectionWorkerNonBlocking:
         assert captured["max_tokens"] == 64
         assert captured["temperature"] > 0
 
+    @pytest.mark.threaded
+    def test_oauth_test_keeps_rotated_credential_when_completion_fails(
+        self, qtbot, monkeypatch
+    ):
+        from app.ai import pi_ai_bridge
+        from app.ui.ai_worker import AIConnectionTestWorker
+
+        refreshed = {
+            "type": "oauth",
+            "access": "refreshed-access-token-for-regression-test",
+            "refresh": "refreshed-refresh-token-for-regression-test",
+            "expires": 1_900_000_000_000,
+        }
+
+        class FakeBridge:
+            def complete(self, **kwargs):
+                kwargs["on_event"]({"event": "credential", "credential": refreshed})
+                raise RuntimeError("model request failed after token refresh")
+
+        monkeypatch.setattr(pi_ai_bridge, "PiAIBridge", FakeBridge)
+        worker = AIConnectionTestWorker(
+            base_url="", model="gpt-test", api_key="",
+            oauth_provider="openai-codex",
+            oauth_credential={"type": "oauth", "access": "original-test-token"},
+        )
+        results = []
+        worker.succeeded.connect(results.append)
+        with qtbot.waitSignal(worker.succeeded, timeout=3000):
+            worker.start()
+        worker.wait()
+
+        assert results[0].ok is False
+        assert results[0].oauth_credential == refreshed
+
     def test_worker_never_receives_repo(self):
         from app.ui.ai_worker import AIConnectionTestWorker
         import inspect

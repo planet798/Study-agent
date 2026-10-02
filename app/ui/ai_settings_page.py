@@ -511,6 +511,11 @@ class AIProfilesPanel(QWidget):
         # 凭据仅在后台请求内存中使用；Worker 不接收 DB connection/repository。
         is_oauth = p.provider_type.startswith("pi_oauth:")
         cfg = self.service.resolve_profile_config(pid) if is_oauth else None
+        if is_oauth and cfg is not None and not cfg.is_configured:
+            self.test_result_label.setText(
+                f"连接失败：{cfg.error_message or 'OAuth 凭据无效，请重新登录'}"
+            )
+            return
         api_key = "" if is_oauth else (self.service.secrets.get(p.secret_ref) or "")
         self.test_btn.setEnabled(False)
         self.test_result_label.setText("测试中…")

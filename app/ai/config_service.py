@@ -14,7 +14,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import math
 import os
 import sqlite3
 import time
@@ -47,6 +50,55 @@ SOURCE_PROFILE = "profile"
 SOURCE_ENV = "env"
 SOURCE_NONE = "none"
 
+_CODEX_AUTH_CLAIM = "https://api.openai.com/auth"
+
+
+def _codex_account_id(access_token: str) -> str | None:
+    """Read Codex's account claim, matching the pi-ai token requirement."""
+    try:
+        parts = access_token.split(".")
+        if len(parts) != 3:
+            return None
+        payload_part = parts[1]
+        payload_bytes = base64.b64decode(
+            payload_part + "=" * (-len(payload_part) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+        payload = json.loads(payload_bytes.decode("utf-8"))
+        account_id = payload.get(_CODEX_AUTH_CLAIM, {}).get("chatgpt_account_id")
+        return account_id if isinstance(account_id, str) and account_id else None
+    except (AttributeError, ValueError, TypeError, UnicodeDecodeError, binascii.Error):
+        return None
+
+
+def _is_valid_oauth_credential(credential: object, provider_id: str) -> bool:
+    """Validate pi-ai's stored OAuth shape and Codex's JWT account binding."""
+    if not isinstance(credential, dict) or credential.get("type") != "oauth":
+        return False
+    access = credential.get("access")
+    refresh = credential.get("refresh")
+    expires = credential.get("expires")
+    if not isinstance(access, str) or not access:
+        return False
+    if not isinstance(refresh, str):
+        return False
+    if isinstance(expires, bool) or not isinstance(expires, (int, float)):
+        return False
+    try:
+        if not math.isfinite(expires):
+            return False
+    except OverflowError:
+        return False
+    if provider_id == "openai-codex":
+        account_id = credential.get("accountId")
+        return (
+            isinstance(account_id, str)
+            and bool(account_id)
+            and account_id == _codex_account_id(access)
+        )
+    return True
+
 
 @dataclass
 class RuntimeAIConfig:
@@ -75,8 +127,12 @@ class RuntimeAIConfig:
     @property
     def is_configured(self) -> bool:
         if self.is_oauth:
-            return bool(self.model and isinstance(self.oauth_credential, dict)
-                        and self.oauth_credential.get("type") == "oauth")
+            return bool(
+                self.model
+                and _is_valid_oauth_credential(
+                    self.oauth_credential, self.oauth_provider_id
+                )
+            )
         return bool(self.api_key and self.model and self.base_url)
 
 
@@ -241,8 +297,9 @@ class AIConfigService:
             return False
         if is_pi_oauth_provider_type(profile.provider_type):
             try:
-                return json.loads(raw).get("type") == "oauth"
-            except (ValueError, AttributeError):
+                provider_id = profile.provider_type[len(PROVIDER_TYPE_PI_OAUTH_PREFIX):]
+                return _is_valid_oauth_credential(json.loads(raw), provider_id)
+            except (ValueError, AttributeError, TypeError):
                 return False
         return True
 
@@ -294,8 +351,8 @@ class AIConfigService:
         from .ai_profiles import PI_OAUTH_PROVIDER_IDS
         if provider_id not in PI_OAUTH_PROVIDER_IDS:
             raise ValueError(f"不支持的 OAuth 提供商: {provider_id}")
-        if not isinstance(credential, dict) or credential.get("type") != "oauth":
-            raise ValueError("OAuth 凭据格式无效")
+        if not _is_valid_oauth_credential(credential, provider_id):
+            raise ValueError("OAuth 凭据格式无效或账户信息不完整，请重新登录")
         if not (model or "").strip():
             raise ValueError("请选择模型")
         profile = self.create_profile(
@@ -320,8 +377,9 @@ class AIConfigService:
         profile = self.get_profile(profile_id)
         if profile is None or not is_pi_oauth_provider_type(profile.provider_type):
             raise ValueError("目标配置不是 OAuth 订阅配置")
-        if not isinstance(credential, dict) or credential.get("type") != "oauth":
-            raise ValueError("OAuth 凭据格式无效")
+        provider_id = profile.provider_type[len(PROVIDER_TYPE_PI_OAUTH_PREFIX):]
+        if not _is_valid_oauth_credential(credential, provider_id):
+            raise ValueError("OAuth 凭据格式无效或账户信息不完整，请重新登录")
         self._secrets.set(
             profile.secret_ref,
             json.dumps(credential, ensure_ascii=False, separators=(",", ":")),
@@ -461,9 +519,11 @@ class AIConfigService:
             profile_name=profile.display_name,
             oauth_credential=oauth_credential,
         )
-        if cfg.is_oauth and not cfg.oauth_credential:
+        if cfg.is_oauth and not _is_valid_oauth_credential(
+            cfg.oauth_credential, cfg.oauth_provider_id
+        ):
             cfg.error_message = (
-                f"配置「{profile.display_name}」需要重新登录（凭据不存在或格式无效）。"
+                f"配置「{profile.display_name}」需要重新登录（凭据缺失、损坏或账户信息无效）。"
             )
         elif not cfg.is_oauth and not api_key:
             cfg.error_message = (

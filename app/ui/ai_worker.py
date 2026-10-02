@@ -106,16 +106,25 @@ class AIConnectionTestWorker(QThread):
     def run(self) -> None:  # noqa: D102
         from ..ai.config_service import ConnectionTestResult, run_connection_test
 
+        refreshed_credential = {}
         try:
             if self._oauth_provider and self._oauth_credential:
                 import time
                 from ..ai.pi_ai_bridge import PiAIBridge
                 started = time.monotonic()
+
+                def capture_refresh(event: dict) -> None:
+                    if event.get("event") == "credential":
+                        credential = event.get("credential")
+                        if isinstance(credential, dict):
+                            refreshed_credential["value"] = credential
+
                 response = PiAIBridge().complete(
                     provider=self._oauth_provider, model=self._model,
                     credential=self._oauth_credential,
                     messages=[{"role": "user", "content": "Reply with OK."}],
                     temperature=0.3, max_tokens=64,
+                    on_event=capture_refresh,
                 )
                 content = (response.get("content") or "").strip()
                 finish_reason = str(response.get("finishReason") or "")
@@ -137,7 +146,9 @@ class AIConnectionTestWorker(QThread):
                     model=self._model,
                     latency_ms=int((time.monotonic() - started) * 1000),
                     source=content[:50],
-                    oauth_credential=response.get("credential"),
+                    oauth_credential=(
+                        response.get("credential") or refreshed_credential.get("value")
+                    ),
                 )
             else:
                 result = run_connection_test(
@@ -156,6 +167,7 @@ class AIConnectionTestWorker(QThread):
                     sanitize_text(str(e), self._api_key)
                 ),
                 model=self._model,
+                oauth_credential=refreshed_credential.get("value"),
             )
         self.succeeded.emit(result)
 

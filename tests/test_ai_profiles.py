@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import urllib.error
 
@@ -24,6 +25,14 @@ from app.ai.config_service import (
 )
 from app.ai.interface import AIServiceError
 from app.ai.secrets import SecretStore, SecretStoreError, make_secret_ref
+
+
+def _codex_access_token(account_id: str) -> str:
+    payload = {
+        "https://api.openai.com/auth": {"chatgpt_account_id": account_id}
+    }
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    return f"test-header.{encoded}.test-signature"
 
 
 class TestSecretStore:
@@ -208,7 +217,10 @@ class TestAIConfigServiceCRUD:
     def test_create_oauth_profile_keeps_credential_out_of_database(
         self, ai_config_service, fake_keyring, conn
     ):
-        credential = {"type": "oauth", "access": "secret-token", "refresh": "refresh-token"}
+        credential = {
+            "type": "oauth", "access": "secret-token",
+            "refresh": "refresh-token", "expires": 1_900_000_000_000,
+        }
         profile = ai_config_service.create_oauth_profile(
             "openai", "ChatGPT 订阅", "gpt-4o", credential, make_active=True
         )
@@ -224,6 +236,72 @@ class TestAIConfigServiceCRUD:
             "SELECT * FROM ai_profiles"
         ).fetchone()))
         assert fake_keyring.store[("study-agent", profile.secret_ref)] != ""
+
+    def test_codex_oauth_credential_round_trip_and_refresh_are_exact(
+        self, ai_config_service
+    ):
+        credential = {
+            "type": "oauth",
+            "access": _codex_access_token("account-before-refresh"),
+            "refresh": "refresh-token-before-refresh",
+            "expires": 1_900_000_000_000,
+            "accountId": "account-before-refresh",
+        }
+        profile = ai_config_service.create_oauth_profile(
+            "openai-codex", "Codex 订阅", "gpt-5-codex", credential,
+            make_active=True,
+        )
+
+        assert (
+            ai_config_service.resolve_profile_config(profile.id).oauth_credential
+            == credential
+        )
+
+        refreshed = {
+            "type": "oauth",
+            "access": _codex_access_token("account-after-refresh"),
+            "refresh": "refresh-token-after-refresh",
+            "expires": 1_910_000_000_000,
+            "accountId": "account-after-refresh",
+        }
+        ai_config_service.save_oauth_credential(profile.id, refreshed)
+
+        runtime = ai_config_service.resolve_profile_config(profile.id)
+        assert runtime.is_configured is True
+        assert runtime.oauth_credential == refreshed
+
+    def test_damaged_codex_credential_requires_relogin(self, ai_config_service):
+        profile = ai_config_service.create_profile(
+            "Codex 订阅", "", "gpt-5-codex",
+            provider_type="pi_oauth:openai-codex", make_active=True,
+        )
+        ai_config_service.secrets.set(profile.secret_ref, json.dumps({
+            "type": "oauth",
+            "access": "***",
+            "refresh": "***",
+            "expires": 1_900_000_000_000,
+            "accountId": "account-before-refresh",
+        }))
+
+        runtime = ai_config_service.resolve_profile_config(profile.id)
+
+        assert runtime.is_configured is False
+        assert "重新登录" in runtime.error_message
+        assert ai_config_service.has_credentials(profile.id) is False
+
+    def test_codex_account_id_must_match_access_token(self, ai_config_service):
+        credential = {
+            "type": "oauth",
+            "access": _codex_access_token("real-account-claim"),
+            "refresh": "test-refresh-token",
+            "expires": 1_900_000_000_000,
+            "accountId": "different-account-id",
+        }
+
+        with pytest.raises(ValueError, match="重新登录"):
+            ai_config_service.create_oauth_profile(
+                "openai-codex", "Codex 订阅", "gpt-5-codex", credential
+            )
 
     def test_oauth_credentials_missing_requires_relogin(self, ai_config_service):
         profile = ai_config_service.create_profile(

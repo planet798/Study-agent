@@ -23,6 +23,11 @@ from typing import Callable
 BRIDGE_DIR = Path(__file__).resolve().parents[2] / "oauth_bridge"
 _PROFILE_LOCKS: dict[str, threading.Lock] = {}
 _PROFILE_LOCKS_GUARD = threading.Lock()
+_DISPLAY_TEXT_KEYS = frozenset({
+    "content", "details", "error", "errormessage", "friendlymessage",
+    "instructions", "label", "message", "placeholder", "text", "url",
+    "usercode",
+})
 
 
 @contextmanager
@@ -122,13 +127,23 @@ class PiAIBridge:
                 text = text.replace(secret, "***")
             return re.sub(r"(?i)bearer\s+\S+", "Bearer ***", text)
 
-        def scrub_payload(value):
-            if isinstance(value, dict):
-                return {key: scrub_payload(child) for key, child in value.items()}
-            if isinstance(value, list):
-                return [scrub_payload(child) for child in value]
+        def scrub_payload(value, *, display_text: bool = False):
+            """Redact user-facing text while leaving data and credentials intact."""
             if isinstance(value, str):
-                return scrub(value)
+                return scrub(value) if display_text else value
+            if isinstance(value, dict):
+                return {
+                    key: scrub_payload(
+                        child,
+                        display_text=(
+                            key not in {"credential", "credentials"}
+                            and key.lower() in _DISPLAY_TEXT_KEYS
+                        ),
+                    )
+                    for key, child in value.items()
+                }
+            if isinstance(value, list):
+                return [scrub_payload(child, display_text=display_text) for child in value]
             return value
 
         try:
@@ -157,14 +172,14 @@ class PiAIBridge:
                 if "event" in event:
                     if event["event"] == "prompt" and on_prompt:
                         try:
-                            answer = on_prompt(event)
+                            answer = on_prompt(scrub_payload(event))
                             reply = {"type": "prompt_result", "id": event["id"], "value": answer}
                         except Exception:
                             reply = {"type": "prompt_result", "id": event["id"], "cancelled": True}
                         process.stdin.write(json.dumps(reply, ensure_ascii=False) + "\n")
                         process.stdin.flush()
                     elif on_event:
-                        on_event(event)
+                        on_event(scrub_payload(event))
                 elif "result" in event:
                     result = event["result"]
                 elif "error" in event:
