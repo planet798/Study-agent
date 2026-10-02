@@ -1,7 +1,7 @@
 """API Key 安全存储（SecretStore）。
 
 硬性要求：
-- 真实 API Key 绝不写入 SQLite / JSON / 源码 / 日志；
+- API Key 与 OAuth 令牌绝不写入 SQLite / JSON / 源码 / 日志；
 - Windows 本地应用优先写入 Windows Credential Manager；
 - 数据库只保存 ``secret_ref``（例如 ``ai-profile/3``）。
 
@@ -17,16 +17,18 @@
 from __future__ import annotations
 
 import base64
+import json
 import uuid
 from typing import Any, Optional
 
 # keyring service 名（写进 Credential Manager 的“服务”一栏）
 SECRET_SERVICE_NAME = "study-agent"
 SECRET_ACCOUNT_PREFIX = "ai-profile/"
-# Windows Credential Manager limits credential blobs to 2560 bytes. Large OAuth
-# payloads are base64-split into smaller sibling credentials under the same ref.
+# Windows Credential Manager limits blobs to 2560 bytes. The Windows keyring
+# backend marshals strings as wide chars, so 1000 ASCII chars stay below 2 KB.
+# Base64-split large OAuth payloads into sibling credentials under the same ref.
 _SECRET_PART_PREFIX = "__study_agent_secret_v1__:"
-_SECRET_PART_CHARS = 1800
+_SECRET_PART_CHARS = 1000
 
 
 class SecretStoreError(Exception):
@@ -79,6 +81,18 @@ class SecretStore:
     def _account(self, secret_ref: str) -> str:
         return secret_ref or ""
 
+    def _backend_name(self) -> str:
+        try:
+            mod = self._mod()
+            backend = mod.get_keyring() if hasattr(mod, "get_keyring") else mod
+            backends = getattr(backend, "backends", None)
+            if backends:
+                candidates = ",".join(type(item).__name__ for item in backends)
+                return f"{type(backend).__name__}[{candidates}]"
+            return type(backend).__name__
+        except Exception:  # noqa: BLE001 - diagnostics must not mask save error
+            return "unknown keyring backend"
+
     @staticmethod
     def _manifest(value: str | None) -> tuple[str, int] | None:
         if not value or not value.startswith(_SECRET_PART_PREFIX):
@@ -106,7 +120,7 @@ class SecretStore:
     # ---------- 公共 API ----------
 
     def set(self, secret_ref: str, value: str) -> None:
-        """写入 Key；失败抛 SecretStoreError（绝不静默丢弃）。"""
+        """Write an API key or OAuth credential; never silently discard it."""
         if not secret_ref:
             raise SecretStoreError("secret_ref 不能为空")
         if value is None:
@@ -145,10 +159,42 @@ class SecretStore:
         except SecretStoreError:
             raise
         except Exception as e:  # noqa: BLE001
-            self.last_error = str(e)
+            detail = str(e)
+            # Some credential backends include the rejected value in exceptions.
+            # Redact both the complete OAuth JSON and any base64 chunks.
+            sensitive = [value]
+
+            def collect_strings(item) -> None:
+                if isinstance(item, dict):
+                    for child in item.values():
+                        collect_strings(child)
+                elif isinstance(item, list):
+                    for child in item:
+                        collect_strings(child)
+                elif isinstance(item, str) and len(item) >= 4:
+                    sensitive.append(item)
+
+            try:
+                collect_strings(json.loads(value))
+            except (ValueError, TypeError):
+                pass
+            try:
+                encoded_value = base64.b64encode(value.encode("utf-8")).decode("ascii")
+                sensitive.extend(
+                    encoded_value[i:i + _SECRET_PART_CHARS]
+                    for i in range(0, len(encoded_value), _SECRET_PART_CHARS)
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            for secret in sensitive:
+                if secret:
+                    detail = detail.replace(secret, "***")
+            self.last_error = (
+                f"backend={self._backend_name()}, error={type(e).__name__}: {detail}"
+            )
             raise SecretStoreError(
                 "无法写入系统凭据存储，凭据未保存。"
-                "请确认系统 keyring / Windows 凭据管理器可用。"
+                "请检查下方脱敏诊断及系统凭据存储状态。"
             ) from e
 
     def get(self, secret_ref: str) -> Optional[str]:

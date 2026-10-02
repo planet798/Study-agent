@@ -47,19 +47,54 @@ class TestSecretStore:
         store = SecretStore(keyring_module=boom)
         assert store.get("ai-profile/1") is None
 
-    def test_large_oauth_secret_is_chunked_and_round_trips(self, fake_keyring):
-        store = SecretStore(keyring_module=fake_keyring)
+    def test_large_oauth_secret_is_chunked_for_windows_credential_blobs(self):
+        class WindowsBlobLimitKeyring:
+            def __init__(self):
+                self.store = {}
+
+            def set_password(self, service, account, value):
+                if len(value.encode("utf-16-le")) > 2560:
+                    raise ValueError("credential blob exceeds Windows limit")
+                self.store[(service, account)] = value
+
+            def get_password(self, service, account):
+                return self.store.get((service, account))
+
+            def delete_password(self, service, account):
+                self.store.pop((service, account), None)
+
+        backend = WindowsBlobLimitKeyring()
+        store = SecretStore(keyring_module=backend)
         value = '{"type":"oauth","access":"' + ("x" * 7000) + '"}'
         store.set("ai-profile/large", value)
-        manifest = fake_keyring.store[("study-agent", "ai-profile/large")]
+        manifest = backend.store[("study-agent", "ai-profile/large")]
         assert manifest.startswith("__study_agent_secret_v1__:")
-        parts = [value for (service, account), value in fake_keyring.store.items()
+        parts = [value for (service, account), value in backend.store.items()
                  if service == "study-agent" and "#v1#" in account]
-        assert parts and max(map(len, parts)) <= 1800
+        assert parts and max(len(part.encode("utf-16-le")) for part in parts) <= 2560
         assert store.get("ai-profile/large") == value
         store.delete("ai-profile/large")
         assert not any("ai-profile/large#v1#" in account
-                       for _service, account in fake_keyring.store)
+                       for _service, account in backend.store)
+
+    def test_keyring_write_diagnostic_redacts_oauth_payload(self, fake_keyring):
+        class RejectingKeyring:
+            def get_password(self, *_args):
+                return None
+
+            def set_password(self, _service, _account, value):
+                raise RuntimeError(f"write rejected: {value[:24]}")
+
+            def delete_password(self, *_args):
+                pass
+
+        store = SecretStore(keyring_module=RejectingKeyring())
+        secret = '{"type":"oauth","access":"very-secret-token"}'
+        with pytest.raises(SecretStoreError):
+            store.set("ai-profile/1", secret)
+        assert "RuntimeError" in store.last_error
+        assert secret not in store.last_error
+        assert "very-secret-token" not in store.last_error
 
     def test_make_secret_ref(self):
         assert make_secret_ref(3) == "ai-profile/3"

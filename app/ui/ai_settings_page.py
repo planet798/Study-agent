@@ -401,7 +401,13 @@ class AIProfilesPanel(QWidget):
                 make_active=True,
             )
         except Exception as error:  # noqa: BLE001
-            QMessageBox.critical(self, "保存订阅失败", str(error))
+            from ..ai.secrets import SecretStoreError
+            details = (getattr(self.service.secrets, "last_error", "")
+                       if isinstance(error, SecretStoreError) else "")
+            message = str(error)
+            if details:
+                message += f"\n\n诊断（已脱敏）：{details}"
+            QMessageBox.critical(self, "保存订阅失败", message)
             return
         QMessageBox.information(self, "已连接", f"已保存 {provider['name']} 订阅，并选择模型 {model['id']}。")
         self.refresh()
