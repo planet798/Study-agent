@@ -16,11 +16,17 @@
 
 from __future__ import annotations
 
+import base64
+import uuid
 from typing import Any, Optional
 
 # keyring service 名（写进 Credential Manager 的“服务”一栏）
 SECRET_SERVICE_NAME = "study-agent"
 SECRET_ACCOUNT_PREFIX = "ai-profile/"
+# Windows Credential Manager limits credential blobs to 2560 bytes. Large OAuth
+# payloads are base64-split into smaller sibling credentials under the same ref.
+_SECRET_PART_PREFIX = "__study_agent_secret_v1__:"
+_SECRET_PART_CHARS = 1800
 
 
 class SecretStoreError(Exception):
@@ -73,6 +79,30 @@ class SecretStore:
     def _account(self, secret_ref: str) -> str:
         return secret_ref or ""
 
+    @staticmethod
+    def _manifest(value: str | None) -> tuple[str, int] | None:
+        if not value or not value.startswith(_SECRET_PART_PREFIX):
+            return None
+        try:
+            generation, count = value[len(_SECRET_PART_PREFIX):].rsplit(":", 1)
+            return generation, int(count)
+        except (ValueError, TypeError):
+            return None
+
+    def _delete_parts(self, secret_ref: str, manifest: tuple[str, int] | None) -> None:
+        if manifest is None:
+            return
+        generation, count = manifest
+        mod = self._mod()
+        for index in range(count):
+            try:
+                mod.delete_password(
+                    self.service_name,
+                    f"{self._account(secret_ref)}#v1#{generation}#{index}",
+                )
+            except Exception:  # noqa: BLE001 - cleanup is best effort
+                pass
+
     # ---------- 公共 API ----------
 
     def set(self, secret_ref: str, value: str) -> None:
@@ -82,14 +112,42 @@ class SecretStore:
         if value is None:
             value = ""
         try:
-            self._mod().set_password(self.service_name, self._account(secret_ref), value)
+            mod = self._mod()
+            account = self._account(secret_ref)
+            old_value = mod.get_password(self.service_name, account)
+            old_manifest = self._manifest(old_value)
+            encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
+            if len(value.encode("utf-8")) <= _SECRET_PART_CHARS:
+                mod.set_password(self.service_name, account, value)
+            else:
+                generation = uuid.uuid4().hex
+                parts = [encoded[i:i + _SECRET_PART_CHARS]
+                         for i in range(0, len(encoded), _SECRET_PART_CHARS)]
+                written = []
+                try:
+                    for index, part in enumerate(parts):
+                        part_account = f"{account}#v1#{generation}#{index}"
+                        mod.set_password(self.service_name, part_account, part)
+                        written.append(part_account)
+                    mod.set_password(
+                        self.service_name, account,
+                        f"{_SECRET_PART_PREFIX}{generation}:{len(parts)}",
+                    )
+                except Exception:
+                    for part_account in written:
+                        try:
+                            mod.delete_password(self.service_name, part_account)
+                        except Exception:
+                            pass
+                    raise
+            self._delete_parts(secret_ref, old_manifest)
             self.last_error = ""
         except SecretStoreError:
             raise
         except Exception as e:  # noqa: BLE001
             self.last_error = str(e)
             raise SecretStoreError(
-                "无法写入系统凭据存储（keyring），API Key 未保存。"
+                "无法写入系统凭据存储，凭据未保存。"
                 "请确认系统 keyring / Windows 凭据管理器可用。"
             ) from e
 
@@ -98,7 +156,19 @@ class SecretStore:
         if not secret_ref:
             return None
         try:
-            value = self._mod().get_password(self.service_name, self._account(secret_ref))
+            mod = self._mod()
+            account = self._account(secret_ref)
+            value = mod.get_password(self.service_name, account)
+            manifest = self._manifest(value)
+            if manifest is not None:
+                generation, count = manifest
+                encoded = "".join(
+                    mod.get_password(
+                        self.service_name, f"{account}#v1#{generation}#{index}"
+                    ) or ""
+                    for index in range(count)
+                )
+                value = base64.b64decode(encoded, validate=True).decode("utf-8")
             self.last_error = ""
             return value
         except Exception as e:  # noqa: BLE001 - 后端不可用 / 无此条目
@@ -110,7 +180,11 @@ class SecretStore:
         if not secret_ref:
             return
         try:
-            self._mod().delete_password(self.service_name, self._account(secret_ref))
+            mod = self._mod()
+            account = self._account(secret_ref)
+            manifest = self._manifest(mod.get_password(self.service_name, account))
+            mod.delete_password(self.service_name, account)
+            self._delete_parts(secret_ref, manifest)
             self.last_error = ""
         except Exception as e:  # noqa: BLE001 - 条目不存在 / 后端不可用
             self.last_error = str(e)

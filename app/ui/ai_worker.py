@@ -9,11 +9,69 @@
 
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import QThread, Signal
 
 from ..database.connection import get_connection
 from ..database.repository import Task
 from ..services.task_review_service import TaskReviewService
+
+
+class OAuthLoginWorker(QThread):
+    """Run pi-ai OAuth interactively without blocking the GUI thread."""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+    auth_event = Signal(object)
+    prompt_requested = Signal(object)
+
+    def __init__(self, provider_id: str, parent=None):
+        super().__init__(parent)
+        self.provider_id = provider_id
+        self._prompt_lock = threading.Lock()
+        self._prompt_event = threading.Event()
+        self._prompt_answer = None
+        self._prompt_cancelled = False
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.requestInterruption()
+        self._cancel_event.set()
+        self.answer_prompt(None)
+
+    def answer_prompt(self, value: str | None) -> None:
+        with self._prompt_lock:
+            self._prompt_answer = value or ""
+            self._prompt_cancelled = value is None
+            self._prompt_event.set()
+
+    def _request_prompt(self, event: dict) -> str:
+        self._prompt_event.clear()
+        self._prompt_answer = None
+        self._prompt_cancelled = False
+        self.prompt_requested.emit(event)
+        while not self._prompt_event.wait(0.2):
+            if self.isInterruptionRequested():
+                raise RuntimeError("登录已取消")
+        with self._prompt_lock:
+            if self._prompt_cancelled:
+                raise RuntimeError("登录已取消")
+            return self._prompt_answer or ""
+
+    def run(self) -> None:
+        try:
+            from ..ai.pi_ai_bridge import PiAIBridge
+            result = PiAIBridge().login(
+                self.provider_id,
+                on_event=self.auth_event.emit,
+                on_prompt=self._request_prompt,
+                timeout=600,
+                cancel_event=self._cancel_event,
+            )
+            self.succeeded.emit(result["credential"])
+        except Exception as error:  # noqa: BLE001
+            self.failed.emit(str(error))
 
 
 class AIConnectionTestWorker(QThread):
@@ -33,23 +91,47 @@ class AIConnectionTestWorker(QThread):
         api_key: str,
         timeout: float = 10.0,
         parent=None,
+        *,
+        oauth_provider: str = "",
+        oauth_credential: dict | None = None,
     ):
         super().__init__(parent)
         self._base_url = base_url
         self._model = model
         self._api_key = api_key
         self._timeout = timeout
+        self._oauth_provider = oauth_provider
+        self._oauth_credential = oauth_credential
 
     def run(self) -> None:  # noqa: D102
-        from ..ai.config_service import run_connection_test
+        from ..ai.config_service import ConnectionTestResult, run_connection_test
 
         try:
-            result = run_connection_test(
-                self._base_url,
-                self._model,
-                self._api_key,
-                timeout=self._timeout,
-            )
+            if self._oauth_provider and self._oauth_credential:
+                import time
+                from ..ai.pi_ai_bridge import PiAIBridge
+                started = time.monotonic()
+                response = PiAIBridge().complete(
+                    provider=self._oauth_provider, model=self._model,
+                    credential=self._oauth_credential,
+                    messages=[{"role": "user", "content": "Reply with OK."}],
+                    temperature=0, max_tokens=5,
+                )
+                result = ConnectionTestResult(
+                    ok=bool((response.get("content") or "").strip()),
+                    message="连接成功" if (response.get("content") or "").strip() else "模型未返回文本",
+                    model=self._model,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                    source=(response.get("content") or "").strip()[:50],
+                    oauth_credential=response.get("credential"),
+                )
+            else:
+                result = run_connection_test(
+                    self._base_url,
+                    self._model,
+                    self._api_key,
+                    timeout=self._timeout,
+                )
         except Exception as e:  # noqa: BLE001 - 任何异常都转为一条结果
             from ..ai.client import sanitize_text
             from ..ai.config_service import ConnectionTestResult, classify_connection_error

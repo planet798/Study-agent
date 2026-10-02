@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -23,8 +24,10 @@ from typing import Iterator, Optional
 
 from .ai_profiles import (
     PROVIDER_TYPE_OPENAI_COMPATIBLE,
+    PROVIDER_TYPE_PI_OAUTH_PREFIX,
     AIProfile,
     AIProfileRepository,
+    is_pi_oauth_provider_type,
 )
 from .client import (
     DEFAULT_BASE_URL,
@@ -57,9 +60,23 @@ class RuntimeAIConfig:
     profile_id: Optional[int] = None
     profile_name: str = ""
     error_message: str = ""
+    oauth_credential: dict | None = None
+
+    @property
+    def oauth_provider_id(self) -> str:
+        if is_pi_oauth_provider_type(self.provider_type):
+            return self.provider_type[len(PROVIDER_TYPE_PI_OAUTH_PREFIX):]
+        return ""
+
+    @property
+    def is_oauth(self) -> bool:
+        return bool(self.oauth_provider_id)
 
     @property
     def is_configured(self) -> bool:
+        if self.is_oauth:
+            return bool(self.model and isinstance(self.oauth_credential, dict)
+                        and self.oauth_credential.get("type") == "oauth")
         return bool(self.api_key and self.model and self.base_url)
 
 
@@ -70,6 +87,7 @@ class ConnectionTestResult:
     model: str = ""
     latency_ms: int = 0
     source: str = ""
+    oauth_credential: dict | None = None
 
 
 def classify_connection_error(message: str) -> str:
@@ -209,10 +227,24 @@ class AIConfigService:
 
     def has_api_key(self, profile_id: int) -> bool:
         profile = self.get_profile(profile_id)
-        if profile is None:
+        if profile is None or is_pi_oauth_provider_type(profile.provider_type):
             return False
         value = self._secrets.get(profile.secret_ref)
         return bool(value)
+
+    def has_credentials(self, profile_id: int) -> bool:
+        profile = self.get_profile(profile_id)
+        if profile is None:
+            return False
+        raw = self._secrets.get(profile.secret_ref)
+        if not raw:
+            return False
+        if is_pi_oauth_provider_type(profile.provider_type):
+            try:
+                return json.loads(raw).get("type") == "oauth"
+            except (ValueError, AttributeError):
+                return False
+        return True
 
     # ================= Profile 写入 =================
 
@@ -253,6 +285,47 @@ class AIConfigService:
                     repo.delete(profile.id)
                 raise
         return profile
+
+    def create_oauth_profile(
+        self, provider_id: str, display_name: str, model: str,
+        credential: dict, make_active: bool = False,
+    ) -> AIProfile:
+        """Create an account-backed profile; the OAuth token stays in keyring."""
+        from .ai_profiles import PI_OAUTH_PROVIDER_IDS
+        if provider_id not in PI_OAUTH_PROVIDER_IDS:
+            raise ValueError(f"不支持的 OAuth 提供商: {provider_id}")
+        if not isinstance(credential, dict) or credential.get("type") != "oauth":
+            raise ValueError("OAuth 凭据格式无效")
+        if not (model or "").strip():
+            raise ValueError("请选择模型")
+        profile = self.create_profile(
+            display_name=display_name,
+            base_url="",
+            model=model,
+            provider_type=f"{PROVIDER_TYPE_PI_OAUTH_PREFIX}{provider_id}",
+            make_active=make_active,
+        )
+        try:
+            self._secrets.set(
+                profile.secret_ref,
+                json.dumps(credential, ensure_ascii=False, separators=(",", ":")),
+            )
+        except SecretStoreError:
+            with self._repo() as repo:
+                repo.delete(profile.id)
+            raise
+        return profile
+
+    def save_oauth_credential(self, profile_id: int, credential: dict) -> None:
+        profile = self.get_profile(profile_id)
+        if profile is None or not is_pi_oauth_provider_type(profile.provider_type):
+            raise ValueError("目标配置不是 OAuth 订阅配置")
+        if not isinstance(credential, dict) or credential.get("type") != "oauth":
+            raise ValueError("OAuth 凭据格式无效")
+        self._secrets.set(
+            profile.secret_ref,
+            json.dumps(credential, ensure_ascii=False, separators=(",", ":")),
+        )
 
     def update_profile(
         self,
@@ -369,7 +442,15 @@ class AIConfigService:
                 source=SOURCE_NONE,
                 error_message=f"AI 配置不存在: id={profile_id}",
             )
-        api_key = self._secrets.get(profile.secret_ref) or ""
+        stored_secret = self._secrets.get(profile.secret_ref) or ""
+        oauth_credential = None
+        api_key = stored_secret
+        if is_pi_oauth_provider_type(profile.provider_type):
+            api_key = ""
+            try:
+                oauth_credential = json.loads(stored_secret) if stored_secret else None
+            except (ValueError, TypeError):
+                oauth_credential = None
         cfg = RuntimeAIConfig(
             base_url=(profile.base_url or "").strip().rstrip("/"),
             model=(profile.model or "").strip(),
@@ -378,14 +459,19 @@ class AIConfigService:
             source=SOURCE_PROFILE,
             profile_id=profile.id,
             profile_name=profile.display_name,
+            oauth_credential=oauth_credential,
         )
-        if not api_key:
+        if cfg.is_oauth and not cfg.oauth_credential:
+            cfg.error_message = (
+                f"配置「{profile.display_name}」需要重新登录（凭据不存在或格式无效）。"
+            )
+        elif not cfg.is_oauth and not api_key:
             cfg.error_message = (
                 f"配置「{profile.display_name}」缺少 API Key（系统凭据存储中不存在）。"
             )
         elif not cfg.model:
             cfg.error_message = f"配置「{profile.display_name}」缺少 Model。"
-        elif not cfg.base_url:
+        elif not cfg.is_oauth and not cfg.base_url:
             cfg.error_message = f"配置「{profile.display_name}」缺少 Base URL。"
         return cfg
 

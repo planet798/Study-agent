@@ -17,9 +17,24 @@ from typing import Optional
 
 from ..utils.date_utils import now_iso
 
-# 第一版只支持 OpenAI-compatible（DeepSeek / USTC / OpenAI 等都是兼容 API）
+# OAuth providers are implemented by the pi-ai bridge; provider_type keeps old
+# profiles compatible while identifying the account-backed transport.
 PROVIDER_TYPE_OPENAI_COMPATIBLE = "openai_compatible"
+PROVIDER_TYPE_PI_OAUTH_PREFIX = "pi_oauth:"
+PI_OAUTH_PROVIDER_IDS = frozenset({
+    "anthropic", "github-copilot", "kimi-coding", "meta", "openai",
+    "openai-codex", "openrouter", "xai",
+})
 SUPPORTED_PROVIDER_TYPES = (PROVIDER_TYPE_OPENAI_COMPATIBLE,)
+
+
+def is_pi_oauth_provider_type(provider_type: str) -> bool:
+    return (provider_type or "").startswith(PROVIDER_TYPE_PI_OAUTH_PREFIX) and \
+        (provider_type[len(PROVIDER_TYPE_PI_OAUTH_PREFIX):] in PI_OAUTH_PROVIDER_IDS)
+
+
+def validate_provider_type(provider_type: str) -> bool:
+    return provider_type in SUPPORTED_PROVIDER_TYPES or is_pi_oauth_provider_type(provider_type)
 
 
 @dataclass
@@ -101,7 +116,7 @@ class AIProfileRepository:
         name = (display_name or "").strip()
         if not name:
             raise ValueError("配置名称不能为空")
-        if provider_type not in SUPPORTED_PROVIDER_TYPES:
+        if not validate_provider_type(provider_type):
             raise ValueError(f"不支持的 provider_type: {provider_type}")
         now = now_iso()
         cur = self.conn.execute(
@@ -149,7 +164,7 @@ class AIProfileRepository:
         if model is not None:
             fields["model"] = model.strip()
         if provider_type is not None:
-            if provider_type not in SUPPORTED_PROVIDER_TYPES:
+            if not validate_provider_type(provider_type):
                 raise ValueError(f"不支持的 provider_type: {provider_type}")
             fields["provider_type"] = provider_type
         if secret_ref is not None:

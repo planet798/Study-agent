@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -53,7 +54,7 @@ from .ai_settings_dialogs import (
     PromptDefaultDialog,
     RenameProfileDialog,
 )
-from .ai_worker import AIConnectionTestWorker
+from .ai_worker import AIConnectionTestWorker, OAuthLoginWorker
 from .styles import apply_secondary_button_text
 from .personalization_panel import PersonalizationPanel
 
@@ -70,6 +71,8 @@ class AIProfilesPanel(QWidget):
         super().__init__(parent)
         self.service = ai_config_service
         self._test_worker: AIConnectionTestWorker | None = None
+        self._oauth_worker: OAuthLoginWorker | None = None
+        self._oauth_provider_catalog: dict[str, dict] = {}
         self._build_ui()
         self.refresh()
 
@@ -81,11 +84,15 @@ class AIProfilesPanel(QWidget):
 
         top = QHBoxLayout()
         self.add_btn = SAButton(
-            "添加模型 / 订阅", variant="primary",
+            "添加 API Key 配置", variant="primary",
             icon_name=_icons.IconName.ADD,
         )
         self.add_btn.clicked.connect(self._on_add)
         top.addWidget(self.add_btn)
+
+        self.oauth_btn = SAButton("订阅账号登录", variant="secondary")
+        self.oauth_btn.clicked.connect(self._on_oauth_login)
+        top.addWidget(self.oauth_btn)
 
         self.legacy_btn = SAButton("保存为配置", variant="secondary")
         self.legacy_btn.clicked.connect(self._on_import_legacy)
@@ -166,9 +173,10 @@ class AIProfilesPanel(QWidget):
         select_row = 0
         for i, p in enumerate(profiles):
             suffix = "  当前" if p.is_active else ""
+            is_oauth = p.provider_type.startswith("pi_oauth:")
+            endpoint = f"订阅账号 · {p.model}" if is_oauth else (p.base_url or "（无 Base URL）")
             item = QListWidgetItem(
-                f"{p.display_name}{suffix}\n    "
-                f"{p.base_url or '（无 Base URL）'}"
+                f"{p.display_name}{suffix}\n    {endpoint}"
             )
             item.setData(Qt.ItemDataRole.UserRole, p.id)
             if p.is_active:
@@ -194,7 +202,7 @@ class AIProfilesPanel(QWidget):
         self.detail_title.setText("不可用")
         self.info_label.setText("")
         self.test_result_label.setText("")
-        for b in (self.add_btn, self.legacy_btn, self.set_active_btn,
+        for b in (self.add_btn, self.oauth_btn, self.legacy_btn, self.set_active_btn,
                   self.test_btn, self.edit_key_btn, self.rename_btn,
                   self.delete_btn):
             b.setEnabled(False)
@@ -226,7 +234,7 @@ class AIProfilesPanel(QWidget):
                 )
             else:
                 self.source_label.setText(
-                    "当前无可用 AI 配置。请点击【添加模型 / 订阅】，选择服务并填写 API Key。"
+                    "当前无可用 AI 配置。可添加 API Key，或点击【订阅账号登录】使用支持的订阅服务。"
                 )
         else:
             self.legacy_btn.setVisible(False)
@@ -258,13 +266,21 @@ class AIProfilesPanel(QWidget):
             self.refresh()
             return
         self.detail_title.setText(p.display_name + ("（当前）" if p.is_active else ""))
-        key_state = "已配置（••••••••）" if self.service.has_api_key(pid) else "未配置"
+        is_oauth = p.provider_type.startswith("pi_oauth:")
+        credential_state = "已登录（订阅 OAuth）" if self.service.has_credentials(pid) else "未配置"
+        if is_oauth:
+            base_url_text = f"pi-ai OAuth · {p.provider_type.split(':', 1)[1]}"
+            credential_label = "账号："
+        else:
+            base_url_text = p.base_url or "（未填写）"
+            credential_label = "API Key："
+        self.edit_key_btn.setEnabled(not is_oauth)
         self.info_label.setText(
             f"配置名称：{p.display_name}\n"
-            f"Base URL：{p.base_url or '（未填写）'}\n"
+            f"服务：{base_url_text}\n"
             f"Model：{p.model or '（未填写）'}\n"
-            f"API Key：{key_state}\n"
-            f"类型：{p.provider_type}"
+            f"{credential_label}{credential_state if is_oauth else ('已配置（••••••••）' if self.service.has_api_key(pid) else '未配置')}\n"
+            f"类型：{'订阅账号登录' if is_oauth else p.provider_type}"
         )
         self.set_active_btn.setEnabled(not p.is_active)
 
@@ -287,6 +303,115 @@ class AIProfilesPanel(QWidget):
             QMessageBox.critical(self, "添加失败", str(e))
             return
         self.refresh()
+
+    def _on_oauth_login(self) -> None:
+        if self._oauth_worker is not None:
+            return
+        try:
+            from ..ai.pi_ai_bridge import PiAIBridge
+            providers = [p for p in PiAIBridge().catalog() if p.get("isSubscription") and p.get("models")]
+        except Exception as error:  # noqa: BLE001
+            QMessageBox.warning(self, "订阅登录不可用", str(error))
+            return
+        if not providers:
+            QMessageBox.warning(self, "无可用服务", "pi-ai 没有返回支持订阅登录的服务。")
+            return
+        labels = [f"{p['name']} — {p['loginLabel']}" for p in providers]
+        label, accepted = QInputDialog.getItem(
+            self, "订阅账号登录", "选择要登录的模型服务：", labels, 0, False
+        )
+        if not accepted:
+            return
+        provider = providers[labels.index(label)]
+        worker = OAuthLoginWorker(provider["id"], self)
+        self._oauth_worker = worker
+        self.oauth_btn.setEnabled(False)
+        worker.auth_event.connect(self._on_oauth_event)
+        worker.prompt_requested.connect(self._on_oauth_prompt)
+        worker.succeeded.connect(lambda credential: self._on_oauth_login_succeeded(provider, credential))
+        worker.failed.connect(lambda message: QMessageBox.warning(self, "登录失败", message))
+        worker.finished.connect(self._on_oauth_worker_finished)
+        worker.start()
+
+    def _on_oauth_event(self, event: dict) -> None:
+        auth_event = event.get("authEvent", {})
+        kind = auth_event.get("type")
+        if kind == "auth_url":
+            url = auth_event.get("url", "")
+            if url:
+                QDesktopServices.openUrl(QUrl(url))
+            text = auth_event.get("instructions") or "已在浏览器打开授权页面。请完成登录并返回 Study Agent。"
+            QMessageBox.information(self, "等待账号授权", text)
+        elif kind == "device_code":
+            url = auth_event.get("verificationUri", "")
+            if url:
+                QDesktopServices.openUrl(QUrl(url))
+            QMessageBox.information(
+                self, "设备授权",
+                f"请在浏览器打开：\n{url}\n\n并输入授权码：\n{auth_event.get('userCode', '')}",
+            )
+        elif kind == "info":
+            text = auth_event.get("message", "")
+            for link in auth_event.get("links", []):
+                text += f"\n{link.get('label') or '帮助'}：{link.get('url')}"
+            if text:
+                QMessageBox.information(self, "订阅登录", text)
+
+    def _on_oauth_prompt(self, event: dict) -> None:
+        worker = self._oauth_worker
+        if worker is None:
+            return
+        prompt = event.get("prompt", {})
+        prompt_type = prompt.get("type")
+        if prompt_type == "select":
+            options = prompt.get("options", [])
+            labels = [item.get("label", item.get("id", "")) for item in options]
+            label, accepted = QInputDialog.getItem(
+                self, "订阅登录", prompt.get("message", "请选择"), labels, 0, False
+            )
+            worker.answer_prompt(options[labels.index(label)]["id"] if accepted else None)
+        else:
+            from PySide6.QtWidgets import QLineEdit
+            mode = QLineEdit.EchoMode.Password if prompt_type == "secret" else QLineEdit.EchoMode.Normal
+            value, accepted = QInputDialog.getText(
+                self, "订阅登录", prompt.get("message", "请输入"), mode,
+                prompt.get("placeholder", ""),
+            )
+            worker.answer_prompt(value if accepted else None)
+
+    def _on_oauth_login_succeeded(self, provider: dict, credential: dict) -> None:
+        models = provider.get("models", [])
+        labels = [f"{model['name']} ({model['id']})" for model in models]
+        label, accepted = QInputDialog.getItem(
+            self, "选择模型", f"{provider['name']} 登录成功，请选择要使用的模型：",
+            labels, 0, False,
+        )
+        if not accepted:
+            QMessageBox.information(
+                self, "登录完成", "账号授权已完成；关闭窗口前请先选择模型以保存配置。"
+            )
+            return
+        model = models[labels.index(label)]
+        try:
+            self.service.create_oauth_profile(
+                provider_id=provider["id"],
+                display_name=f"{provider['name']} 订阅",
+                model=model["id"],
+                credential=credential,
+                make_active=True,
+            )
+        except Exception as error:  # noqa: BLE001
+            QMessageBox.critical(self, "保存订阅失败", str(error))
+            return
+        QMessageBox.information(self, "已连接", f"已保存 {provider['name']} 订阅，并选择模型 {model['id']}。")
+        self.refresh()
+
+    def _on_oauth_worker_finished(self) -> None:
+        worker = self._oauth_worker
+        self._oauth_worker = None
+        self.oauth_btn.setEnabled(True)
+        if worker is not None:
+            worker.deleteLater()
 
     def _on_import_legacy(self) -> None:
         try:
@@ -348,7 +473,7 @@ class AIProfilesPanel(QWidget):
         profiles = self.service.list_profiles()
         others = [x for x in profiles if x.id != pid]
         reassign_to = None
-        msg = f"确定删除配置「{p.display_name}」吗？\n同时会删除系统凭据存储中的 API Key。"
+        msg = f"确定删除配置「{p.display_name}」吗？\n同时会删除系统凭据存储中的登录凭据。"
         if p.is_active and others:
             names = [x.display_name for x in others]
             choice, ok = QInputDialog.getItem(
@@ -377,19 +502,29 @@ class AIProfilesPanel(QWidget):
         p = self.service.get_profile(pid)
         if p is None:
             return
-        # 只把普通值传给 worker；Key 从 keyring 取出后仅存在于内存。
-        api_key = self.service.secrets.get(p.secret_ref) or ""
+        # 凭据仅在后台请求内存中使用；Worker 不接收 DB connection/repository。
+        is_oauth = p.provider_type.startswith("pi_oauth:")
+        cfg = self.service.resolve_profile_config(pid) if is_oauth else None
+        api_key = "" if is_oauth else (self.service.secrets.get(p.secret_ref) or "")
         self.test_btn.setEnabled(False)
         self.test_result_label.setText("测试中…")
         worker = AIConnectionTestWorker(
             base_url=p.base_url, model=p.model, api_key=api_key,
             timeout=10.0, parent=self,
+            oauth_provider=cfg.oauth_provider_id if cfg else "",
+            oauth_credential=cfg.oauth_credential if cfg else None,
         )
         self._test_worker = worker
 
         def _done(result) -> None:
             self.test_btn.setEnabled(True)
             self._test_worker = None
+            if result.oauth_credential and is_oauth:
+                try:
+                    self.service.save_oauth_credential(pid, result.oauth_credential)
+                except Exception as error:  # noqa: BLE001
+                    self.test_result_label.setText(f"连接成功，但凭据更新失败：{error}")
+                    return
             if result.ok:
                 self.test_result_label.setText(
                     f"连接成功 · Model: {result.model} · {result.latency_ms} ms"
@@ -409,6 +544,14 @@ class AIProfilesPanel(QWidget):
             try:
                 worker.requestInterruption()
                 worker.wait()
+            except Exception:  # noqa: BLE001
+                pass
+        oauth_worker = self._oauth_worker
+        self._oauth_worker = None
+        if oauth_worker is not None and oauth_worker.isRunning():
+            try:
+                oauth_worker.cancel()
+                oauth_worker.wait(3000)
             except Exception:  # noqa: BLE001
                 pass
 

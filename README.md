@@ -103,14 +103,22 @@ Monthly Dashboard、Monthly AI Summary 与 summary cache production path 已移�
 
 在 Sidebar 打开 **设置**，无需修改任何源码或环境变量：
 
-- **模型 / API**：添加 / 删除 / 重命名 API 配置，修改 Base URL / Model / API Key，
-  切换当前配置，测试连接。切换后**下一次 AI 请求立即生效**（无需重启）。
+- **模型 / API**：支持添加 API Key 配置，或使用【订阅账号登录】完成 OpenAI/ChatGPT、Anthropic/Claude、GitHub Copilot、Kimi Coding 等 pi-ai OAuth 授权；可选择模型、切换当前配置并测试连接。切换后**下一次 AI 请求立即生效**（无需重启）。
+
+首次使用 OAuth 登录需安装 Node.js 22.19+，并在项目目录运行一次：
+
+```bash
+cd oauth_bridge
+npm ci
+```
+
+OAuth 授权凭据保存在系统凭据存储（Windows Credential Manager），不会写入 SQLite、配置文件或日志；API Key 接入仍可继续使用。
 - **Prompt 管理**：查看 Study Agent 全部内置 Prompt、用途、变量；直接编辑并保存；
   恢复系统默认；查看最终实际发送给模型的 Prompt 预览（含真实运行时上下文）。
 
-### API Key 存在哪里
+### API Key / OAuth 凭据存在哪里
 
-- API Key **绝不写入 SQLite / JSON / 源码 / 日志**；
+- API Key 与 OAuth access/refresh token **绝不写入 SQLite / 配置文件 / 源码 / 日志**；
 - 数据库只保存 `secret_ref`，真实 Key 由 `keyring` 写入系统凭据存储
   （Windows 上为 **Windows Credential Manager**）；
 - 需要 `keyring` 依赖（见 `requirements.txt`）。

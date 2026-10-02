@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+from contextlib import nullcontext
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Optional
@@ -252,6 +253,7 @@ class AdaptiveAIClient(AIClient):
         urlopen: Callable[..., Any] | None = None,
     ):
         self._config_provider = config_provider
+        self._config_service = getattr(config_provider, "__self__", None)
         self.timeout = timeout
         self._urlopen = urlopen or urllib.request.urlopen
 
@@ -284,6 +286,39 @@ class AdaptiveAIClient(AIClient):
                 getattr(cfg, "error_message", "") or
                 "AI 未配置：请在「AI 设置 → 模型 / API」中添加并启用配置"
             )
+        if getattr(cfg, "is_oauth", False):
+            from .pi_ai_bridge import PiAIBridge, oauth_profile_lock
+
+            lock = oauth_profile_lock(
+                getattr(self._config_service, "db_path", None), cfg.profile_id
+            ) if self._config_service else nullcontext()
+            with lock:
+                if self._config_service:
+                    cfg = self._config_service.resolve_profile_config(cfg.profile_id)
+
+                def persist_refresh(event: dict) -> None:
+                    if event.get("event") == "credential" and self._config_service:
+                        self._config_service.save_oauth_credential(
+                            cfg.profile_id, event.get("credential")
+                        )
+
+                response = PiAIBridge().complete(
+                    provider=cfg.oauth_provider_id,
+                    model=cfg.model,
+                    credential=cfg.oauth_credential,
+                    system_prompt=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    temperature=kwargs.get("temperature", 0.3),
+                    max_tokens=kwargs.get("max_tokens"),
+                    on_event=persist_refresh,
+                )
+                refreshed = response.get("credential")
+                if refreshed and refreshed != cfg.oauth_credential and self._config_service:
+                    self._config_service.save_oauth_credential(cfg.profile_id, refreshed)
+            content = (response.get("content") or "").strip()
+            if not content:
+                raise AIServiceError("AI 返回内容为空")
+            return content
         return send_chat_request(
             api_key=cfg.api_key,
             base_url=cfg.base_url,

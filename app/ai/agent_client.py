@@ -179,6 +179,7 @@ class AdaptiveAgentModelClient(AgentModelClient):
         urlopen: Callable[..., Any] | None = None,
     ):
         self._config_provider = config_provider
+        self._config_service = getattr(config_provider, "__self__", None)
         self.timeout = timeout
         self._urlopen = urlopen or urllib.request.urlopen
 
@@ -204,6 +205,51 @@ class AdaptiveAgentModelClient(AgentModelClient):
             raise AIServiceError(
                 getattr(cfg, "error_message", "")
                 or "AI 未配置：请在「AI 设置 → 模型 / API」中添加并启用配置"
+            )
+        if getattr(cfg, "is_oauth", False):
+            from contextlib import nullcontext
+            from .pi_ai_bridge import PiAIBridge, oauth_profile_lock
+
+            lock = oauth_profile_lock(
+                getattr(self._config_service, "db_path", None), cfg.profile_id
+            ) if self._config_service else nullcontext()
+            with lock:
+                if self._config_service:
+                    cfg = self._config_service.resolve_profile_config(cfg.profile_id)
+
+                def persist_refresh(event: dict) -> None:
+                    if event.get("event") == "credential" and self._config_service:
+                        self._config_service.save_oauth_credential(
+                            cfg.profile_id, event.get("credential")
+                        )
+
+                response = PiAIBridge().complete(
+                    provider=cfg.oauth_provider_id,
+                    model=cfg.model,
+                    credential=cfg.oauth_credential,
+                    messages=[message.to_payload() for message in request.messages],
+                    tools=list(request.tools),
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    on_event=persist_refresh,
+                )
+                refreshed = response.get("credential")
+                if refreshed and refreshed != cfg.oauth_credential and self._config_service:
+                    self._config_service.save_oauth_credential(cfg.profile_id, refreshed)
+            tool_calls = []
+            for call in response.get("toolCalls") or []:
+                function = call.get("function") or {}
+                tool_calls.append(ModelToolCall(
+                    id=str(call.get("id", "")),
+                    name=str(function.get("name", "")),
+                    arguments=str(function.get("arguments", "{}")),
+                ))
+            return ModelResponse(
+                content=(response.get("content") or "").strip(),
+                tool_calls=tuple(tool_calls),
+                finish_reason=str(response.get("finishReason") or ""),
+                model=str(response.get("model") or cfg.model),
+                usage=response.get("usage"),
             )
         return send_agent_request(
             api_key=cfg.api_key,

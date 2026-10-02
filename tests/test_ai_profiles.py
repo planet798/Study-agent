@@ -47,6 +47,20 @@ class TestSecretStore:
         store = SecretStore(keyring_module=boom)
         assert store.get("ai-profile/1") is None
 
+    def test_large_oauth_secret_is_chunked_and_round_trips(self, fake_keyring):
+        store = SecretStore(keyring_module=fake_keyring)
+        value = '{"type":"oauth","access":"' + ("x" * 7000) + '"}'
+        store.set("ai-profile/large", value)
+        manifest = fake_keyring.store[("study-agent", "ai-profile/large")]
+        assert manifest.startswith("__study_agent_secret_v1__:")
+        parts = [value for (service, account), value in fake_keyring.store.items()
+                 if service == "study-agent" and "#v1#" in account]
+        assert parts and max(map(len, parts)) <= 1800
+        assert store.get("ai-profile/large") == value
+        store.delete("ai-profile/large")
+        assert not any("ai-profile/large#v1#" in account
+                       for _service, account in fake_keyring.store)
+
     def test_make_secret_ref(self):
         assert make_secret_ref(3) == "ai-profile/3"
 
@@ -155,6 +169,34 @@ class TestAIConfigServiceCRUD:
         with pytest.raises(SecretStoreError):
             ai_config_service.create_profile("A", "https://a/v1", "m", api_key="k")
         assert ai_config_service.profile_count() == 0
+
+    def test_create_oauth_profile_keeps_credential_out_of_database(
+        self, ai_config_service, fake_keyring, conn
+    ):
+        credential = {"type": "oauth", "access": "secret-token", "refresh": "refresh-token"}
+        profile = ai_config_service.create_oauth_profile(
+            "openai", "ChatGPT 订阅", "gpt-4o", credential, make_active=True
+        )
+        assert profile.provider_type == "pi_oauth:openai"
+        runtime = ai_config_service.get_runtime_config()
+        assert runtime.is_configured is True
+        assert runtime.is_oauth is True
+        assert runtime.oauth_provider_id == "openai"
+        assert runtime.oauth_credential == credential
+        assert ai_config_service.has_credentials(profile.id)
+        assert not ai_config_service.has_api_key(profile.id)
+        assert "secret-token" not in str(tuple(conn.execute(
+            "SELECT * FROM ai_profiles"
+        ).fetchone()))
+        assert fake_keyring.store[("study-agent", profile.secret_ref)] != ""
+
+    def test_oauth_credentials_missing_requires_relogin(self, ai_config_service):
+        profile = ai_config_service.create_profile(
+            "ChatGPT", "", "gpt-4o", provider_type="pi_oauth:openai", make_active=True
+        )
+        cfg = ai_config_service.get_runtime_config()
+        assert cfg.is_configured is False
+        assert "重新登录" in cfg.error_message
 
 
 class TestRuntimeConfig:
@@ -326,6 +368,43 @@ class TestSecretSafety:
 
 
 class TestAdaptiveClientNoKeyInLogs:
+    def test_oauth_client_dispatches_via_pi_ai_and_persists_refresh(self, monkeypatch):
+        from app.ai import pi_ai_bridge
+
+        credential = {"type": "oauth", "access": "old"}
+        refreshed = {"type": "oauth", "access": "new"}
+        persisted = []
+
+        class ConfigService:
+            def get_runtime_config(self):
+                class Cfg:
+                    is_configured = True
+                    is_oauth = True
+                    oauth_provider_id = "openai"
+                    oauth_credential = credential
+                    model = "gpt-4o"
+                    profile_id = 7
+                    api_key = ""
+                return Cfg()
+
+            def resolve_profile_config(self, _profile_id):
+                return self.get_runtime_config()
+
+            def save_oauth_credential(self, profile_id, value):
+                persisted.append((profile_id, value))
+
+        class FakeBridge:
+            def complete(self, **kwargs):
+                assert kwargs["provider"] == "openai"
+                assert kwargs["credential"] == credential
+                return {"content": '{"ok": true}', "credential": refreshed}
+
+        monkeypatch.setattr(pi_ai_bridge, "PiAIBridge", FakeBridge)
+        service = ConfigService()
+        client = AdaptiveAIClient(service.get_runtime_config)
+        assert client.chat("system", "user") == '{"ok": true}'
+        assert persisted == [(7, refreshed)]
+
     def test_is_configured_and_switch_takes_effect_immediately(self):
         state = {"model": "m1", "key": "k1"}
 
