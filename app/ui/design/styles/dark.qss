@@ -914,3 +914,21 @@ QPushButton#AgentCodeTab:checked {
 QPushButton#AgentCodeCopy:focus, QPushButton#AgentCodeTab:focus, QPushButton#AgentCodeExpand:focus {
     border: 1px solid {{focus}};
 }
+
+/* Learning Routes: lightweight rows, scoped to this surface. */
+QFrame#RouteOverviewRow {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {{border_subtle}};
+}
+QFrame#RouteOverviewRow:hover {
+    background-color: {{surface_hover}};
+}
+QFrame#RouteGroupHeading {
+    background-color: transparent;
+    border: none;
+}
+QLabel#RouteCurrentTopic {
+    color: {{text_primary}};
+    font-size: {{font_size_body}};
+}

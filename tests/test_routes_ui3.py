@@ -65,11 +65,11 @@ def _page(qtbot, routes_env):
 def _texts(page):
     from PySide6.QtWidgets import QLabel
 
-    return [l.text() for l in page.list_container.findChildren(QLabel)]
+    return [l.text() for l in getattr(page, "list_container", page).findChildren(QLabel)]
 
 
 def _tag_texts(page):
-    return [t.text() for t in page.list_container.findChildren(SATag)]
+    return [t.text() for t in getattr(page, "list_container", page).findChildren(SATag)]
 
 
 # ---------------- Overview ----------------
@@ -148,35 +148,35 @@ def _fake_rp(levels, *, evidence_count=None, reverse=False):
 
 
 def test_distribution_empty(qtbot, routes_env):
-    page = _page(qtbot, routes_env)
+    page = _detail(qtbot, routes_env)
     rp = _fake_rp([0, 0])
-    page._route_progress = lambda route_id: rp
+    page._progress_for = lambda route_id: rp
     page.refresh()
     assert "暂无能力证据" in _texts(page)
 
 
 def test_distribution_single_l2(qtbot, routes_env):
-    page = _page(qtbot, routes_env)
-    page._route_progress = lambda route_id: _fake_rp([2])
+    page = _detail(qtbot, routes_env)
+    page._progress_for = lambda route_id: _fake_rp([2])
     page.refresh()
     tags = _tag_texts(page)
-    assert "1 个知识点" in tags
+    assert any("1 个知识点" in text for text in _texts(page))
     assert "L2 × 1" in tags
 
 
 def test_distribution_two_levels(qtbot, routes_env):
-    page = _page(qtbot, routes_env)
-    page._route_progress = lambda route_id: _fake_rp([2, 4])
+    page = _detail(qtbot, routes_env)
+    page._progress_for = lambda route_id: _fake_rp([2, 4])
     page.refresh()
     tags = _tag_texts(page)
     assert "L2 × 1" in tags
     assert "L4 × 1" in tags
-    assert "2 个知识点" in tags
+    assert any("2 个知识点" in text for text in _texts(page))
 
 
 def test_distribution_counts_aggregate(qtbot, routes_env):
-    page = _page(qtbot, routes_env)
-    page._route_progress = lambda route_id: _fake_rp([3, 3, 5])
+    page = _detail(qtbot, routes_env)
+    page._progress_for = lambda route_id: _fake_rp([3, 3, 5])
     page.refresh()
     tags = _tag_texts(page)
     assert "L3 × 2" in tags
@@ -184,8 +184,8 @@ def test_distribution_counts_aggregate(qtbot, routes_env):
 
 
 def test_distribution_order_independent(qtbot, routes_env):
-    page = _page(qtbot, routes_env)
-    page._route_progress = lambda route_id: _fake_rp([2, 4], reverse=True)
+    page = _detail(qtbot, routes_env)
+    page._progress_for = lambda route_id: _fake_rp([2, 4], reverse=True)
     page.refresh()
     tags = _tag_texts(page)
     assert "L2 × 1" in tags and "L4 × 1" in tags
@@ -287,3 +287,58 @@ def test_detail_capability_no_route_level_label(qtbot, routes_env):
     # 不出现百分比
     for t in tags:
         assert not t.endswith("%")
+
+
+# ---------------- Lightweight overview behavior ----------------
+
+def test_overview_keeps_summaries_but_distribution_is_in_detail(qtbot, routes_env):
+    page = _page(qtbot, routes_env)
+    page._route_progress = lambda route_id: _fake_rp([2, 4])
+    page.refresh()
+    texts = _texts(page)
+    assert any("能力证据 Capability：2 个知识点" == text for text in texts)
+    assert any(text.startswith("掌握度：") for text in texts)
+    assert not any("L2 ×" in text or "L4 ×" in text for text in texts)
+
+
+def test_overview_menu_pause_resume_changes_only_selected_route(qtbot, routes_env):
+    from app.ui.route_overview_widgets import RouteOverviewRow, RouteActionsButton
+    from PySide6.QtWidgets import QLabel
+
+    page = _page(qtbot, routes_env)
+    rows = page.findChildren(RouteOverviewRow)
+    target_name = rows[0].findChildren(QLabel)[0].text()
+    target = next(r for r in routes_env["env"].route_repo.list_all() if r.name == target_name)
+    other = next(r for r in routes_env["env"].route_repo.list_all()
+                 if r.id != target.id and r.planning_enabled)
+    menu = rows[0].findChild(RouteActionsButton).menu()
+    next(a for a in menu.actions() if a.data() == "pause").trigger()
+    assert not routes_env["env"].route_repo.get(target.id).planning_enabled
+    assert routes_env["env"].route_repo.get(other.id).planning_enabled
+    row = page.findChildren(RouteOverviewRow)[0]
+    next(a for a in row.findChild(RouteActionsButton).menu().actions()
+         if a.data() == "resume").trigger()
+    assert routes_env["env"].route_repo.get(target.id).planning_enabled
+
+
+def test_overview_progress_failure_is_not_zero(qtbot, routes_env, monkeypatch):
+    page = _page(qtbot, routes_env)
+    def fail(*args):
+        raise RuntimeError("unavailable")
+    monkeypatch.setattr(routes_env["progress"], "get_progress", fail)
+    page.refresh()
+    texts = _texts(page)
+    assert "掌握度：数据暂不可用" in texts
+    assert "能力证据 Capability：数据暂不可用" in texts
+    assert "掌握度：0%" not in texts
+
+
+def test_overview_refresh_preserves_scroll(qtbot, routes_env):
+    page = _page(qtbot, routes_env)
+    page.resize(680, 420)
+    page.show()
+    bar = page.scroll.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 200)
+    bar.setValue(180)
+    page.refresh()
+    qtbot.waitUntil(lambda: bar.value() == 180)

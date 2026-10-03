@@ -1,40 +1,30 @@
-# Learning Routes Design (UI-3)
+# Learning Routes Design (UI-3 · 2026-10 概览精修)
 
 > Routes 页面回答：**“各条路线进行到哪里、接下来学什么、掌握与能力分别如何？”**
 
 ## Overview（Route Dashboard）
 
-- 分组（如“求职准备”）用 `SACard` 作为 group heading，不与普通路线卡片混淆。
-- 每条 canonical/learning route 一张 `SACard(variant="interactive")`。
+- 分组（如“求职准备”）采用轻量标题与数量摘要。
+- 每条路线采用中性分隔线条目，常驻“查看路线”和“更多”菜单。
 
-### Route Card 信息层级
+### Route Overview 信息层级
 
-```
-[名称]  [route_key 前缀]                         [状态徽标]
-当前阶段：…
-当前 Topic：…
-下一步：…（必需但未完成的学习活动）
-优先级：…　自动规划：…
-课程进度 ▓▓▓▓░ done/total
-掌握度 Mastery ▓▓▓░░ xx%        （无 assessment 时为“暂无验收数据”）
-能力 Capability  [Lx · label]
-[查看路线] [调整] [暂停/恢复自动规划] [归档]
-```
+名称 / route key / 状态 / 查看路线 / 更多 → 当前阶段 → 当前知识点 → 下一步。
+课程进度保留进度条；掌握度为百分比或“暂无验收数据”；能力证据只显示有证据的知识点数量。
+等级分布保留在详情；优先级是次要 metadata。调整 / 暂停或恢复规划 / 归档进入菜单。
 
-- 优先：名称 / 当前阶段 / 当前 Topic / 下一步。
-- 其次：课程进度 / Mastery / Capability。
-- 再次：状态 / Priority。
-- 复杂技能 / Gap / Projects 仍在 Route Detail。
+无路线时显示集中空态及创建入口。无计划、课程已完成、读取暂不可用有独立文案。
+刷新及关闭详情后恢复概览滚动位置，手动滚动会取消旧恢复请求。
 
 ## Mastery vs Capability（关键）
 
-- **Mastery** 是连续度量 → `SAProgressBar`（百分比）；无验收数据显示“暂无验收数据”。
+- **Mastery** 是连续度量 → 概览显示百分比，详情使用 `SAProgressBar`；无验收数据显示“暂无验收数据”。
 - **Capability** 是离散等级 → `SATag` + 现有 service 提供的 label；
   **绝不画成百分比**，**绝不与 Mastery 共用同一进度条**。
 
 ### Route-level Capability = Evidence Coverage / Distribution（不做聚合）
 
-`RouteProgressService` 明确**不计算 route average capability**。因此 Route Card 只展示：
+`RouteProgressService` 明确**不计算 route average capability**。因此详情只展示：
 
 - `capability_evidence_count`（有证据的知识点数量）；
 - `capability_level_counts`（各 level 的计数分布）。
