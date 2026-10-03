@@ -877,3 +877,40 @@ QLabel#AgentWorkspaceBadge {
 QLabel#AgentWorkspaceBadge[unavailable="true"] {
     color: {{warning}};
 }
+
+/* ---- Agent embedded source/document panels (local only) ---- */
+QFrame#AgentCodePanel {
+    background: {{surface_alt}};
+    border: 1px solid {{border_subtle}};
+    border-radius: 8px;
+}
+QLabel#AgentCodeLanguage {
+    color: {{text_secondary}};
+    background: transparent;
+    font-size: {{font_size_caption}};
+}
+QTextBrowser#AgentCodeSource {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: {{text_primary}};
+}
+QPushButton#AgentCodeCopy, QPushButton#AgentCodeTab, QPushButton#AgentCodeExpand {
+    background: transparent;
+    color: {{text_secondary}};
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 3px 8px;
+    min-height: 20px;
+}
+QPushButton#AgentCodeCopy:hover, QPushButton#AgentCodeTab:hover, QPushButton#AgentCodeExpand:hover {
+    background: {{surface_hover}};
+    color: {{text_primary}};
+}
+QPushButton#AgentCodeTab:checked {
+    background: {{surface_selected}};
+    color: {{text_primary}};
+}
+QPushButton#AgentCodeCopy:focus, QPushButton#AgentCodeTab:focus, QPushButton#AgentCodeExpand:focus {
+    border: 1px solid {{focus}};
+}

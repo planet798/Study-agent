@@ -171,3 +171,27 @@ def test_busy_without_manual_scroll_still_targets_new_assistant(qtbot, repo):
                     and abs(bar.value() - min(max(0, widget.mapTo(
                         page.conversation_body, QPoint()).y() - 16), bar.maximum())) <= 2)
     assert page.latest_button.text() == "↓ 最新"
+
+
+def test_panel_first_open_and_new_reply_keep_native_scroll_targets(qtbot, repo):
+    from app.ui.agent_code_panel import AgentAssistantContent
+
+    page, task = _page(qtbot, repo)
+    history = _history()
+    panel_text = "```md\n" + "Paragraph\n\n" * 80 + "```\n\n" + _answer()
+    messages = history + [_row(31, "assistant", panel_text)]
+    page.load_session({"id": 1}, messages, task, None, True)
+    bar = page.conversation_scroll.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 0 and bar.value() == bar.maximum())
+    page.load_session({"id": 1}, messages + [_row(32, "assistant", panel_text)], task, None, True)
+    row = next(w for w in page.findChildren(AgentMessageWidget) if w.message_id == 32)
+    assert isinstance(row.markdown_view, AgentAssistantContent)
+    qtbot.waitUntil(lambda: abs(bar.value() - min(max(0, row.mapTo(
+        page.conversation_body, QPoint()).y() - 16), bar.maximum())) <= 2)
+    assert bar.value() < bar.maximum() - 100
+    assert page._pending_scroll_handler is not None
+    # Programmatic theme/width changes must retain the new-reply positioning.
+    page.resize(420, 630)
+    qtbot.waitUntil(lambda: abs(bar.value() - min(max(0, row.mapTo(
+        page.conversation_body, QPoint()).y() - 16), bar.maximum())) <= 2)
+    assert page._pending_scroll_handler is not None

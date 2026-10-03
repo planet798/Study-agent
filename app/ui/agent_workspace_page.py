@@ -709,6 +709,8 @@ class AgentWorkspacePage(QWidget):
             return
         widget = AgentMessageWidget(role=role, text=text, speaker=speaker,
                                     message_id=message_id)
+        # User panel resizing must cancel old rangeChanged scroll restores first.
+        widget.content_interaction.connect(self._clear_pending_scroll)
         # Insert before the trailing stretch.
         self.conversation_layout.insertWidget(
             max(0, self.conversation_layout.count() - 1), widget

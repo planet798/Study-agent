@@ -25,8 +25,12 @@ Design boundaries:
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSize, Qt, QTimer
+if TYPE_CHECKING:
+    from .agent_code_panel import AgentAssistantContent
+
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -116,19 +120,8 @@ def _fragment_is_monospace(char_format: QTextCharFormat) -> bool:
 
 
 def _is_code_block(block) -> bool:
-    """A block is a fenced code block when all of its text is monospace."""
-    if not block.text().strip():
-        return False
-    iterator = block.begin()
-    saw_text = False
-    while not iterator.atEnd():
-        fragment = iterator.fragment()
-        if fragment.isValid() and fragment.text():
-            saw_text = True
-            if not _fragment_is_monospace(fragment.charFormat()):
-                return False
-        iterator += 1
-    return saw_text
+    """Use Qt's importer metadata, not inline-code font heuristics."""
+    return block.blockFormat().hasProperty(QTextFormat.Property.BlockCodeLanguage)
 
 
 class _MessageBodyView(QTextBrowser):
@@ -226,8 +219,9 @@ class AgentPlainTextView(_MessageBodyView):
 class AgentMarkdownView(_MessageBodyView):
     """Read-only, safe Markdown view for one assistant message."""
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, *, continuous_code: bool = False):
         super().__init__("AgentAssistantMarkdown", parent)
+        self._continuous_code = continuous_code
         self._markdown = ""
         self._plaintext_fallback = False
         self._table_timer = QTimer(self)
@@ -287,16 +281,9 @@ class AgentMarkdownView(_MessageBodyView):
         # QTextBlock iterators, so the classification must not interleave with
         # the mutations.
         plan: list[tuple[int, int, bool]] = []
-        in_code = False
         block = document.begin()
         while block.isValid():
             is_code = _is_code_block(block)
-            if is_code:
-                in_code = True
-            elif block.text().strip() or QTextCursor(block).currentTable() is not None:
-                in_code = False
-            # Blank lines inside a fenced block keep the code-block surface.
-            is_code = is_code or (in_code and not block.text().strip())
             plan.append((block.blockNumber(), block.blockFormat().headingLevel(), is_code))
             block = block.next()
 
@@ -313,6 +300,60 @@ class AgentMarkdownView(_MessageBodyView):
             self._style_inline_code(block, code_background)
 
         self._style_tables(document.rootFrame(), tokens)
+        if self._continuous_code:
+            self._group_code_backgrounds(code_background)
+
+    def _group_code_backgrounds(self, background: QColor | None) -> None:
+        """Frame only root-level code runs; never reparent lists/quotes/tables."""
+        document = self.document()
+        runs = []
+        start = None
+        end = None
+        block = document.begin()
+        while block.isValid():
+            fmt = block.blockFormat()
+            safe = (_is_code_block(block) and not block.textList() and not fmt.indent()
+                    and not fmt.property(QTextFormat.Property.BlockQuoteLevel)
+                    and QTextCursor(block).currentFrame() == document.rootFrame())
+            if safe:
+                if start is None:
+                    start = block.position()
+                end = block.position() + block.length() - 1
+            elif start is not None:
+                runs.append((start, end))
+                start = None
+            block = block.next()
+        if start is not None:
+            runs.append((start, end))
+        # Reverse insertion preserves earlier character offsets.
+        for start, end in reversed(runs):
+            cursor = QTextCursor(document)
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            frame_format = QTextFrameFormat()
+            if background is not None:
+                frame_format.setBackground(background)
+            frame_format.setPadding(_CODE_BLOCK_PADDING)
+            frame = cursor.insertFrame(frame_format)
+            # insertFrame requires separator paragraphs around the frame. These
+            # are generated empty blocks, not payload lines; keep them near-zero
+            # rather than painting an extra inherited code stripe.
+            for separator in (document.findBlock(frame.firstPosition() - 1),
+                              document.findBlock(frame.lastPosition() + 1)):
+                if separator.isValid() and not separator.text():
+                    fmt = QTextBlockFormat()
+                    fmt.setLineHeight(1, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
+                    QTextCursor(separator).setBlockFormat(fmt)
+            block = frame.firstCursorPosition().block()
+            while block.isValid() and block.position() <= frame.lastPosition():
+                fmt = block.blockFormat()
+                fmt.clearBackground()
+                fmt.setTopMargin(0)
+                fmt.setBottomMargin(0)
+                fmt.setLeftMargin(0)
+                fmt.setRightMargin(0)
+                QTextCursor(block).setBlockFormat(fmt)
+                block = block.next()
 
     def _normalize_table_leading_blocks(self, frame) -> None:
         for child in frame.childFrames():
@@ -468,11 +509,19 @@ class AgentMarkdownView(_MessageBodyView):
         block_format = QTextBlockFormat(self.document().findBlock(position).blockFormat())
         if background is not None:
             block_format.setBackground(background)
-        block_format.setLeftMargin(_CODE_BLOCK_MARGIN)
-        block_format.setRightMargin(_CODE_BLOCK_MARGIN)
+        if self._continuous_code:
+            # Container code remains in its native list/quote frame. Zero gaps
+            # join paragraph surfaces without discarding container indentation.
+            block_format.setLeftMargin(block_format.leftMargin() + _CODE_BLOCK_MARGIN)
+            block_format.setRightMargin(block_format.rightMargin() + _CODE_BLOCK_MARGIN)
+            block_format.setTopMargin(0)
+            block_format.setBottomMargin(0)
+        else:
+            block_format.setLeftMargin(_CODE_BLOCK_MARGIN)
+            block_format.setRightMargin(_CODE_BLOCK_MARGIN)
+            block_format.setTopMargin(_CODE_BLOCK_PADDING)
+            block_format.setBottomMargin(_CODE_BLOCK_PADDING)
         block_format.setNonBreakableLines(False)
-        block_format.setTopMargin(_CODE_BLOCK_PADDING)
-        block_format.setBottomMargin(_CODE_BLOCK_PADDING)
         cursor = QTextCursor(self.document())
         cursor.setPosition(position)
         cursor.setBlockFormat(block_format)
@@ -505,6 +554,8 @@ class AgentMarkdownView(_MessageBodyView):
 class AgentMessageWidget(QWidget):
     """One conversation row: speaker label + role-specific body."""
 
+    content_interaction = Signal()
+
     def __init__(
         self,
         role: str,
@@ -522,7 +573,7 @@ class AgentMessageWidget(QWidget):
         self.speaker = speaker or (
             USER_SPEAKER if role == USER_ROLE else ASSISTANT_SPEAKER
         )
-        self.markdown_view: AgentMarkdownView | None = None
+        self.markdown_view: AgentMarkdownView | AgentAssistantContent | None = None
         self.plain_view: AgentPlainTextView | None = None
 
         self.setObjectName("AgentMessageRow")
@@ -570,8 +621,16 @@ class AgentMessageWidget(QWidget):
             row.addStretch(1)
             row.addWidget(self.bubble)
         else:
-            self.markdown_view = AgentMarkdownView()
-            self.markdown_view.set_markdown(self.raw_text)
+            from .agent_content_blocks import FencedBlock, segment_agent_content
+            from .agent_code_panel import AgentAssistantContent
+
+            blocks = segment_agent_content(self.raw_text)
+            if any(isinstance(block, FencedBlock) for block in blocks):
+                self.markdown_view = AgentAssistantContent(self.raw_text, blocks)
+                self.markdown_view.content_interaction.connect(self.content_interaction)
+            else:
+                self.markdown_view = AgentMarkdownView()
+                self.markdown_view.set_markdown(self.raw_text)
             bubble_layout.addWidget(self.markdown_view)
             # Assistant answers expand to the available width, capped by the
             # bubble's maximum width.
