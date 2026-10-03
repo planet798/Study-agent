@@ -22,7 +22,7 @@
 ## Markdown 与审批
 
 - 继续 Qt-native GFM + MarkdownNoHTML；loadResource 为 no-op，不导航链接，不引入 WebEngine/HTML renderer/网络。数据库原文不变。
-- 段落、列表和首标题间距收敛；代码仍为轻量 surface_alt，WrapAnywhere 不插入额外字符。新增可靠顶层 fence 文档面板后，普通/保守回退正文继续原生渲染；Markdown 面板预览内 root code 使用连续 frame 背景，inline-code-only 段落不再误判为 block code。
+- 段落、列表和首标题间距收敛；代码仍为轻量 surface_alt，WrapAnywhere 不插入额外字符。完整回复由 markdown-it 结构解析，仅提升 root fence；外部列表/quote/引用定义不取消独立文档面板。普通/有界回退正文继续原生渲染，并与 Markdown 面板预览一致使用连续 code 背景；inline-code-only 段落不误判为 block code。共享引用上下文只进入普通 prose 的临时 Qt 输入，面板 payload 与复制不变，详见 AGENT_DOCUMENT_PANELS.md。
 - 原生表格使用等比例列、细边框和 4px cell padding。表格宽度根据 viewport 重算，预留 Qt cell/border chrome 及各列整数舍入余量；没有通过剪裁正文伪造响应式，也没有转为其他 renderer。修正 Qt importer 在代码块之后首个表头格产生的空段落和缺失粗体，仅移除生成的空 block，不删原始文字；显式设置 table/cell 细实线边框。
 - 已覆盖 3/5/8 列表格在 280/380/501/800 logical px 下、两主题的长路径换行、无内部滚动溢出及剪贴板逐字符一致。任意多列/极端大字号的最小 glyph 宽度仍是 Qt-native 的物理限制；若实际必要表格不能容纳，需报告并决定，不能隐藏列或暗换 renderer。
 - 待确认操作继续独立位于输入上方；紧凑 margins 不删固定动作说明、plain-text 笔记预览、批准/拒绝文案、IDs 或串行锁定。

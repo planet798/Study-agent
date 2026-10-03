@@ -82,7 +82,9 @@ def test_assistant_message_uses_safe_markdown(qtbot):
     qtbot.addWidget(widget)
     assert widget.role == ASSISTANT_ROLE
     assert widget.speaker == ASSISTANT_SPEAKER
-    assert isinstance(widget.markdown_view, AgentMarkdownView)
+    from app.ui.agent_code_panel import AgentAssistantContent
+    assert isinstance(widget.markdown_view, AgentAssistantContent)
+    assert len(widget.markdown_view.panels) == 1
     assert widget.plain_view is None
     assert widget.raw_text == MARKDOWN_EXAMPLE  # original persisted string untouched
 

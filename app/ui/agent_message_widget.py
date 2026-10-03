@@ -14,7 +14,8 @@ Design boundaries:
   (``**hello**``) stays literal.
 - Assistant output is untrusted model text and is rendered with the Qt-native
   ``QTextDocument`` Markdown importer only. Raw HTML is disabled
-  (``MarkdownNoHTML``); no WebEngine / JavaScript / third-party renderer is used.
+  (``MarkdownNoHTML``); no WebEngine / JavaScript / HTML renderer is used. A structural parser
+  identifies root fences; it does not render the message.
 - Remote images, ``file://`` / ``qrc://`` and any other resource are never
   fetched: :meth:`AgentMarkdownView.loadResource` is a hard no-op and external
   links are never opened.
@@ -216,13 +217,21 @@ class AgentPlainTextView(_MessageBodyView):
         return QSize(1, self.height())
 
 
+class _ReferenceDocument(QTextDocument):
+    """Validate invisible reference context without permitting resource fetches."""
+
+    def loadResource(self, resource_type, url):  # noqa: N802
+        return None
+
+
 class AgentMarkdownView(_MessageBodyView):
     """Read-only, safe Markdown view for one assistant message."""
 
-    def __init__(self, parent: QWidget | None = None, *, continuous_code: bool = False):
+    def __init__(self, parent: QWidget | None = None, *, continuous_code: bool = True):
         super().__init__("AgentAssistantMarkdown", parent)
         self._continuous_code = continuous_code
         self._markdown = ""
+        self._reference_context = ""
         self._plaintext_fallback = False
         self._table_timer = QTimer(self)
         self._table_timer.setSingleShot(True)
@@ -240,8 +249,9 @@ class AgentMarkdownView(_MessageBodyView):
     def using_plaintext_fallback(self) -> bool:
         return self._plaintext_fallback
 
-    def set_markdown(self, markdown: str) -> None:
+    def set_markdown(self, markdown: str, *, reference_context: str = "") -> None:
         self._markdown = markdown if isinstance(markdown, str) else str(markdown or "")
+        self._reference_context = reference_context
         self._render()
 
     # ---------- rendering ----------
@@ -252,7 +262,17 @@ class AgentMarkdownView(_MessageBodyView):
         # a pixel-sized default font makes the importer drop paragraph margins.
         document.setDefaultFont(_base_body_font())
         try:
-            document.setMarkdown(self._markdown, MARKDOWN_FEATURES)
+            rendering_text = self._markdown
+            if self._reference_context:
+                # Qt, not markdown-it's normalized env, decides link/title
+                # semantics. Prepend all original definitions in source order
+                # so a local duplicate cannot override the first definition.
+                context = _ReferenceDocument()
+                context.setMarkdown(self._reference_context, MARKDOWN_FEATURES)
+                if context.toPlainText().strip():
+                    raise ValueError("Qt does not accept the derived reference context")
+                rendering_text = self._reference_context + "\n\n" + self._markdown
+            document.setMarkdown(rendering_text, MARKDOWN_FEATURES)
             self._normalize_table_leading_blocks(document.rootFrame())
             self._plaintext_fallback = False
             self._style_document()
@@ -318,15 +338,16 @@ class AgentMarkdownView(_MessageBodyView):
             if safe:
                 if start is None:
                     start = block.position()
+                    first_format = QTextBlockFormat(fmt)
                 end = block.position() + block.length() - 1
             elif start is not None:
-                runs.append((start, end))
+                runs.append((start, end, first_format))
                 start = None
             block = block.next()
         if start is not None:
-            runs.append((start, end))
+            runs.append((start, end, first_format))
         # Reverse insertion preserves earlier character offsets.
-        for start, end in reversed(runs):
+        for start, end, first_format in reversed(runs):
             cursor = QTextCursor(document)
             cursor.setPosition(start)
             cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
@@ -346,7 +367,10 @@ class AgentMarkdownView(_MessageBodyView):
                     QTextCursor(separator).setBlockFormat(fmt)
             block = frame.firstCursorPosition().block()
             while block.isValid() and block.position() <= frame.lastPosition():
-                fmt = block.blockFormat()
+                # insertFrame at document position 0 drops the first block's
+                # importer metadata. Restore it rather than losing code identity.
+                fmt = (QTextBlockFormat(first_format) if block.position() == frame.firstPosition()
+                       else block.blockFormat())
                 fmt.clearBackground()
                 fmt.setTopMargin(0)
                 fmt.setBottomMargin(0)
@@ -458,7 +482,8 @@ class AgentMarkdownView(_MessageBodyView):
     def _style_heading(self, block, level: int, text_primary: QColor | None) -> None:
         role = _HEADING_ROLES.get(level, typography.SUBTITLE)
         position = block.position()
-        text_length = len(block.text())
+        # QTextBlock length/positions use UTF-16, unlike Python len(str).
+        text_length = block.length() - 1
         block_format = QTextBlockFormat(block.blockFormat())
         # Heading blocks in Qt hard-code an ``x-large`` size; neutralise the level
         # and control size ourselves so headings stay close to body text.

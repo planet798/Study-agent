@@ -106,48 +106,111 @@ def test_message_order_identity_and_markdown_contract(qtbot):
     assert "End" in row.markdown_view.toPlainText()
 
 
-@pytest.mark.parametrize("raw", [
-    "See [multi\nline].\n\n```py\nx\n```\n\n[multi\nline]: https://example.com\n",
-    "See [a\\]b].\n\n```py\nx\n```\n\n[a\\]b]: https://example.com\n",
+def anchors(view):
+    result = []
+    for block in iter_blocks(view.document()):
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            if fragment.isValid() and fragment.charFormat().isAnchor():
+                fmt = fragment.charFormat()
+                result.append((fragment.text(), fmt.anchorHref(), fmt.toolTip()))
+            iterator += 1
+    return result
+
+
+@pytest.mark.parametrize("label,definition", [
+    ("r", '[r]: https://example.com/a "标题"'),
+    ("multi\nline", '[multi\nline]: https://example.com/a\n  "跨行标题"'),
+    ("a\\]b", '[a\\]b]: <https://example.com/a> "转义"'),
+    ("危险", '[危险]: javascript:alert(1) "inert"'),
+    ("r", '> [r]: file:///secret "inert"'),
+    ("r", '- [r]: qrc:/secret "inert"'),
+    ("r", '[r]: <https://example.com/中文> "Unicode"'),
+    ("r", '[r]: https://example.com/a&amp;b "T &amp; T"'),
+    ("multi\nline", '> [multi\n> line]: /nested\n>   "Quoted title"'),
 ])
-def test_complex_reference_fallback_matches_native_text_and_anchors(qtbot, raw):
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("placement", ["before", "after"])
+def test_shared_reference_context_matches_native_text_href_and_title(qtbot, label, definition, newline, placement):
+    prose = f"😀 See [{label}].\n\n```py\nx\n```\n\n后文 [{label}].\n"
+    raw = (definition + "\n\n" + prose if placement == "before"
+           else prose + "\n" + definition + "\n")
+    raw = raw.replace("\n", newline)
     native = AgentMarkdownView()
     native.set_markdown(raw)
     qtbot.addWidget(native)
     row = AgentMessageWidget("assistant", raw)
     qtbot.addWidget(row)
-    assert type(row.markdown_view) is AgentMarkdownView
-    assert row.raw_text == row.markdown_view.markdown == raw
-    assert not row.findChildren(AgentCodePanel)
-    assert row.markdown_view.toPlainText() == native.toPlainText()
-
-    def anchors(view):
-        result = []
-        block = view.document().begin()
-        while block.isValid():
-            iterator = block.begin()
-            while not iterator.atEnd():
-                fragment = iterator.fragment()
-                if fragment.isValid() and fragment.charFormat().isAnchor():
-                    result.append((fragment.text(), fragment.charFormat().anchorHref()))
-                iterator += 1
-            block = block.next()
-        return result
-
+    content = row.markdown_view
+    assert isinstance(content, AgentAssistantContent)
+    assert len(content.panels) == 1
+    assert row.raw_text == content.markdown == raw
+    views = [v for v in content.views if isinstance(v, AgentMarkdownView)]
+    assert all(not v.using_plaintext_fallback for v in views)
     assert anchors(native)
-    assert anchors(row.markdown_view) == anchors(native)
+    assert [a for v in views for a in anchors(v)] == anchors(native)
+    # Code formatting aside, native prose text and invisible definitions agree.
+    expected = native.toPlainText().replace("\nx\n", "\n").strip()
+    actual = "\n".join(v.toPlainText().strip() for v in views if v.toPlainText().strip())
+    # Continuous code frames contribute generated empty separators in the
+    # native document; compare the actual nonempty prose blocks, not those gaps.
+    assert [line for line in actual.splitlines() if line] == [line for line in expected.splitlines() if line]
+    assert all(v.openLinks() is False and v.openExternalLinks() is False for v in views)
+    assert all(v.markdown == b.source for v, b in zip(
+        views, [b for b in segment_agent_content(raw) if not hasattr(b, "payload") and b.source.strip()]))
 
 
-def test_container_and_reference_fallback_preserves_whole_native_document(qtbot):
-    for raw in ("1. first\n\n```py\nx\n```\n\n2. second",
-                "[link][ref]\n\n```py\nx\n```\n\n[ref]: https://example.com",
-                "> ```md\n> # nested\n> ```"):
-        row = AgentMessageWidget("assistant", raw)
-        qtbot.addWidget(row)
-        assert type(row.markdown_view) is AgentMarkdownView
-        assert row.markdown_view.markdown == raw
-        assert not row.findChildren(AgentCodePanel)
-        assert row.raw_text == raw
+def test_duplicate_definitions_first_wins_and_preview_has_own_context(qtbot):
+    raw = ('[r]: /first "First"\n\nSee [r]\n\n'
+           '````md\nSee [r]\n\n[r]: /inside "Inside"\n````\n\n'
+           '[r]: /second "Second"\n\nAgain [r]')
+    native = AgentMarkdownView()
+    native.set_markdown(raw)
+    qtbot.addWidget(native)
+    row = AgentMessageWidget("assistant", raw)
+    qtbot.addWidget(row)
+    content = row.markdown_view
+    prose = [v for v in content.views if isinstance(v, AgentMarkdownView)]
+    assert [a for v in prose for a in anchors(v)] == anchors(native)
+    assert [a[1:] for v in prose for a in anchors(v)] == [("/first", "First")] * 2
+    assert anchors(content.panels[0].preview_view) == [("r", "/inside", "Inside")]
+    other = AgentMessageWidget("assistant", '[r]: /parent\n\n```md\nSee [r]\n```')
+    qtbot.addWidget(other)
+    assert not anchors(other.markdown_view.panels[0].preview_view)
+
+
+def test_numbered_lists_straddling_root_code_keep_native_numbering(qtbot):
+    raw = "1. first\n\n```py\nx\n```\n\n2. second"
+    native = AgentMarkdownView()
+    native.set_markdown(raw)
+    row = AgentMessageWidget("assistant", raw)
+    qtbot.addWidget(native)
+    qtbot.addWidget(row)
+    content = row.markdown_view
+    assert len(content.panels) == 1
+    def numbering(view):
+        return [(b.text(), b.textList().itemText(b)) for b in iter_blocks(view.document()) if b.textList()]
+    assert [n for v in content.views if isinstance(v, AgentMarkdownView) for n in numbering(v)] == numbering(native)
+
+
+def test_nested_container_fences_are_retained_and_code_backgrounds_are_continuous(qtbot):
+    raw = "> ```py\n> a\n> b\n> ```\n\n- item\n\n  ```py\n  c\n  d\n  ```\n"
+    row = AgentMessageWidget("assistant", raw)
+    qtbot.addWidget(row)
+    assert type(row.markdown_view) is AgentMarkdownView
+    assert not row.findChildren(AgentCodePanel)
+    code = [b for b in iter_blocks(row.markdown_view.document()) if _is_code_block(b)]
+    assert [b.text() for b in code] == ["a", "b", "c", "d"]
+    assert all(b.blockFormat().topMargin() == b.blockFormat().bottomMargin() == 0 for b in code)
+
+
+def test_incompatible_qt_reference_context_is_not_visible(qtbot):
+    view = AgentMarkdownView()
+    qtbot.addWidget(view)
+    view.set_markdown("See [r]", reference_context="NOT a definition")
+    assert view.using_plaintext_fallback
+    assert view.toPlainText() == view.markdown == "See [r]"
 
 
 def test_preview_resources_html_and_links_are_inert(qtbot):
@@ -317,3 +380,82 @@ def test_long_info_header_does_not_widen_conversation(qtbot):
     assert row.minimumSizeHint().width() <= 320
     assert panel.copy_button.isVisible()
     assert panel.block.payload == "x\n"
+
+
+def test_complete_mixed_reply_instantiates_two_panels_and_retains_external_ownership(qtbot, qapp):
+    from pathlib import Path
+    from app.ui.agent_content_blocks import FencedBlock, MarkdownBlock
+
+    raw = (Path(__file__).parent / 'fixtures' / 'agent_mixed_reply.md').read_text()
+    row = AgentMessageWidget('assistant', raw, message_id=326)
+    qtbot.addWidget(row)
+    row.resize(800, row.sizeHint().height())
+    row.show()
+    content = row.markdown_view
+    assert isinstance(content, AgentAssistantContent)
+    assert len(content.panels) == len(row.findChildren(AgentCodePanel)) == 2
+    path_panel, md_panel = content.panels
+    assert path_panel.block.payload == 'notes/loss_mask.md\n'
+    assert md_panel.preview_button is not None and md_panel.source_button is not None
+    assert md_panel.clip.view is md_panel.preview_view
+    assert md_panel.preview_button.isChecked() and not md_panel.source_button.isChecked()
+    assert md_panel.block.payload.count('```python') == 3
+    assert not md_panel.preview_view.findChildren(AgentCodePanel)
+    qtbot.waitUntil(lambda: md_panel.clip.overflow)
+    for panel in content.panels:
+        for expanded in (False, True):
+            if expanded != panel.clip.expanded:
+                panel.toggle_expanded()
+            panel.copy_source()
+            assert qapp.clipboard().text() == raw[panel.block.payload_start:panel.block.payload_end]
+    assert row.message_id == 326 and row.text == row.raw_text == content.markdown == raw
+    blocks = segment_agent_content(raw)
+    assert [type(b) for b in blocks] == [MarkdownBlock, FencedBlock, MarkdownBlock, FencedBlock, MarkdownBlock]
+    assert ''.join(b.source for b in blocks) == raw
+    exterior = content.views[-1]
+    assert isinstance(exterior, AgentMarkdownView)
+    assert '三点说明' in exterior.toPlainText()
+    assert len([b for b in iter_blocks(exterior.document()) if b.textList()]) == 3
+    assert any(b.blockFormat().property(QTextFormat.Property.BlockQuoteLevel)
+               for b in iter_blocks(exterior.document()))
+
+
+def test_reference_context_preserves_qt_dialect_not_parser_normalized_urls(qtbot):
+    from app.ui.agent_content_blocks import _parser
+
+    raw = 'See [r].\n\n```py\nx\n```\n\n[r]: https://example.com/a&amp;b "T &amp; T"'
+    env = {}
+    _parser().parse(raw, env)
+    native = AgentMarkdownView()
+    native.set_markdown(raw)
+    qtbot.addWidget(native)
+    assert env['references']['R']['href'] != anchors(native)[0][1]
+    row = AgentMessageWidget('assistant', raw)
+    qtbot.addWidget(row)
+    assert [a for v in row.markdown_view.views if isinstance(v, AgentMarkdownView)
+            for a in anchors(v)] == anchors(native)
+
+
+def test_native_inline_code_only_is_not_framed(qtbot):
+    view = AgentMarkdownView()
+    qtbot.addWidget(view)
+    view.set_markdown('`only inline`')
+    assert not _is_code_block(view.document().begin())
+    assert not view.document().rootFrame().childFrames()
+    assert view.document().begin().blockFormat().background().style() == Qt.BrushStyle.NoBrush
+
+
+def test_bounded_whole_message_fallback_still_has_continuous_code_background(qtbot, monkeypatch):
+    import app.ui.agent_content_blocks as module
+
+    monkeypatch.setattr(module, '_MAX_CHARS', 4)
+    raw = '```py\na\n\nb\n```\n'
+    row = AgentMessageWidget('assistant', raw)
+    qtbot.addWidget(row)
+    view = row.markdown_view
+    assert type(view) is AgentMarkdownView
+    assert view.markdown == raw
+    frames = view.document().rootFrame().childFrames()
+    assert len(frames) == 1
+    assert frames[0].format().background().style() != Qt.BrushStyle.NoBrush
+    assert [b.text() for b in iter_blocks(view.document()) if _is_code_block(b)] == ['a', '', 'b']

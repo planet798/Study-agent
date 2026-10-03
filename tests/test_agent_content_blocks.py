@@ -42,16 +42,26 @@ def test_multi_block_order_offsets_and_internal_literal_containers():
 
 @pytest.mark.parametrize("source", [
     "inline `x` and ```y```", "``not a fence\n", "```bad`info\nx\n```bad`info\n",
-    "    ```python\nx\n    ```", "\t```\nx\n\t```",
-    "> ```md\n> # H\n> ```\n\n```py\nx\n```",
-    "- item\n\n  ```py\n  x\n  ```", "1. first\n\n```py\nx\n```\n\n2. second",
-    "- first\n  continuation\n```py\nx\n```", "[link][r]\n\n```\nx\n```\n\n[r]: https://example.com",
-    "```\nx\n```\n\n    indented", "```\nx\n```\n\n> quote",
-    "See [multi\nline].\n\n```py\nx\n```\n\n[multi\nline]: https://example.com\n",
-    "See [a\\]b].\n\n```py\nx\n```\n\n[a\\]b]: https://example.com\n",
+    "    ```python\n    x\n    ```", "\t```\n\tx\n\t```",
+    "> ```md\n> # H\n> ```", "- item\n\n  ```py\n  x\n  ```",
 ])
-def test_uncertain_or_cross_document_semantics_stay_whole(source):
+def test_non_root_code_is_not_lifted(source):
     assert segment_agent_content(source) == [MarkdownBlock(source, 0, len(source))]
+
+
+@pytest.mark.parametrize("prefix,suffix", [
+    ("- list\n\n", "\n- after\n"),
+    ("> separate quote\n\n", "\n> after\n"),
+    ("[ordinary paragraph]\n\n", "\n    indented\n"),
+    ("1. first\n\n", "\n2. second\n"),
+    ("> ```md\n> # nested\n> ```\n\n", ""),
+])
+def test_normal_exterior_structures_do_not_cancel_root_panels(prefix, suffix):
+    source = prefix + "```py\nx\n```\n" + suffix
+    blocks = segment_agent_content(source)
+    assert len([b for b in blocks if isinstance(b, FencedBlock)]) == 1
+    assert "".join(b.source for b in blocks) == source
+    assert blocks[0].source == prefix
 
 
 def test_backtick_invalid_info_does_not_hide_later_valid_fence():
@@ -69,6 +79,51 @@ def test_bounded_scanner_preserves_over_limit_source():
     assert segment_agent_content(source) == [MarkdownBlock(source, 0, len(source))]
 
 
-@pytest.mark.parametrize("source", ["   \t```\nx\n```", "text\u2028```\nx\n```"])
+@pytest.mark.parametrize("source", ["text\u2028```\nx\n```"])
 def test_nonstandard_indent_or_linebreak_falls_back(source):
+    assert segment_agent_content(source) == [MarkdownBlock(source, 0, len(source))]
+
+
+def test_parser_failure_and_depth_bound_preserve_complete_source(monkeypatch):
+    import app.ui.agent_content_blocks as module
+    source = "> " * 70 + "nested\n\n```py\nx\n```\n"
+    assert segment_agent_content(source) == [MarkdownBlock(source, 0, len(source))]
+    source = "```py\nx\n```\n"
+    def broken():
+        raise ValueError("broken parser")
+    monkeypatch.setattr(module, "_parser", broken)
+    assert segment_agent_content(source) == [MarkdownBlock(source, 0, len(source))]
+
+
+def test_missing_dependency_is_actionable_not_silent():
+    import subprocess
+    import sys
+    result = subprocess.run([sys.executable, "-c", """
+import sys
+sys.modules['markdown_it'] = None
+import app.ui.agent_content_blocks
+"""], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "pip install -r requirements.txt" in result.stderr
+    assert "markdown-it-py>=4.0,<5.0" in result.stderr
+
+
+def test_four_tildes_inside_three_backticks_remain_literal_payload():
+    source = '```text\n~~~~\ninside\n~~~~\n```\n'
+    block = segment_agent_content(source)[0]
+    assert isinstance(block, FencedBlock)
+    assert block.payload == '~~~~\ninside\n~~~~\n'
+
+
+def test_invalid_parser_map_falls_back_without_dropping_source(monkeypatch):
+    import app.ui.agent_content_blocks as module
+    from markdown_it.token import Token
+
+    token = Token('fence', 'code', 0)
+    token.map = [0, 999]
+    class InvalidParser:
+        def parse(self, source, env):
+            return [token]
+    monkeypatch.setattr(module, '_parser', InvalidParser)
+    source = '```py\nx\n```\n'
     assert segment_agent_content(source) == [MarkdownBlock(source, 0, len(source))]

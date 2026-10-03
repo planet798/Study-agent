@@ -214,7 +214,7 @@ class AgentAssistantContent(QWidget):
                 if not block.source.strip():
                     continue
                 view = AgentMarkdownView()
-                view.set_markdown(block.source)
+                view.set_markdown(block.source, reference_context=block.reference_context)
             self.views.append(view)
             layout.addWidget(view)
 

@@ -25,6 +25,14 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+已有 Windows 环境更新（包括代码面板结构解析依赖 `markdown-it-py>=4.0,<5.0`），在项目根目录运行：
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+使用项目自己的 venv，无需全局安装。结构解析不渲染 HTML；助手正文仍由安全 Qt Markdown 显示。
+
 ## 运行
 
 ```bash
