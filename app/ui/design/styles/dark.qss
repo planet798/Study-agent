@@ -738,24 +738,26 @@ QFrame#AgentMessageBubble {
     border-radius: {{radius_medium}};
 }
 QFrame#AgentMessageBubble[role="assistant"] {
-    background-color: {{surface}};
-    border: 1px solid {{border_subtle}};
+    background: transparent;
+    border: none;
 }
 QFrame#AgentMessageBubble[role="user"] {
-    background-color: {{surface_selected}};
-    border: 1px solid {{border}};
+    background-color: {{surface_alt}};
+    border: none;
 }
 QLabel#AgentMessageSpeaker {
     color: {{text_secondary}};
     font-size: {{font_size_caption}};
-    font-weight: 600;
+    font-weight: 400;
 }
 QTextBrowser#AgentUserMessageText {
+    padding: 0;
     background: transparent;
     border: none;
     color: {{text_primary}};
 }
 QTextBrowser#AgentAssistantMarkdown {
+    padding: 0;
     background: transparent;
     border: none;
     color: {{text_primary}};
@@ -838,4 +840,40 @@ QPushButton#AgentLatestButton {
 }
 QPushButton#AgentLatestButton:hover {
     background-color: {{surface_hover}};
+}
+
+/* Object names retain UI/test identity; primary variant stays Agent-local. */
+QPushButton#AgentSendButton[saVariant="primary"],
+QPushButton#AgentApprovalApprove[saVariant="primary"] {
+    background-color: {{action_background}};
+    border: 1px solid {{action_background}};
+    color: {{action_text}};
+    font-weight: 600;
+}
+QPushButton#AgentSendButton[saVariant="primary"]:hover,
+QPushButton#AgentApprovalApprove[saVariant="primary"]:hover {
+    background-color: {{action_background_hover}};
+    border-color: {{action_background_hover}};
+}
+QPushButton#AgentSendButton[saVariant="primary"]:pressed,
+QPushButton#AgentApprovalApprove[saVariant="primary"]:pressed {
+    background-color: {{action_background_pressed}};
+    border-color: {{action_background_pressed}};
+}
+QPushButton#AgentSendButton[saVariant="primary"]:disabled,
+QPushButton#AgentApprovalApprove[saVariant="primary"]:disabled {
+    background-color: {{action_background_disabled}};
+    border-color: {{action_background_disabled}};
+    color: {{action_text_disabled}};
+}
+QPushButton#AgentSendButton[saVariant="primary"]:focus,
+QPushButton#AgentApprovalApprove[saVariant="primary"]:focus {
+    border-color: {{focus}};
+}
+QLabel#AgentWorkspaceBadge {
+    color: {{text_secondary}};
+    font-size: {{font_size_caption}};
+}
+QLabel#AgentWorkspaceBadge[unavailable="true"] {
+    color: {{warning}};
 }

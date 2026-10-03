@@ -412,9 +412,103 @@ def test_message_identity_and_responsive_width(qtbot, repo):
             {"id": 10, "role": "tool", "content": "secret"},
         ], task, None, True)
         rows = page.findChildren(AgentMessageWidget)
-        qtbot.waitUntil(lambda: rows[1].width() == page.conversation_scroll.viewport().width())
+        qtbot.waitUntil(lambda: rows[1].width() == rows[1].bubble.width()
+                        == min(800, page.conversation_scroll.viewport().width()))
         viewport = page.conversation_scroll.viewport().width()
         assert [w.message_id for w in rows] == [7, 8]
         assert rows[0].bubble.width() <= min(USER_MAX_WIDTH, viewport * .80 + 2)
-        assert rows[1].bubble.width() <= min(ASSISTANT_MAX_WIDTH, viewport * .90 + 2)
+        assert rows[1].bubble.width() == min(ASSISTANT_MAX_WIDTH, viewport)
         assert not page.conversation_scroll.horizontalScrollBar().isVisible()
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_hello_is_compact_fitted_and_keeps_accessible_identity(qtbot, qapp, theme):
+    import math
+    from PySide6.QtGui import QFontMetrics
+    from app.ui.design.theme_manager import ThemeManager
+
+    ThemeManager.instance().set_theme(theme)
+    ThemeManager.instance().apply(qapp)
+    for role in (USER_ROLE, ASSISTANT_ROLE):
+        row = AgentMessageWidget(role, "hello", message_id=12)
+        qtbot.addWidget(row)
+        row.resize(800, row.sizeHint().height())
+        row.show()
+        view = row.plain_view or row.markdown_view
+        qtbot.waitUntil(lambda: view.verticalScrollBar().maximum() == 0)
+        assert row.raw_text == "hello" and row.message_id == 12
+        assert row.accessibleName() == row.speaker
+        assert view.viewport().height() >= math.ceil(view.document().size().height())
+        line = QFontMetrics(view.document().defaultFont()).height()
+        assert row.sizeHint().height() <= 3 * line + 8
+        if role == USER_ROLE:
+            assert row.speaker_label.isHidden()
+            assert row.bubble.width() <= QFontMetrics(view.document().defaultFont()).horizontalAdvance("hello") + 36
+            assert row.bubble.x() + row.bubble.width() == row.width()
+        else:
+            assert not row.speaker_label.isHidden()
+            assert row.bubble.layout().contentsMargins().left() == 0
+            assert row.bubble.width() == 800
+
+
+@pytest.mark.parametrize("columns", [3, 5, 8])
+def test_native_multicolumn_table_resizes_without_loss(qtbot, qapp, columns):
+    from PySide6.QtGui import QTextCursor, QTextTable
+    from app.ui.design.theme_manager import ThemeManager
+
+    view = AgentMarkdownView()
+    qtbot.addWidget(view)
+    view.show()
+    token = "D:/Projects/" + "original_path_" * 20
+    markdown = ("| " + " | ".join(f"Col{i}" for i in range(columns)) + " |\n"
+                + "| " + " | ".join(["---"] * columns) + " |\n"
+                + "| " + " | ".join([token] * columns) + " |")
+    view.set_markdown(markdown)
+    for theme in ("light", "dark"):
+        ThemeManager.instance().set_theme(theme)
+        ThemeManager.instance().apply(qapp)
+        for width in (800, 380, 280, 501):
+            view.resize(width, view.height())
+            qtbot.waitUntil(lambda: view.document().size().width() == view.viewport().width()
+                           and view.horizontalScrollBar().maximum() == 0
+                           and view.verticalScrollBar().maximum() == 0)
+            table = next(f for f in view.document().rootFrame().childFrames()
+                         if isinstance(f, QTextTable))
+            assert table.columns() == columns
+            for column in range(columns):
+                block = table.cellAt(1, column).firstCursorPosition().block()
+                assert block.text() == token
+                assert block.layout().lineCount() > 1
+                cursor = QTextCursor(block)
+                cursor.setPosition(block.position())
+                cursor.setPosition(block.position() + len(token), QTextCursor.MoveMode.KeepAnchor)
+                assert cursor.selectedText() == token
+                view.setTextCursor(cursor)
+                view.copy()
+                assert qapp.clipboard().text() == token
+            assert view.markdown == markdown
+
+
+def test_table_after_code_has_no_generated_header_gap_or_code_surface(qtbot):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont, QTextCursor, QTextFrameFormat, QTextTable
+
+    markdown = '```python\na = "original/path"\n```\n\n| Stage | Check |\n| --- | --- |\n| SFT | loss |'
+    view = AgentMarkdownView()
+    qtbot.addWidget(view)
+    view.resize(380, 100)
+    view.show()
+    view.set_markdown(markdown)
+    qtbot.waitUntil(lambda: view.horizontalScrollBar().maximum() == 0)
+    table = next(f for f in view.document().rootFrame().childFrames() if isinstance(f, QTextTable))
+    for column, header in enumerate(("Stage", "Check")):
+        block = table.cellAt(0, column).firstCursorPosition().block()
+        assert block.text() == header
+        assert block.blockFormat().background().style() == Qt.BrushStyle.NoBrush
+        assert block.blockFormat().leftMargin() == 0
+        assert QTextCursor(block).charFormat().fontWeight() == QFont.Weight.Bold
+        cell_format = table.cellAt(0, column).format().toTableCellFormat()
+        assert cell_format.topBorder() == .5
+        assert cell_format.topBorderStyle() == QTextFrameFormat.BorderStyle.BorderStyle_Solid
+    assert view.markdown == markdown
+    assert 'a = "original/path"' in view.toPlainText()

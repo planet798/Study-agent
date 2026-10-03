@@ -396,6 +396,7 @@ class MainWindow(QMainWindow):
         spec = PAGE_SPECS_BY_KEY.get(key_value(key))
         if spec is None:
             return
+        self.page_header.set_conversation_sizing(False)
         if key_value(key) == PageKey.TODAY.value:
             # Today subtitle = 当前日期；date_label 即同一个 label。
             self.page_header.set_title(spec.title)
@@ -612,6 +613,7 @@ class MainWindow(QMainWindow):
             )
             self._clear_today_scroll_restore()
             self.stack.setCurrentIndex(self.agent_workspace_page_index)
+            self.page_header.set_conversation_sizing(True)
             self.page_header.set_title(self.agent_session_service.effective_title(session))
             self.page_header.set_subtitle(self._route_name_for_task(task) or "学习会话")
             self.page_header.set_icon(None)

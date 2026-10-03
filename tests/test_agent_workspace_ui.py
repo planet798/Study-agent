@@ -316,9 +316,11 @@ def test_capability_chips_are_truthful_and_drop_architecture_jargon(qtbot, repo)
     assert chips["ai"].text() == "AI 已配置"
     assert chips["approval"].text() == "写操作需确认"
     assert chips["mcp"].text() == "MCP 已配置"
-    assert chips["sandbox"].text() == "Workspace 可读写"
+    assert chips["sandbox"].isHidden()
+    assert page.workspace_card.badge.text() == "可读写"
+    assert not page.workspace_card.badge.isHidden()
     assert chips["sandbox_exec"].text() == "代码执行已配置"
-    assert all(not chip.isHidden() for chip in chips.values())
+    assert all(not chips[key].isHidden() for key in ("ai", "approval", "mcp", "sandbox_exec"))
     joined = " ".join(chip.text() for chip in chips.values())
     assert "在线" not in joined
     assert "应用数据只读" not in joined
@@ -462,3 +464,92 @@ def test_same_session_message_refresh_keeps_scroll_position(qtbot, repo):
     )
     qtbot.waitUntil(lambda: bar.value() == bar.maximum())
     assert bar.value() == bar.maximum()
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_reading_column_centers_and_aligns_scrollbar_footer_status(qtbot, qapp, repo, theme):
+    from PySide6.QtCore import QPoint
+    from app.ui.design.theme_manager import ThemeManager
+    from app.ui.agent_workspace_page import READING_COLUMN_MAX_WIDTH
+
+    ThemeManager.instance().set_theme(theme)
+    ThemeManager.instance().apply(qapp)
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    task = _task(repo)
+    page.show()
+    approval = [{"id": 17, "status": "pending", "tool_name": "request_complete_current_task"}]
+    for width in (1400, 720, 440, 1100):
+        for text in ("short", "paragraph\n\n" * 60):
+            page.resize(width, 760)
+            page.load_session({"id": 1}, [{"id": 3, "role": "assistant", "content": text}],
+                              task, None, True, approvals=approval)
+            page.set_busy(True)
+            page.set_error("explicit error")
+            row = _message_widgets(page)[0]
+            qtbot.waitUntil(lambda: row.width() == page.composer.width()
+                           == min(READING_COLUMN_MAX_WIDTH, page.conversation_scroll.viewport().width()))
+            x = row.mapTo(page, QPoint()).x()
+            assert row.parent() is page.conversation_body
+            assert page.composer.x() == x
+            assert page.approvals_container.x() == x
+            assert page.interaction_status_label.x() == x
+            assert page.error_label.x() == x
+            assert row.markdown_view.mapTo(page, QPoint()).x() == x
+            margins = page.conversation_layout.contentsMargins()
+            assert abs(margins.left() - margins.right()) <= 1
+            assert page.approvals_container.width() == page.composer.width()
+            assert page.conversation_scroll.horizontalScrollBar().maximum() == 0
+    page.set_error("explicit error")
+    assert page.error_label.isVisible()
+
+
+def test_agent_named_primary_buttons_use_neutral_variant_in_both_themes(qtbot, qapp, repo):
+    from PySide6.QtGui import QPalette
+    from app.ui.design.theme_manager import ThemeManager, render_theme
+
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [], _task(repo), None, True,
+                      approvals=[{"id": 2, "status": "pending", "tool_name": "request_start_assessment"}])
+    page.composer.set_text("enabled")
+    page.show()
+    approve = page.findChild(type(page.send_button), "AgentApprovalApprove")
+    for theme in ("light", "dark"):
+        manager = ThemeManager.instance()
+        manager.set_theme(theme)
+        manager.apply(qapp)
+        tokens = manager.tokens()
+        for button in (approve, page.send_button):
+            assert button.property("saVariant") == "primary"
+            button.setEnabled(True)
+            button.ensurePolished()
+            qtbot.wait(10)
+            assert button.palette().color(QPalette.ColorRole.Button).name() == tokens["action_background"]
+            assert button.palette().buttonText().color().name() == tokens["action_text"]
+            button.setEnabled(False)
+            qtbot.wait(10)
+            assert button.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button).name() == tokens["action_background_disabled"]
+            assert button.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText).name() == tokens["action_text_disabled"]
+            selector = f'QPushButton#{button.objectName()}[saVariant="primary"]:focus'
+            assert selector in render_theme(theme)
+
+
+def test_existing_rows_resize_from_wide_without_minimum_width_feedback(qtbot, qapp, repo):
+    page = AgentWorkspacePage()
+    qtbot.addWidget(page)
+    page.load_session({"id": 1}, [
+        {"id": 1, "role": "user", "content": "long unbroken path_" * 150},
+        {"id": 2, "role": "assistant", "content": "answer " * 180},
+    ], _task(repo), None, True)
+    page.show()
+    rows = _message_widgets(page)
+    for width in (1400, 380, 1100, 440):
+        page.resize(width, 760)
+        qtbot.waitUntil(lambda: rows[0].width() == page.composer.width()
+                       == min(800, page.conversation_scroll.viewport().width()))
+        assert page.width() == width
+        assert rows[0].bubble.width() <= rows[0].width() * .78 + 1
+        assert rows[1].parent() is page.conversation_body
+        assert page.conversation_scroll.horizontalScrollBar().maximum() == 0
+        assert [row.message_id for row in _message_widgets(page)] == [1, 2]

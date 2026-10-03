@@ -93,7 +93,7 @@ def test_session_switch_cancels_old_assistant_target(qtbot, repo):
     page.load_session({"id": 1}, history, task, None, True)
     page.load_session({"id": 1}, history + [_row(31, "assistant", _answer())],
                       task, None, True)
-    page.load_session({"id": 2}, [_row(50, "user", "B 的消息 " * 200)],
+    page.load_session({"id": 2}, [_row(50, "user", "B 的消息 " * 600)],
                       task, None, True)
     bar = page.conversation_scroll.verticalScrollBar()
     qtbot.waitUntil(lambda: bar.maximum() > 0 and bar.value() == bar.maximum())

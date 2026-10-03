@@ -54,3 +54,18 @@ def test_header_trailing_action():
     header = SAPageHeader("x")
     btn = SAButton("动作", variant="secondary")
     assert header.add_trailing(btn) is btn
+
+
+def test_conversation_header_allocates_text_width_and_restores_default(qtbot):
+    header = SAPageHeader("SFT session", "A short learning route")
+    qtbot.addWidget(header)
+    header.set_icon(None)
+    header.resize(900, 120)
+    header.set_conversation_sizing(True)
+    header.show()
+    qtbot.waitUntil(lambda: header.subtitle_label().width() > 800)
+    label = header.subtitle_label()
+    assert label.heightForWidth(label.width()) <= label.fontMetrics().height() + 2
+    header.set_conversation_sizing(False)
+    assert header._row.stretch(1) == 0
+    assert header._row.stretch(2) == 1

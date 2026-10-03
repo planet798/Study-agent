@@ -107,3 +107,23 @@ def test_narrow_workspace_control_never_claims_long_path(qtbot, repo, width):
     assert control.badge.geometry().left() >= control.selector.geometry().right()
     assert page.conversation_scroll.height() > page.height() // 2
     page.close()
+
+
+def test_conversation_header_sizing_does_not_leak_to_other_pages(
+    qtbot, conn, repo, task_service, date_service,
+):
+    from app.ui.app_shell import PageKey
+    task = repo.create(title="Conversation sizing", scheduled_date="2026-01-06", source="manual")
+    sessions = AgentSessionService(AgentRepository(conn), task_service)
+    sid = sessions.start_or_resume(task.id)["id"]
+    window = _window(qtbot, task_service, date_service, sessions)
+    window._on_open_agent_session(sid)
+    assert window.page_header._row.stretch(1) == 1
+    window.sidebar.item(PageKey.TODAY).click()
+    assert window.page_header._row.stretch(1) == 0
+    assert window.page_header.subtitle() == "2026-01-06"
+    window.sidebar.item(PageKey.SETTINGS).click()
+    assert window.page_header._row.stretch(1) == 0
+    window._on_open_agent_session(sid)
+    assert window.page_header._row.stretch(1) == 1
+    window.close()

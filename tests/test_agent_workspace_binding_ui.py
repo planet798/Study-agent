@@ -38,14 +38,17 @@ def test_compact_states_and_header_position(qtbot, repo):
     assert "/tmp/study-agent/task_7" not in card.selector.text()
     assert card.selector.toolTip() == "/tmp/study-agent/task_7"
     card.set_view(_view(kind="local", available=False, path="/private/missing"))
-    assert card.badge.isHidden()
+    assert not card.badge.isHidden()
+    assert card.badge.text() == "不可用"
     assert _action(card, "重新选择本地项目")
     assert not any(a.text() == "打开文件夹" for a in card.menu.actions())
     task = repo.create(title="Study", scheduled_date="2026-01-05", source="manual")
     page = AgentWorkspacePage()
     qtbot.addWidget(page)
     page.load_session({"id": 3}, [], task, None, True, workspace_view=_view(task.id))
-    assert page.layout().indexOf(page.conversation_scroll) > page.layout().indexOf(page.capability_warning_banner)
+    assert page.context_layout.indexOf(page.capability_warning_banner) >= 0
+    assert page.layout().itemAt(0).layout() is page.context_layout
+    assert page.layout().indexOf(page.conversation_scroll) == 1
     assert page.workspace_card.parent() is page
 
 

@@ -2,9 +2,9 @@
 
 UX-2 information hierarchy::
 
-    Global SAPageHeader   title=学习会话  subtitle=Task title
+    Global SAPageHeader   title=Session title  subtitle=Route
     Workspace
-        Toolbar           [← 返回今日]  + capability chips (wrap)
+        Toolbar           muted capability chips (wrap)
         Task Context Card route / activity / duration tags + description
         Warning / error / model-unavailable surfaces (only when relevant)
         Empty hint        (only when no visible messages)
@@ -12,13 +12,13 @@ UX-2 information hierarchy::
         Pending approvals (only when pending)
         Composer          (AgentComposer, independent surface)
 
-The Task title is intentionally **not** rendered here: its single primary home
-is the SAPageHeader subtitle, so the Workspace never duplicates it.
+The Session title lives in SAPageHeader. The Workspace never duplicates it;
+message rows retain conversation_body ownership inside adaptive column margins.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt, Signal, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QSize, Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -42,6 +42,8 @@ from .components.tag import SATag
 from .design import spacing
 from .task_widget import format_minutes
 
+
+READING_COLUMN_MAX_WIDTH = 800
 
 STATUS_WARNINGS = {
     "mcp_config_invalid": "MCP 配置无效，本次仅使用内置能力。",
@@ -78,6 +80,15 @@ APPROVAL_ACTIONS = {
 }
 
 
+class _ReadingColumnLayout(QVBoxLayout):
+    def minimumSize(self) -> QSize:  # noqa: N802 - Qt API
+        # Centering gutters are expendable, not a minimum window-width requirement.
+        # Otherwise yesterday's wide margins prevent the next narrow resize.
+        size = super().minimumSize()
+        margins = self.contentsMargins()
+        return QSize(max(0, size.width() - margins.left() - margins.right()), size.height())
+
+
 class AgentWorkspacePage(QWidget):
     """Task-bound conversation Workspace with a product-grade interaction shell."""
 
@@ -111,7 +122,13 @@ class AgentWorkspacePage(QWidget):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(spacing.XXL, spacing.LG, spacing.XXL, spacing.XL)
-        root.setSpacing(spacing.LG)
+        root.setSpacing(spacing.MD)
+        self._column_timer = QTimer(self)
+        self._column_timer.setSingleShot(True)
+        self._column_timer.timeout.connect(self._sync_reading_column)
+        self.context_layout = _ReadingColumnLayout()
+        self.context_layout.setSpacing(spacing.SM)
+        root.addLayout(self.context_layout)
 
         self.task_context_card = AgentTaskContextCard()
         self.workspace_card = AgentWorkspaceCard()
@@ -123,12 +140,12 @@ class AgentWorkspacePage(QWidget):
         header.setSpacing(spacing.SM)
         header.addWidget(self.task_context_card, stretch=1)
         header.addWidget(self.workspace_card)
-        root.addLayout(header)
-        root.addLayout(self._build_toolbar())
+        self.context_layout.addLayout(header)
+        self.context_layout.addLayout(self._build_toolbar())
 
         self.capability_warning_banner = SAInfoBanner(variant="warning")
         self.capability_warning_banner.hide()
-        root.addWidget(self.capability_warning_banner)
+        self.context_layout.addWidget(self.capability_warning_banner)
 
         self.model_unavailable_banner = SAInfoBanner(
             title="AI 模型尚未配置",
@@ -140,14 +157,14 @@ class AgentWorkspacePage(QWidget):
         self.settings_button.clicked.connect(self.settings_requested.emit)
         self.model_unavailable_banner.set_action(self.settings_button)
         self.model_unavailable_banner.hide()
-        root.addWidget(self.model_unavailable_banner)
+        self.context_layout.addWidget(self.model_unavailable_banner)
 
         self.error_label = QLabel("")
         self.error_label.setObjectName("AgentErrorBanner")
         self.error_label.setTextFormat(Qt.TextFormat.PlainText)
         self.error_label.setWordWrap(True)
         self.error_label.setVisible(False)
-        root.addWidget(self.error_label)
+        self.context_layout.addWidget(self.error_label)
 
         self.empty_hint = SAEmptyState(
             title="从当前任务开始学习",
@@ -163,7 +180,7 @@ class AgentWorkspacePage(QWidget):
         self.conversation_scroll.setWidgetResizable(True)
         self.conversation_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.conversation_body = QWidget()
-        self.conversation_layout = QVBoxLayout(self.conversation_body)
+        self.conversation_layout = _ReadingColumnLayout(self.conversation_body)
         self.conversation_layout.setContentsMargins(0, 4, 0, 4)
         self.conversation_layout.setSpacing(spacing.LG)
         self.conversation_layout.addWidget(self.empty_hint)
@@ -181,18 +198,44 @@ class AgentWorkspacePage(QWidget):
         bar.sliderPressed.connect(self._clear_pending_scroll)
         bar.rangeChanged.connect(self._update_latest_button)
 
-        root.addWidget(self._build_approvals())
+        self.footer_layout = _ReadingColumnLayout()
+        self.footer_layout.setSpacing(spacing.SM)
+        root.addLayout(self.footer_layout)
+        self.footer_layout.addWidget(self._build_approvals())
 
         self.interaction_status_label = QLabel("")
         self.interaction_status_label.setObjectName("AgentInteractionStatus")
         self.interaction_status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.interaction_status_label.setVisible(False)
-        root.addWidget(self.interaction_status_label)
+        self.footer_layout.addWidget(self.interaction_status_label)
 
         self.composer = AgentComposer()
         self.composer.send_clicked.connect(self._send_current)
         self.composer.input_edit.textChanged.connect(self._update_send_enabled)
-        root.addWidget(self.composer)
+        self.footer_layout.addWidget(self.composer)
+
+    def _sync_reading_column(self) -> None:
+        """Margins preserve message QObject parents and scroll-target coordinates."""
+        viewport = self.conversation_scroll.viewport()
+        available = viewport.width()
+        width = min(READING_COLUMN_MAX_WIDTH, available)
+        left = max(0, (available - width) // 2)
+        right = max(0, available - width - left)
+        margins = self.conversation_layout.contentsMargins()
+        if (margins.left(), margins.right()) != (left, right):
+            self.conversation_layout.setContentsMargins(left, 4, right, 4)
+        # The footer/context have the scroll area's width, including its scrollbar.
+        gutter = max(0, self.conversation_scroll.width() - available)
+        for layout in (self.context_layout, self.footer_layout):
+            margins = layout.contentsMargins()
+            if (margins.left(), margins.right()) != (left, right + gutter):
+                layout.setContentsMargins(left, 0, right + gutter, 0)
+        self.composer.set_available_height(self.height())
+        self._update_latest_button()
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        self._column_timer.start(0)
 
     def _build_toolbar(self) -> QVBoxLayout:
         toolbar = QVBoxLayout()
@@ -347,7 +390,7 @@ class AgentWorkspacePage(QWidget):
     def _apply_capability_status(self, status: AgentCapabilityStatus) -> None:
         ai = self.capability_chips["ai"]
         ai.setText("AI 已配置" if self._model_configured else "AI 未配置")
-        ai.set_variant("info" if self._model_configured else "warning")
+        ai.set_variant("neutral" if self._model_configured else "warning")
         ai.setVisible(True)
 
         approval = self.capability_chips["approval"]
@@ -361,11 +404,9 @@ class AgentWorkspacePage(QWidget):
         mcp.setVisible(bool(status.mcp_configured))
 
         sandbox = self.capability_chips["sandbox"]
-        workspace_readable = self.workspace_card.available and self.workspace_card.workspace_kind != "none"
-        sandbox.setText("Workspace 可读写" if self.workspace_card.workspace_kind == "managed"
-                        else "Workspace 只读")
-        sandbox.set_variant("neutral")
-        sandbox.setVisible(workspace_readable)
+        # Binding mode has one visible home beside the workspace selector.
+        # It is not evidence of the active turn's tool permissions.
+        sandbox.setVisible(False)
 
         sandbox_exec = self.capability_chips["sandbox_exec"]
         sandbox_exec.setText("代码执行已配置")
@@ -402,8 +443,8 @@ class AgentWorkspacePage(QWidget):
         card.setObjectName("AgentApprovalCard")
         card.setProperty("approval_id", approval_id)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(spacing.LG, spacing.MD, spacing.LG, spacing.MD)
-        layout.setSpacing(spacing.SM)
+        layout.setContentsMargins(spacing.MD, spacing.SM, spacing.MD, spacing.SM)
+        layout.setSpacing(spacing.XS)
 
         title = QLabel(action["title"])
         title.setObjectName("AgentApprovalActionTitle")
@@ -493,7 +534,7 @@ class AgentWorkspacePage(QWidget):
     def eventFilter(self, watched, event):  # noqa: N802 - Qt API
         if watched is self.conversation_scroll.viewport():
             if event.type() == QEvent.Type.Resize:
-                QTimer.singleShot(0, self, self._update_latest_button)
+                self._column_timer.start(0)
             elif event.type() in (QEvent.Type.Wheel, QEvent.Type.TouchBegin,
                                   QEvent.Type.MouseButtonPress):
                 self._clear_pending_scroll()

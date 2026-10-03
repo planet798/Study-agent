@@ -90,6 +90,11 @@ class SAPageHeader(QWidget):
         self._subtitle_label.setText(subtitle or "")
         self._subtitle_label.setVisible(bool(subtitle))
 
+    def set_conversation_sizing(self, enabled: bool) -> None:
+        """Use available text width only for the internal conversation header."""
+        self._row.setStretch(1, 1 if enabled else 0)
+        self._row.setStretch(2, 0 if enabled else 1)
+
     def subtitle_label(self) -> QLabel:
         """暴露 subtitle QLabel（Today 的日期仍写入这个 label）。"""
         return self._subtitle_label

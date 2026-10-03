@@ -18,7 +18,7 @@ class AgentTaskContextCard(QWidget):
         layout.setSpacing(spacing.XS)
         self.tags_widget = FlowWidget(self)
         self.route_tag = self.tags_widget.add_widget(SATag("", "neutral"))
-        self.activity_tag = self.tags_widget.add_widget(SATag("", "info"))
+        self.activity_tag = self.tags_widget.add_widget(SATag("", "neutral"))
         self.duration_tag = self.tags_widget.add_widget(SATag("", "neutral"))
         layout.addWidget(self.tags_widget)
         self.description_button = QPushButton("任务信息 ▾")
@@ -41,7 +41,7 @@ class AgentTaskContextCard(QWidget):
     def set_metadata(self, route_text: str, activity_text: str, duration_text: str,
                      *, route_is_fallback: bool = False) -> None:
         self.route_tag.setText(route_text or "未分类")
-        self.route_tag.set_variant("neutral" if route_is_fallback else "accent")
+        self.route_tag.set_variant("neutral")
         self.activity_tag.setText(activity_text or "学习活动")
         self.duration_tag.setText(duration_text or "未设置")
 

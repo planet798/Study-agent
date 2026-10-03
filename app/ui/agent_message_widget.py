@@ -31,12 +31,16 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetrics,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
     QTextFormat,
+    QTextFrameFormat,
     QTextOption,
+    QTextLength,
+    QTextTable,
 )
 from PySide6.QtWidgets import (
     QFrame,
@@ -58,12 +62,12 @@ USER_SPEAKER = "你"
 ASSISTANT_SPEAKER = "学习助手"
 
 # Assistant body may breathe wider than the user's own messages.
-ASSISTANT_MAX_WIDTH = 960
+ASSISTANT_MAX_WIDTH = 800
 USER_MAX_WIDTH = 680
-ASSISTANT_VIEWPORT_FRACTION = 0.90
+ASSISTANT_VIEWPORT_FRACTION = 1.0
 USER_VIEWPORT_FRACTION = 0.78
-# QTextEdit reserves an internal ~6px gutter per edge even without a frame.
-BODY_HEIGHT_SLACK = 20
+# Ceil fractional document height, then retain two logical pixels for descenders.
+BODY_HEIGHT_SLACK = 2
 
 # Qt-native Markdown with raw HTML disabled. ``MarkdownDialectGitHub`` enables the
 # common GFM subset (tables, fenced code, task lists). ``MarkdownNoHTML`` keeps
@@ -87,6 +91,8 @@ _HEADING_BOTTOM_MARGIN = 4
 _LINE_HEIGHT_PERCENT = 140
 _CODE_BLOCK_MARGIN = 10
 _CODE_BLOCK_PADDING = 6
+_TABLE_CELL_PADDING = 4
+_TABLE_BORDER_WIDTH = 0.5
 
 
 def _base_body_font() -> QFont:
@@ -166,7 +172,9 @@ class _MessageBodyView(QTextBrowser):
     def _sync_height(self, *_args) -> None:
         # Qt returns a fractional QSizeF; flooring it clips descenders on Windows
         # DPI scales. The slack covers viewport/document rounding and rich blocks.
-        chrome = max(0, min(64, self.height() - self.viewport().height()))
+        margins = self.contentsMargins()
+        # Unlike height - viewport.height(), these are stable during resize callbacks.
+        chrome = margins.top() + margins.bottom()
         required = math.ceil(self.document().size().height()) + BODY_HEIGHT_SLACK + chrome
         height = max(BODY_HEIGHT_SLACK + chrome, required)
         if self.height() != height:
@@ -202,14 +210,17 @@ class AgentPlainTextView(_MessageBodyView):
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt API
         """Shrink to the user's text instead of QTextBrowser's 256px default."""
-        metrics = self.fontMetrics()
+        metrics = QFontMetrics(self.document().defaultFont())
         lines = self._text.splitlines() or [""]
         natural = max((metrics.horizontalAdvance(line) for line in lines), default=0)
         width = max(1, min(natural + 8, USER_MAX_WIDTH))
         height = self.document().size().height()
         if height <= 0:
             height = float(metrics.height() * max(1, len(lines)))
-        return QSize(width, int(height) + 2)
+        return QSize(width, math.ceil(height) + BODY_HEIGHT_SLACK)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        return QSize(1, self.height())
 
 
 class AgentMarkdownView(_MessageBodyView):
@@ -219,6 +230,9 @@ class AgentMarkdownView(_MessageBodyView):
         super().__init__("AgentAssistantMarkdown", parent)
         self._markdown = ""
         self._plaintext_fallback = False
+        self._table_timer = QTimer(self)
+        self._table_timer.setSingleShot(True)
+        self._table_timer.timeout.connect(self._resize_tables)
         self._theme_manager = theme_manager()
         self._theme_manager.theme_changed.connect(self._on_theme_changed)
 
@@ -245,6 +259,7 @@ class AgentMarkdownView(_MessageBodyView):
         document.setDefaultFont(_base_body_font())
         try:
             document.setMarkdown(self._markdown, MARKDOWN_FEATURES)
+            self._normalize_table_leading_blocks(document.rootFrame())
             self._plaintext_fallback = False
             self._style_document()
         except Exception:  # noqa: BLE001 - one bad model output must not crash the UI
@@ -278,7 +293,7 @@ class AgentMarkdownView(_MessageBodyView):
             is_code = _is_code_block(block)
             if is_code:
                 in_code = True
-            elif block.text().strip():
+            elif block.text().strip() or QTextCursor(block).currentTable() is not None:
                 in_code = False
             # Blank lines inside a fenced block keep the code-block surface.
             is_code = is_code or (in_code and not block.text().strip())
@@ -296,6 +311,73 @@ class AgentMarkdownView(_MessageBodyView):
             elif not heading_level:
                 self._style_paragraph(block)
             self._style_inline_code(block, code_background)
+
+        self._style_tables(document.rootFrame(), tokens)
+
+    def _normalize_table_leading_blocks(self, frame) -> None:
+        for child in frame.childFrames():
+            if isinstance(child, QTextTable):
+                cell = child.cellAt(0, 0)
+                first = cell.firstCursorPosition().block()
+                following = first.next()
+                # Qt's importer can put a spurious empty paragraph in the first
+                # header cell after a code fence. Remove only that generated block.
+                if (not first.text() and following.isValid()
+                        and following.position() < cell.lastCursorPosition().position()):
+                    cursor = QTextCursor(first)
+                    cursor.deleteChar()
+                    # The same importer quirk leaves this header without the
+                    # bold format applied to the other GFM header cells.
+                    cursor = cell.firstCursorPosition()
+                    cursor.setPosition(cell.lastCursorPosition().position(), QTextCursor.MoveMode.KeepAnchor)
+                    header_format = QTextCharFormat()
+                    header_format.setFontWeight(QFont.Weight.Bold)
+                    cursor.mergeCharFormat(header_format)
+            self._normalize_table_leading_blocks(child)
+
+    def _style_tables(self, frame, tokens: dict[str, str]) -> None:
+        for child in frame.childFrames():
+            if isinstance(child, QTextTable):
+                fmt = child.format()
+                # Qt rounds each column separately and includes cell/border gutters
+                # outside its advertised table width. Reserve that chrome, not text.
+                chrome = 2 * (_TABLE_CELL_PADDING + math.ceil(_TABLE_BORDER_WIDTH))
+                width = max(1, self.viewport().width() - chrome - child.columns())
+                fmt.setWidth(QTextLength(QTextLength.Type.FixedLength, width))
+                fmt.setColumnWidthConstraints([
+                    QTextLength(QTextLength.Type.PercentageLength, 100 / child.columns())
+                    for _ in range(child.columns())
+                ])
+                fmt.setCellPadding(_TABLE_CELL_PADDING)
+                fmt.setCellSpacing(0)
+                fmt.setBorder(_TABLE_BORDER_WIDTH)
+                fmt.setBorderCollapse(True)
+                fmt.setBorderStyle(QTextFrameFormat.BorderStyle.BorderStyle_Solid)
+                border = self._color(tokens, "border_subtle")
+                if border is not None:
+                    fmt.setBorderBrush(QBrush(border))
+                if fmt != child.format():
+                    child.setFormat(fmt)
+                for row in range(child.rows()):
+                    for column in range(child.columns()):
+                        cell = child.cellAt(row, column)
+                        cell_format = cell.format().toTableCellFormat()
+                        cell_format.setBorder(_TABLE_BORDER_WIDTH)
+                        cell_format.setBorderStyle(QTextFrameFormat.BorderStyle.BorderStyle_Solid)
+                        if border is not None:
+                            cell_format.setBorderBrush(QBrush(border))
+                        if cell_format != cell.format():
+                            cell.setFormat(cell_format)
+            self._style_tables(child, tokens)
+
+    def _resize_tables(self) -> None:
+        self._style_tables(self.document().rootFrame(), self._theme_tokens())
+        self._sync_height()
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            self._table_timer.start(0)
 
     @staticmethod
     def _color(tokens: dict[str, str], key: str) -> QColor | None:
@@ -340,7 +422,7 @@ class AgentMarkdownView(_MessageBodyView):
         # Heading blocks in Qt hard-code an ``x-large`` size; neutralise the level
         # and control size ourselves so headings stay close to body text.
         block_format.setHeadingLevel(0)
-        block_format.setTopMargin(_HEADING_TOP_MARGIN.get(level, 8))
+        block_format.setTopMargin(0 if position == 0 else _HEADING_TOP_MARGIN.get(level, 8))
         block_format.setBottomMargin(_HEADING_BOTTOM_MARGIN)
         cursor = QTextCursor(self.document())
         cursor.setPosition(position)
@@ -362,6 +444,10 @@ class AgentMarkdownView(_MessageBodyView):
             float(_LINE_HEIGHT_PERCENT),
             QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,
         )
+        block_format.setTopMargin(0)
+        block_format.setBottomMargin(4 if block.textList() else 8)
+        if not block.next().isValid():
+            block_format.setBottomMargin(0)
         cursor = QTextCursor(self.document())
         cursor.setPosition(block.position())
         cursor.setBlockFormat(block_format)
@@ -441,6 +527,7 @@ class AgentMessageWidget(QWidget):
 
         self.setObjectName("AgentMessageRow")
         self.setProperty("role", self.role)
+        self.setAccessibleName(self.speaker)
         self._build_ui()
 
     @property
@@ -464,13 +551,17 @@ class AgentMessageWidget(QWidget):
         )
 
         bubble_layout = QVBoxLayout(self.bubble)
-        bubble_layout.setContentsMargins(spacing.LG, spacing.MD, spacing.LG, spacing.MD)
-        bubble_layout.setSpacing(spacing.SM)
+        if self.role == USER_ROLE:
+            bubble_layout.setContentsMargins(spacing.MD, spacing.SM, spacing.MD, spacing.SM)
+        else:
+            bubble_layout.setContentsMargins(0, 0, 0, 0)
+        bubble_layout.setSpacing(spacing.XS)
 
         self.speaker_label = QLabel(self.speaker)
         self.speaker_label.setObjectName("AgentMessageSpeaker")
         self.speaker_label.setTextFormat(Qt.TextFormat.PlainText)
         bubble_layout.addWidget(self.speaker_label)
+        self.speaker_label.setVisible(self.role != USER_ROLE)
 
         if self.role == USER_ROLE:
             self.plain_view = AgentPlainTextView()
@@ -492,4 +583,11 @@ class AgentMessageWidget(QWidget):
         cap = USER_MAX_WIDTH if self.role == USER_ROLE else ASSISTANT_MAX_WIDTH
         fraction = (USER_VIEWPORT_FRACTION if self.role == USER_ROLE
                     else ASSISTANT_VIEWPORT_FRACTION)
-        self.bubble.setMaximumWidth(min(cap, max(1, int(self.width() * fraction))))
+        available = min(cap, max(1, int(self.width() * fraction)))
+        if self.plain_view is not None:
+            margins = self.bubble.layout().contentsMargins()
+            natural = self.plain_view.sizeHint().width() + margins.left() + margins.right()
+            # A fixed minimum would pin the old width across narrow resizes.
+            self.bubble.setMaximumWidth(min(available, natural))
+        else:
+            self.bubble.setMaximumWidth(available)
