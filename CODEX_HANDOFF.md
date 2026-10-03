@@ -1,7 +1,7 @@
 # Study Agent — Codex 开发交接
 
 > 本文面向在 Codex 中继续开发本项目的 coding agent，不依赖 Pi 会话、技能、子代理或临时文件。
-> 功能交接基线：`master` 的 `6f6f656`（Fix mixed Markdown document panels with structural parsing）；原交接文档提交为 `dec2935`。接手时以实际 `git log` 为准。
+> 2026-10-03 最新功能范围：学习路线概览与详情精修；概览提交为 `a40394d`，详情提交请核对实际 `git log`。此前 Markdown 面板功能基线为 `6f6f656`，原交接文档提交为 `dec2935`。
 > 用户最新确认：**最新 Markdown 文档面板修复已成功，Windows 实际验证没有问题。** 不要再把该修复标成未完成任务。
 > 2026-10-03 补充：用户确认 **Personalization-1E-C 已全部实现**；旧聊天中的 E-C 方案不能再作为待办。当前检出代码与该完成记录的核对结果见第 10 节。
 
@@ -170,6 +170,34 @@
 - 用户未逐项报告所有 DPI/超大表格矩阵，不要把此次通过夸大为所有极端场景全通过。已有文档的未勾选细项是更广泛检查，不等于当前主要问题仍未解决。
 - `/tmp` 截图、日志和 Pi 会话文件不是可靠交接资源，可能不存在。新 Codex 环境应从仓库 fixture 和测试重新生成，不依赖旧临时路径。
 
+### 学习路线本轮验证（2026-10-03 · WSL2）
+
+- 路线交互、结构编辑、技能、AI 预览与线程退出：**90 passed in 24.39s**。
+- 路线数据/进度、Topic 活动、主窗口、主题与实践页兼容：**126 passed in 147.91s**。
+- 两组测试有重叠；这是定向验证，不是完整 Release Gate。compileall 与 diff-check 通过。
+- 隔离临时 DB 的离屏渲染覆盖深浅主题和 100%/125%/150%/175% scale；观察了实际 Qt widget 图像。
+  这些图像只验证离屏布局，不构成 Windows 用户实机验收。
+
+路线定向命令：
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
+  tests/test_route_details_polish.py tests/test_routes_ui3.py \
+  tests/test_learning_routes_ui.py tests/test_manual_route_plan_ui.py \
+  tests/test_route_skills_ui.py tests/test_ai_route_preview.py \
+  tests/test_dialog_worker_lifecycle.py -q
+```
+
+兼容命令：
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
+  tests/test_route_progress.py tests/test_route_data_isolation.py \
+  tests/test_topic_learning_components.py tests/test_main_window.py \
+  tests/test_theme_runtime.py tests/test_practice_ui.py \
+  tests/test_routes_ui3.py tests/test_route_details_polish.py -q
+```
+
 ## 7. 环境与 Windows 常用命令
 
 以下在项目根目录执行。使用项目 `.venv`，不用全局 Python/pip，不能提交 `.venv`。
@@ -287,7 +315,17 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ## 10. 后续工作状态
 
-**本次授权范围是同步交接与个性化相关文档，没有新的功能开发任务。** 最新面板问题已解决；后续需求由用户另行指定。
+**最新授权范围是学习路线概览与详情精修。** 用户确认保留详情弹窗与三类进度摘要后，已明确要求“开始实施”。本轮不涉及实践页、设置页及个性化功能开发。
+
+### 学习路线精修（2026-10-03）
+
+- 概览改为轻量条目与分组标题，课程进度 / 掌握度 / 能力证据数量保留；等级分布在详情，管理操作进入更多菜单。
+- 详情保留弹窗，课程结构提前；当前未完成阶段默认展开，路线信息 / 掌握与能力 / 技能 / 缺口 / 项目及需求分别折叠。
+- 同次打开的折叠选择与刷新位置保留；用户滚动或关闭会使旧恢复请求失效。无计划创建入口只有一组，读取失败不冒充零进度。
+- 视图拆入 `route_overview_widgets.py` / `route_detail_sections.py`，恢复生命周期在 `route_scroll.py`；服务、schema、规划 gate 与证据算法未更改。
+- 概览沿用 `RoutePlanService` 的课程统计，详情沿用 `RouteProgressService` 的 component-aware 覆盖口径；不可在视觉精修中悄悄统一它们。理论完成而必需实验未完成的场景已有回归。
+- Windows 实机视觉验收尚未完成。WSL2 离屏渲染不能代替 Windows 验收，详细场景见 `docs/ui/ROUTES_DESIGN.md` 与 `docs/ui/FINAL_UI_ACCEPTANCE.md`。
+
 
 ### Personalization 进度（2026-10-03）
 
@@ -297,7 +335,7 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 - 这说明当前检出版本尚未对应到用户确认的 E-C 实现，不推翻用户完成记录。本次只记录差异；没有补写功能，也没有核实 E-C 对应提交、测试或实机验收。涉及 E-C 的后续任务先核对实际实现版本，不凭旧方案猜测或重做。
 - `docs/PERSONALIZATION.md` 的 P-1B 至 E-B 章节是这份检出代码的实现与历史验证说明，不能单凭章节标题或旧的“future E-C”措辞推断项目仍停在 E-B。
 
-此前讨论过的后续 UI 优先级是：学习路线 → 实践项目 → 设置/对话框收尾。它们只是建议顺序，不是自动施工授权。用户若选择其一，先看对应设计与源代码，再按实际截图澄清范围。
+学习路线本轮已实施，尚待 Windows 实机验收。后续建议是实践项目 → 设置/对话框收尾；这些仍不是自动施工授权，用户选定后先明确范围。
 
 不要为「彻底去 AI 味」改模型输出原文、删状态/权限说明，或重写业务。视觉问题首先用完整用户场景复现，验收需断言目标控件真实存在，不只看测试总数。
 
@@ -316,4 +354,4 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ---
 
-交接摘要：**保留已验收的暖中性桌面 UI；最新混合 Markdown 回复的结构分块与文档面板已修复并经用户实机确认。下一位 Codex 可以直接从新的用户任务继续，不需要重新设计或重做这些完成项。**
+交接摘要：**保留已验收的暖中性桌面 UI 与 Markdown 文档面板；学习路线概览及详情精修已实施，尚待 Windows 实机验收。下一位 Codex 从新的用户任务继续，不重做已完成项。**

@@ -1,13 +1,6 @@
-"""学习路线页面（Phase C）。
+"""学习路线页面与详情的交互编排。
 
-展示路线树（父 group / 子 learning），支持：
-- 手动创建路线 / 分组；
-- 调整名称 / 目标 / 优先级；
-- 暂停 / 恢复自动规划；
-- 归档 / 恢复（分组有未归档子路线时拒绝归档）；
-- 查看路线详情：手动创建 plan / phase / topic，安全删除 topic。
-
-不含多路线 Scheduler / AI 生成路线（Phase D～F）。
+概览与详情视图独立组织；写操作沿用现有服务、确认与历史保护。
 """
 
 from __future__ import annotations
@@ -15,7 +8,6 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -32,7 +24,6 @@ from ..utils.date_utils import today as _default_today
 from .dialogs import show_warning
 from .components.button import SAButton
 from .components.empty_state import SAEmptyState
-from .components.card import SACard
 from .components.progress_bar import SAProgressBar
 from .components.status_badge import SAStatusBadge
 from .components.section_header import SASectionHeader
@@ -48,14 +39,17 @@ from .route_dialogs import (
     AddTopicDialog,
     CreateLearningRouteDialog,
     EditLearningRouteDialog,
-    priority_stars,
     priority_text,
 )
-from .styles import apply_secondary_button_text
 from .route_overview_widgets import (
     RouteActionsButton, RouteGroupHeading, RouteOverview, RouteOverviewRow,
 )
 from .route_scroll import RouteScrollKeeper
+from .route_detail_sections import (
+    RouteDetailSection, RouteDetailSummary, RoutePhaseSection, RouteTopicRow,
+)
+from .components.flow_layout import FlowWidget
+from .design import spacing
 
 
 def _secondary(text: str, on_click) -> QPushButton:
@@ -65,20 +59,8 @@ def _secondary(text: str, on_click) -> QPushButton:
     return btn
 
 
-def _primary(text: str, on_click) -> QPushButton:
-    btn = SAButton(text, variant="primary", size="small")
-    btn.clicked.connect(on_click)
-    return btn
-
-
-def _subtle(text: str, on_click) -> QPushButton:
-    btn = SAButton(text, variant="subtle", size="small")
-    btn.clicked.connect(on_click)
-    return btn
-
-
 class RouteDetailDialog(QDialog):
-    """路线详情：信息 + 手动学习结构（Plan/Phase/Topic）。"""
+    """路线详情：课程、证据与管理操作的弹窗编排。"""
 
     def __init__(self, route, route_service, route_plan_service, parent=None,
                  progress_service=None, today_provider=None,
@@ -105,13 +87,21 @@ class RouteDetailDialog(QDialog):
         self._closing = False
         self.setWindowTitle(f"路线：{route.name}")
         self.setModal(True)
-        self.resize(640, 620)
+        self.resize(880, 720)
+        if self.screen() is not None:
+            available = self.screen().availableGeometry()
+            self.resize(min(880, int(available.width() * 0.9)),
+                        min(720, int(available.height() * 0.9)))
+        self._expanded_states: dict[str, bool] = {}
+        self._default_phase_id = None
 
         root = QVBoxLayout(self)
-        root.setSpacing(8)
+        root.setContentsMargins(spacing.LG, spacing.LG, spacing.LG, spacing.LG)
+        root.setSpacing(spacing.SM)
 
         self.title_label = QLabel(route.name)
         self.title_label.setObjectName("AppTitle")
+        self.title_label.setWordWrap(True)
         root.addWidget(self.title_label)
 
         self.info_label = QLabel("")
@@ -127,9 +117,10 @@ class RouteDetailDialog(QDialog):
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self.body = QWidget()
         self.body_layout = QVBoxLayout(self.body)
-        self.body_layout.setContentsMargins(0, 0, 6, 0)
-        self.body_layout.setSpacing(6)
+        self.body_layout.setContentsMargins(0, 0, spacing.SM, 0)
+        self.body_layout.setSpacing(spacing.SM)
         self.scroll.setWidget(self.body)
+        self._scroll_keeper = RouteScrollKeeper(self.scroll)
         root.addWidget(self.scroll, stretch=1)
 
         btns = QHBoxLayout()
@@ -142,101 +133,172 @@ class RouteDetailDialog(QDialog):
     # ---------- 渲染 ----------
 
     def refresh(self) -> None:
+        scroll_value = self._scroll_keeper.capture()
         route = self.route_service.get(self.route.id) or self.route
         self.route = route
         self.title_label.setText(route.name)
-
-        # compatibility：旧 info_label 保留为 alias，但不作为 production 视觉。
-        planning = "已启用" if route.planning_enabled else "暂停"
-        status = "已归档" if route.is_archived else "进行中"
+        self.setWindowTitle(f"路线：{route.name}")
         self.info_label.setText(
-            f"目标：{route.goal or '—'}\n"
-            f"描述：{route.description or '—'}\n"
+            f"目标：{route.goal or '—'}\n描述：{route.description or '—'}\n"
             f"优先级：{priority_text(route.priority)}\n"
-            f"自动规划：{planning}　状态：{status}"
+            f"自动规划：{'已启用' if route.planning_enabled else '暂停'}　"
+            f"状态：{'已归档' if route.is_archived else '进行中'}"
         )
-        self.info_label.setVisible(False)
-
-        self._rebuild_actions(route)
+        self.info_label.hide()  # historical alias, not a second visible overview
         self._clear_body()
-
-        structure = self.route_plan_service.get_structure(route.id)
-        if structure is None:
-            hint = QLabel("该路线还没有学习计划")
-            hint.setObjectName("EmptyHint")
-            self.body_layout.addWidget(hint)
-            if not route.is_archived:
-                empty_row = QHBoxLayout()
-                empty_row.addWidget(
-                    _secondary("创建手动学习计划", self._on_create_plan)
-                )
-                empty_row.addWidget(
-                    _secondary("AI 生成学习计划", self._on_ai_generate)
-                )
-                empty_row.addStretch()
-                self.body_layout.addLayout(empty_row)
-            self.body_layout.addStretch()
-            return
-
-        progress = self.route_plan_service.route_progress(route.id)
+        try:
+            structure = self.route_plan_service.get_structure(route.id)
+            structure_available = True
+        except Exception:
+            structure, structure_available = None, False
+        self._rebuild_actions(route, structure is not None)
         rp = self._progress_for(route.id)
-
-        self._build_overview_card(route, structure)
-        self._build_learning_progress_card(rp, progress)
-        self._build_mastery_card(rp)
-        self._build_capability_card(rp)
-
-        done_ids = self._complete_topic_ids()
-        if not structure.phases:
-            self.body_layout.addWidget(
-                _secondary("＋ 添加阶段", self._on_add_phase)
+        progress = None
+        if structure is not None:
+            try:
+                progress = self.route_plan_service.route_progress(route.id)
+            except Exception:
+                pass
+        self._build_summary(route, structure, rp, progress, structure_available)
+        self._build_route_information(route)
+        if not structure_available:
+            self.body_layout.addWidget(SAEmptyState(
+                "课程数据暂不可用", "请稍后重新打开路线详情。"
+            ))
+        elif structure is None:
+            empty = SAEmptyState("该路线还没有学习计划", "先建立课程阶段与知识点。")
+            if not route.is_archived:
+                actions = FlowWidget()
+                actions.add_widget(_secondary("创建手动学习计划", self._on_create_plan))
+                actions.add_widget(_secondary("AI 生成学习计划", self._on_ai_generate))
+                empty.set_action(actions)
+            self.body_layout.addWidget(empty)
+        else:
+            self._build_course_header(rp)
+            done_ids = self._complete_topic_ids()
+            self._default_phase_id = next(
+                (p.id for p in structure.phases if any(t.id not in done_ids for t in p.topics)),
+                None,
             )
-        for phase in structure.phases:
-            self.body_layout.addWidget(self._phase_card(phase, done_ids))
+            if not structure.phases:
+                self.body_layout.addWidget(SAEmptyState(
+                    "还没有课程阶段", "使用上方“添加阶段”完善学习计划。"
+                ))
+            for phase in structure.phases:
+                self.body_layout.addWidget(self._phase_card(phase, done_ids))
+
+        evidence = self._section("evidence", "掌握与能力", (
+            f"{rp.assessment_evidence_count} 个已验收 · {rp.capability_evidence_count} 个有能力证据"
+            if rp is not None else "数据暂不可用" if self.progress_service else "暂无验收数据"
+        ))
+        self._build_mastery_card(rp, evidence.body_layout)
+        self._build_capability_card(rp, evidence.body_layout)
         self._add_skills_section()
         self._add_curriculum_gap_section()
         self._add_linked_projects_section()
         self._add_practice_blockers_section()
         self.body_layout.addStretch()
+        self.body_layout.activate()
+        self._scroll_keeper.restore(scroll_value)
 
-    # ---------- 构建辅助 ----------
-
-    def _rebuild_actions(self, route) -> None:
-        while self.action_row.count():
-            item = self.action_row.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+    def _rebuild_actions(self, route, has_plan=True) -> None:
+        self._clear_layout(self.action_row)
+        actions = []
         if not route.is_archived:
-            self.action_row.addWidget(
-                _primary("AI 生成学习计划", self._on_ai_generate)
-            )
-            self.action_row.addWidget(
-                _secondary("＋ 添加阶段", self._on_add_phase)
-            )
-            if route.planning_enabled:
-                self.action_row.addWidget(
-                    _secondary("暂停自动规划", self._on_pause)
-                )
-            else:
-                self.action_row.addWidget(
-                    _secondary("恢复自动规划", self._on_resume)
-                )
-            self.action_row.addWidget(_subtle("归档路线", self._on_archive))
+            if has_plan:
+                self.action_row.addWidget(_secondary("添加阶段", self._on_add_phase))
+                actions.append(("ai", "AI 生成学习计划"))
+            actions.extend([
+                ("pause" if route.planning_enabled else "resume",
+                 "暂停自动规划" if route.planning_enabled else "恢复自动规划"),
+                ("archive", "归档路线"),
+            ])
         else:
-            self.action_row.addWidget(
-                _secondary("恢复路线", self._on_restore)
-            )
+            actions.append(("restore", "恢复路线"))
+        more = RouteActionsButton(actions)
+        handlers = {"ai": self._on_ai_generate, "pause": self._on_pause,
+                    "resume": self._on_resume, "archive": self._on_archive,
+                    "restore": self._on_restore}
+        more.requested.connect(lambda key: handlers[key]())
+        self.action_row.addWidget(more)
         self.action_row.addStretch()
 
+    @staticmethod
+    def _clear_layout(layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+            elif item.layout() is not None:
+                RouteDetailDialog._clear_layout(item.layout())
+
     def _clear_body(self) -> None:
-        while self.body_layout.count():
-            item = self.body_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+        self._clear_layout(self.body_layout)
+
+    def _remember_expanded(self, key: str, expanded: bool) -> None:
+        self._expanded_states[key] = expanded
+        self._scroll_keeper.cancel()
+
+    def _section(self, key: str, title: str, summary="", *, expanded=False):
+        section = RouteDetailSection(
+            key, title, summary, expanded=self._expanded_states.get(key, expanded)
+        )
+        section.expanded_changed.connect(self._remember_expanded)
+        self.body_layout.addWidget(section)
+        return section
+
+    def _build_summary(self, route, structure, rp, progress, available):
+        phase, topic, next_activity = "尚未创建学习计划", "暂无知识点", "创建学习计划"
+        if not available:
+            phase = topic = next_activity = "数据暂不可用"
+        elif structure is not None:
+            done_ids = self._complete_topic_ids()
+            topics = [(p, t) for p in structure.phases for t in p.topics]
+            pending = [(p, t) for p, t in topics if t.id not in done_ids]
+            if pending:
+                current_phase, current_topic = pending[0]
+                phase, topic = current_phase.name, current_topic.name
+                if self.topic_learning_service:
+                    try:
+                        statuses = self.topic_learning_service.get_component_status(current_topic.id)
+                        next_activity = next((s['label'] for s in statuses
+                                              if s['required'] and not s['complete']), "查看课程学习安排")
+                    except Exception:
+                        next_activity = "学习活动暂不可用"
+                else:
+                    next_activity = "查看课程学习安排"
+            elif topics:
+                phase, topic, next_activity = "课程学习已完成", "课程知识点已完成", "查看掌握情况与能力证据"
+            else:
+                phase, topic, next_activity = "尚未添加知识点", "暂无知识点", "完善课程阶段与知识点"
+        course_label, course_percent = "课程进度：尚未创建学习计划", None
+        if structure is not None and rp is not None:
+            # Detail coverage has always used the component-aware progress service.
+            total, done = rp.topic_total, rp.topic_covered
+            course_label = f"课程覆盖 {done}/{total}"
+            course_percent = int(round(done * 100 / total)) if total else 0
+        elif progress is not None:
+            total, done = int(progress.get('total') or 0), int(progress.get('done') or 0)
+            course_label = f"课程覆盖 {done}/{total}"
+            course_percent = int(round(done * 100 / total)) if total else 0
+        elif not available or structure is not None:
+            course_label = "课程进度：数据暂不可用"
+        unavailable = rp is None and self.progress_service is not None
+        mastery = "数据暂不可用" if unavailable else "暂无验收数据"
+        capability = "数据暂不可用" if unavailable else "暂无能力证据"
+        if rp is not None:
+            if rp.has_assessment:
+                mastery = f"{rp.mastery_percent}%"
+            if rp.capability_evidence_count:
+                capability = f"{rp.capability_evidence_count} 个知识点"
+        status = "archived" if route.is_archived else "active" if route.planning_enabled else "paused"
+        self.body_layout.addWidget(RouteDetailSummary(
+            goal=route.goal or '', phase=phase, topic=topic, next_activity=next_activity,
+            status=status, course_label=course_label, course_percent=course_percent,
+            mastery=mastery, capability=capability,
+        ))
 
     def _progress_for(self, route_id):
         if self.progress_service is None:
@@ -248,10 +310,13 @@ class RouteDetailDialog(QDialog):
         except Exception:  # noqa: BLE001
             return None
 
-    def _card(self, title: str):
-        card = SACard()
-        card.add_widget(SASectionHeader(title))
-        return card, card.body_layout
+    def _detail_block(self, title: str):
+        block = QWidget()
+        layout = QVBoxLayout(block)
+        layout.setContentsMargins(0, 0, 0, spacing.SM)
+        layout.setSpacing(spacing.SM)
+        layout.addWidget(SASectionHeader(title))
+        return block, layout
 
     @staticmethod
     def _value_pair(lay, label: str, value: str) -> None:
@@ -262,108 +327,42 @@ class RouteDetailDialog(QDialog):
         val = QLabel(value if value else "—")
         val.setObjectName("SAValueStrong")
         val.setWordWrap(True)
+        val.setTextFormat(Qt.TextFormat.PlainText)
         row.addWidget(key)
         row.addWidget(val, stretch=1)
         lay.addLayout(row)
 
-    def _detail_current_phase(self, structure) -> str:
-        if structure is None or not structure.phases:
-            return "尚未创建学习计划"
-        done_ids = self._complete_topic_ids()
-        for phase in structure.phases:
-            if any(t.id not in done_ids for t in phase.topics):
-                return phase.name
-        return structure.phases[-1].name
-
-    def _detail_current_topic(self, structure):
-        if structure is None or not structure.phases:
-            return None
-        done_ids = self._complete_topic_ids()
-        for phase in structure.phases:
-            for topic in phase.topics:
-                if topic.id not in done_ids:
-                    return topic.name
-        last = structure.phases[-1]
-        return last.topics[-1].name if last.topics else None
-
     # ---------- Overview ----------
 
-    def _build_overview_card(self, route, structure) -> None:
-        card, lay = self._card("概览")
-        head = QHBoxLayout()
-        if route.is_archived:
-            head.addWidget(SAStatusBadge("archived"))
-        elif not route.planning_enabled:
-            head.addWidget(SAStatusBadge("paused"))
-        else:
-            head.addWidget(SAStatusBadge("active"))
-        head.addStretch()
-        lay.addLayout(head)
+    def _build_route_information(self, route) -> None:
+        section = self._section("info", "路线信息")
+        lay = section.body_layout
         self._value_pair(lay, "目标", route.goal or "—")
         self._value_pair(lay, "描述", route.description or "—")
         self._value_pair(lay, "优先级", priority_text(route.priority))
-        self._value_pair(
-            lay, "自动规划", "已启用" if route.planning_enabled else "暂停"
-        )
-        self._value_pair(
-            lay, "状态", "已归档" if route.is_archived else "进行中"
-        )
-        self._value_pair(lay, "当前阶段", self._detail_current_phase(structure))
-        self._value_pair(
-            lay, "当前 Topic", self._detail_current_topic(structure) or "—"
-        )
-        self.body_layout.addWidget(card)
+        self._value_pair(lay, "自动规划", "已启用" if route.planning_enabled else "暂停")
+        self._value_pair(lay, "状态", "已归档" if route.is_archived else "进行中")
 
-    # ---------- Learning Progress ----------
-
-    def _build_learning_progress_card(self, rp, progress) -> None:
-        card, lay = self._card("学习进度")
-        if rp is not None:
-            covered, total = rp.topic_covered, rp.topic_total
-        else:
-            covered = int(progress.get("done") or 0)
-            total = int(progress.get("total") or 0)
-        pct = int(round(covered * 100 / total)) if total else 0
-        lay.addWidget(
-            SAProgressBar(value=pct, label=f"课程覆盖 {covered} / {total}")
-        )
-        if rp is not None and (
-            rp.activity_required_total or rp.activity_optional_total
-        ):
-            req_pct = (
-                int(round(rp.activity_required_done * 100 /
-                          rp.activity_required_total))
-                if rp.activity_required_total else 0
-            )
-            lay.addWidget(SAProgressBar(
-                value=req_pct,
-                label=(f"学习活动 必需：{rp.activity_required_done} / "
-                       f"{rp.activity_required_total}"),
-            ))
+    def _build_course_header(self, rp) -> None:
+        self.body_layout.addWidget(SASectionHeader("课程结构"))
+        if rp is not None and (rp.activity_required_total or rp.activity_optional_total):
+            text = f"必需学习活动 {rp.activity_required_done}/{rp.activity_required_total}"
             if rp.activity_optional_total:
-                opt_pct = int(round(
-                    rp.activity_optional_done * 100 / rp.activity_optional_total
-                ))
-                lay.addWidget(SAProgressBar(
-                    value=opt_pct,
-                    label=(f"学习活动 可选：{rp.activity_optional_done} / "
-                           f"{rp.activity_optional_total}"),
-                ))
-        else:
-            empty = QLabel("暂无学习活动数据")
-            empty.setObjectName("TaskMeta")
-            lay.addWidget(empty)
-        self.body_layout.addWidget(card)
+                text += f"　可选学习活动 {rp.activity_optional_done}/{rp.activity_optional_total}"
+            self.body_layout.addWidget(self._meta_label(text))
+        elif rp is None and self.progress_service is not None:
+            self.body_layout.addWidget(self._meta_label("学习活动数据暂不可用"))
 
     # ---------- Mastery ----------
 
-    def _build_mastery_card(self, rp) -> None:
-        card, lay = self._card("掌握情况")
+    def _build_mastery_card(self, rp, target_layout=None) -> None:
+        target = self.body_layout if target_layout is None else target_layout
+        card, lay = self._detail_block("掌握情况")
         if rp is None:
-            empty = QLabel("暂无掌握数据")
+            empty = QLabel("掌握数据暂不可用" if self.progress_service else "暂无掌握数据")
             empty.setObjectName("TaskMeta")
             lay.addWidget(empty)
-            self.body_layout.addWidget(card)
+            target.addWidget(card)
             return
         if rp.has_assessment:
             lay.addWidget(SAProgressBar(
@@ -384,14 +383,15 @@ class RouteDetailDialog(QDialog):
             ("最近验收", last_assessed or "—"),
         ):
             self._value_pair(lay, label, value)
-        self.body_layout.addWidget(card)
+        target.addWidget(card)
 
     # ---------- Capability ----------
 
-    def _build_capability_card(self, rp) -> None:
-        card, lay = self._card("能力证据 Capability")
+    def _build_capability_card(self, rp, target_layout=None) -> None:
+        target = self.body_layout if target_layout is None else target_layout
+        card, lay = self._detail_block("能力证据 Capability")
         if rp is None or rp.capability_evidence_count <= 0:
-            empty = QLabel("暂无能力证据")
+            empty = QLabel("能力证据数据暂不可用" if rp is None and self.progress_service else "暂无能力证据")
             empty.setObjectName("TaskMeta")
             lay.addWidget(empty)
         else:
@@ -413,7 +413,7 @@ class RouteDetailDialog(QDialog):
             lay.addWidget(SASectionHeader("知识状态"))
             for ks in rp.knowledge:
                 self._add_knowledge_row(lay, ks)
-        self.body_layout.addWidget(card)
+        target.addWidget(card)
 
     def _add_knowledge_row(self, lay, ks) -> None:
         row = QHBoxLayout()
@@ -423,6 +423,7 @@ class RouteDetailDialog(QDialog):
         title = QLabel(f"{ks.name}　{ks.status}")
         title.setObjectName("TaskTitle")
         title.setWordWrap(True)
+        title.setTextFormat(Qt.TextFormat.PlainText)
         info.addWidget(title)
 
         mastery_txt = (
@@ -458,6 +459,7 @@ class RouteDetailDialog(QDialog):
         lbl = QLabel(text)
         lbl.setObjectName("TaskMeta")
         lbl.setWordWrap(True)
+        lbl.setTextFormat(Qt.TextFormat.PlainText)
         return lbl
 
     def _section_label(self, text: str) -> QLabel:
@@ -466,52 +468,40 @@ class RouteDetailDialog(QDialog):
         return lbl
 
     def _add_linked_projects_section(self) -> None:
-        """Phase 4：轻量展示关联实践项目（不把完整项目管理塞进 RouteDetail）。"""
         if self.practice_service is None:
             return
         try:
             projects = self.practice_service.list_by_route(self.route.id)
-        except Exception:  # noqa: BLE001
+        except Exception:
+            section = self._section("projects", "关联实践项目", "暂不可用")
+            section.body_layout.addWidget(self._meta_label("项目数据暂不可用"))
             return
-        self.body_layout.addWidget(self._section_label("关联实践项目"))
+        section = self._section("projects", "关联实践项目", f"{len(projects)} 个")
+        for project in projects:
+            section.body_layout.addWidget(self._meta_label(project['name']))
         if not projects:
-            empty = QLabel("关联实践项目：0")
-            empty.setObjectName("TaskMeta")
-            self.body_layout.addWidget(empty)
-            return
-        for p in projects:
-            lbl = QLabel(f"关联实践项目：{p['name']}")
-            lbl.setObjectName("TaskMeta")
-            self.body_layout.addWidget(lbl)
+            section.body_layout.addWidget(self._meta_label("尚未关联实践项目"))
 
     def _add_practice_blockers_section(self) -> None:
-        """Phase 6：轻量展示该路线的项目学习阻塞（不展开完整 Project Dashboard）。"""
         if self.practice_readiness_service is None:
             return
         try:
             blockers = self.practice_readiness_service.list_route_blockers(
                 self.route.id, self.today_provider()
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
+            section = self._section("blockers", "项目学习需求", "暂不可用")
+            section.body_layout.addWidget(self._meta_label("学习需求数据暂不可用"))
             return
-        self.body_layout.addWidget(self._section_label("项目学习阻塞"))
-        if not blockers:
-            empty = QLabel("项目学习阻塞：0")
-            empty.setObjectName("TaskMeta")
-            self.body_layout.addWidget(empty)
-            return
-        hdr = QLabel(f"项目学习阻塞：{len(blockers)}")
-        hdr.setObjectName("TaskMeta")
-        self.body_layout.addWidget(hdr)
+        section = self._section("blockers", "项目学习需求", f"{len(blockers)} 项")
         for st in blockers:
             nxt = st.next_activity_label or st.reason_label
-            lbl = QLabel(
+            section.body_layout.addWidget(self._meta_label(
                 f"{st.topic_name}　{st.current_capability_label} → "
                 f"{st.target_capability_label}　下一步：{nxt}"
-            )
-            lbl.setObjectName("TaskMeta")
-            lbl.setWordWrap(True)
-            self.body_layout.addWidget(lbl)
+            ))
+        if not blockers:
+            section.body_layout.addWidget(self._meta_label("暂无项目学习需求"))
 
     # ---------- Phase 3：Capability ----------
 
@@ -554,59 +544,31 @@ class RouteDetailDialog(QDialog):
             self.refresh()
 
     def _phase_card(self, phase, done_ids) -> QWidget:
-        card = SACard()
-        lay = card.body_layout
-
-        head = QHBoxLayout()
-        name = QLabel(f"阶段 {phase.order_index or '—'}：{phase.name}")
-        name.setObjectName("TaskTitle")
-        head.addWidget(name)
-        head.addStretch()
-        if not self.route.is_archived:
-            head.addWidget(_secondary(
-                "＋ 添加知识点",
-                lambda _=False, p=phase: self._on_add_topic(p),
-            ))
-            head.addWidget(_secondary(
-                "删除阶段", lambda _=False, p=phase: self._on_delete_phase(p)
-            ))
-        lay.addLayout(head)
-
-        if phase.goals:
-            goal = QLabel(f"目标：{phase.goals}")
-            goal.setObjectName("TaskMeta")
-            goal.setWordWrap(True)
-            lay.addWidget(goal)
-
-        if not phase.topics:
-            empty = QLabel("暂无知识点")
-            empty.setObjectName("TaskMeta")
-            lay.addWidget(empty)
-        for topic in phase.topics:
-            row = QHBoxLayout()
-            text = f"{topic.name}（预计 {topic.estimated_minutes} 分钟）"
-            lbl = QLabel(text)
-            lbl.setWordWrap(True)
-            row.addWidget(lbl, stretch=1)
-            if topic.id in done_ids:
-                row.addWidget(SAStatusBadge("completed"))
-            # Phase 2：学习活动 chips
-            if self.topic_learning_service is not None:
-                chips = self._activity_chips(topic.id)
-                if chips:
-                    chip_lbl = QLabel(chips)
-                    chip_lbl.setObjectName("TaskMeta")
-                    row.addWidget(chip_lbl)
-                    row.addWidget(_secondary(
-                        "学习组成",
-                        lambda _=False, t=topic: self._on_edit_profile(t),
-                    ))
-            if not self.route.is_archived:
-                row.addWidget(_secondary(
-                    "删除", lambda _=False, t=topic: self._on_delete_topic(t)
-                ))
-            lay.addLayout(row)
-        return card
+        topics = [RouteTopicRow(
+            id=t.id, name=t.name, minutes=t.estimated_minutes,
+            complete=t.id in done_ids, activities=self._activity_chips(t.id)
+            if self.topic_learning_service is not None else "",
+            has_profile=self.topic_learning_service is not None,
+        ) for t in phase.topics]
+        key = f"phase:{phase.id}"
+        section = RoutePhaseSection(
+            phase.id, f"阶段 {phase.order_index or '—'}：{phase.name}", phase.goals or "",
+            topics, archived=self.route.is_archived,
+            expanded=self._expanded_states.get(key, phase.id == self._default_phase_id),
+        )
+        section.expanded_changed.connect(self._remember_expanded)
+        by_id = {t.id: t for t in phase.topics}
+        def requested(action, entity_id):
+            if action == "add_topic":
+                self._on_add_topic(phase)
+            elif action == "delete_phase":
+                self._on_delete_phase(phase)
+            elif action == "delete_topic":
+                self._on_delete_topic(by_id[entity_id])
+            elif action == "edit_profile":
+                self._on_edit_profile(by_id[entity_id])
+        section.requested.connect(requested)
+        return section
 
     def _complete_topic_ids(self) -> set:
         if self.topic_learning_service is not None and not self.route.is_archived:
@@ -622,7 +584,7 @@ class RouteDetailDialog(QDialog):
         try:
             statuses = self.topic_learning_service.get_component_status(topic_id)
         except Exception:  # noqa: BLE001
-            return ""
+            return "学习活动暂不可用"
         parts = []
         for s in statuses:
             if s["complete"]:
@@ -776,34 +738,27 @@ class RouteDetailDialog(QDialog):
     def _add_skills_section(self) -> None:
         if self.skill_service is None:
             return
-        self.body_layout.addWidget(self._section_label("关联技能"))
         route_repo = self.route_service.route_repo
         try:
             skill_ids = route_repo.list_skill_ids(self.route.id)
-        except Exception:  # noqa: BLE001
-            skill_ids = []
-        skills = []
-        for sid in skill_ids:
-            s = self.skill_service.skill_repo.get(sid)
-            if s is not None:
-                skills.append(s)
+            skills = [s for sid in skill_ids
+                      if (s := self.skill_service.skill_repo.get(sid)) is not None]
+        except Exception:
+            section = self._section("skills", "关联技能", "暂不可用")
+            section.body_layout.addWidget(self._meta_label("技能数据暂不可用"))
+            return
+        section = self._section("skills", "关联技能", f"{len(skills)} 个")
+        lay = section.body_layout
         if not skills:
-            empty = QLabel("尚未关联学习路线")
-            empty.setObjectName("TaskMeta")
-            self.body_layout.addWidget(empty)
-        for s in skills:
+            lay.addWidget(self._meta_label("尚未关联技能"))
+        for skill in skills:
             row = QHBoxLayout()
-            lbl = QLabel(f"{s['name']}（{s.get('tier', '')}级）")
-            row.addWidget(lbl, 1)
+            row.addWidget(self._meta_label(f"{skill['name']}（{skill.get('tier', '')}级）"), 1)
             if not self.route.is_archived:
-                row.addWidget(_secondary(
-                    "移除关联", lambda _=False, sk=s: self._on_remove_skill(sk)
-                ))
-            self.body_layout.addLayout(row)
+                row.addWidget(_secondary("移除关联", lambda _=False, sk=skill: self._on_remove_skill(sk)))
+            lay.addLayout(row)
         if not self.route.is_archived:
-            self.body_layout.addWidget(_secondary(
-                "＋ 关联已有技能", self._on_assign_skill
-            ))
+            lay.addWidget(_secondary("关联已有技能", self._on_assign_skill))
 
     def _on_assign_skill(self) -> None:
         route_repo = self.route_service.route_repo
@@ -845,31 +800,24 @@ class RouteDetailDialog(QDialog):
         if self.skill_service is None:
             return
         try:
-            gaps = self.skill_service.curriculum_gap_skills(
-                route_id=self.route.id
-            )
-        except Exception:  # noqa: BLE001
-            gaps = []
-        self.body_layout.addWidget(self._section_label("课程缺口"))
-        if not gaps:
-            empty = QLabel("暂无课程缺口")
-            empty.setObjectName("TaskMeta")
-            self.body_layout.addWidget(empty)
+            gaps = self.skill_service.curriculum_gap_skills(route_id=self.route.id)
+        except Exception:
+            section = self._section("gaps", "课程缺口", "暂不可用")
+            section.body_layout.addWidget(self._meta_label("课程缺口数据暂不可用"))
             return
-        for g in gaps:
+        section = self._section("gaps", "课程缺口", f"{len(gaps)} 项")
+        lay = section.body_layout
+        if not gaps:
+            lay.addWidget(self._meta_label("暂无课程缺口"))
+        for gap in gaps:
             row = QHBoxLayout()
-            freq = float(g.get("frequency_30d") or 0.0) * 100
-            lbl = QLabel(
-                f"{g['skill']}　近30天目标岗位需求：{freq:.1f}%　当前路线暂无 Topic"
-            )
-            lbl.setWordWrap(True)
-            row.addWidget(lbl, 1)
+            freq = float(gap.get('frequency_30d') or 0.0) * 100
+            row.addWidget(self._meta_label(
+                f"{gap['skill']}　近30天目标岗位需求：{freq:.1f}%　当前路线暂无 Topic"
+            ), 1)
             if not self.route.is_archived:
-                row.addWidget(_secondary(
-                    "添加知识点",
-                    lambda _=False, name=g["skill"]: self._on_gap_add_topic(name),
-                ))
-            self.body_layout.addLayout(row)
+                row.addWidget(_secondary("添加知识点", lambda _=False, name=gap['skill']: self._on_gap_add_topic(name)))
+            lay.addLayout(row)
 
     def _on_gap_add_topic(self, skill_name: str) -> None:
         structure = self.route_plan_service.get_structure(self.route.id)
@@ -976,6 +924,7 @@ class RouteDetailDialog(QDialog):
     def drain_worker(self) -> None:
         """Wait for the dialog-owned AI call; interruption does not cancel HTTP."""
         self._closing = True
+        self._scroll_keeper.cancel()
         worker = self._ai_worker
         if worker is None:
             return
@@ -1249,18 +1198,6 @@ class LearningRoutesPage(QWidget):
         except Exception:  # noqa: BLE001
             return None
 
-    def _current_topic(self, route_id):
-        structure = self._structure(route_id)
-        if structure is None or not structure.phases:
-            return None
-        done_ids = self._complete_topic_ids()
-        for phase in structure.phases:
-            for topic in phase.topics:
-                if topic.id not in done_ids:
-                    return topic
-        last = structure.phases[-1]
-        return last.topics[-1] if last.topics else None
-
     def _next_activity_label(self, topic_id) -> str:
         if self.topic_learning_service is None or topic_id is None:
             return ""
@@ -1287,26 +1224,6 @@ class LearningRoutesPage(QWidget):
             for level in sorted(counts)
             if int(counts.get(level, 0) or 0) > 0
         ]
-
-    @staticmethod
-    def _route_status_badge(route) -> SAStatusBadge:
-        if route.is_archived:
-            return SAStatusBadge("archived")
-        if not route.planning_enabled:
-            return SAStatusBadge("paused")
-        return SAStatusBadge("active")
-
-    def _current_phase_name(self, route_id: int) -> str:
-        if self.route_plan_service is None:
-            return "—"
-        structure = self.route_plan_service.get_structure(route_id)
-        if structure is None or not structure.phases:
-            return "尚未创建学习计划"
-        done_ids = self._complete_topic_ids()
-        for phase in structure.phases:
-            if any(t.id not in done_ids for t in phase.topics):
-                return phase.name
-        return structure.phases[-1].name
 
     def _complete_topic_ids(self) -> set:
         if self.topic_learning_service is not None:

@@ -251,7 +251,7 @@ def _dlg_texts(dlg):
 
 def test_detail_sections_present(qtbot, routes_env):
     texts = _dlg_texts(_detail(qtbot, routes_env))
-    for section in ("概览", "学习进度", "掌握情况",
+    for section in ("路线信息", "课程结构", "掌握与能力", "掌握情况",
                     "能力证据 Capability", "课程覆盖"):
         assert any(section in t for t in texts), section
     assert not any("下次复习" in t or "待复习" in t for t in texts)
@@ -266,18 +266,21 @@ def test_detail_no_legacy_bracket_prefixes(qtbot, routes_env):
 
 def test_detail_overview_card_fields(qtbot, routes_env):
     texts = _dlg_texts(_detail(qtbot, routes_env))
-    assert "当前阶段" in texts
-    assert "当前 Topic" in texts
+    assert any(t.startswith("当前阶段：") for t in texts)
+    assert any(t.startswith("当前知识点：") for t in texts)
     assert "目标" in texts
 
 
 def test_detail_action_hierarchy(qtbot, routes_env):
+    from app.ui.route_overview_widgets import RouteActionsButton
     from PySide6.QtWidgets import QPushButton
 
     dlg = _detail(qtbot, routes_env)
-    by_text = {b.text(): b for b in dlg.findChildren(QPushButton)}
-    assert by_text["AI 生成学习计划"].objectName() == "PrimaryButton"
-    assert by_text["归档路线"].objectName() == "SAButton"  # subtle
+    buttons = [dlg.action_row.itemAt(i).widget() for i in range(dlg.action_row.count())]
+    assert any(isinstance(b, QPushButton) and b.text() == "添加阶段" for b in buttons)
+    more = next(b for b in buttons if isinstance(b, RouteActionsButton))
+    assert {a.data() for a in more.menu().actions()} == {"ai", "pause", "archive"}
+    assert not any(isinstance(b, QPushButton) and b.text() == "AI 生成学习计划" for b in buttons)
 
 
 def test_detail_capability_no_route_level_label(qtbot, routes_env):

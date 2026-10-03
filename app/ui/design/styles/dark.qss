@@ -932,3 +932,9 @@ QLabel#RouteCurrentTopic {
     color: {{text_primary}};
     font-size: {{font_size_body}};
 }
+
+QFrame#RouteDetailSection, QFrame#RouteTopicRow {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {{border_subtle}};
+}

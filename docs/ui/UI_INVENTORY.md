@@ -49,19 +49,19 @@
 
 ---
 
-## 2. `app/ui/routes_page.py` — 1,152 LOC
+## 2. `app/ui/routes_page.py` — 路线视图已拆分（2026-10）
 
 | 项 | 内容 |
 |---|---|
 | 主要 class | `RouteDetailDialog(QDialog)`、`LearningRoutesPage(QWidget)` |
-| 职责 | 学习路线总览卡片 + 路线详情（Plan/Phase/Topic/Activity/Skill/Gap/Project/Blocker） |
+| 职责 | 学习路线概览与详情的交互编排，纯视图由独立模块负责 |
 | 依赖 service | `route_service`、`route_plan_service`、`progress_service`、`ai_route_service`、`skill_service`、`topic_learning_service`、`capability_service`、`outcome_service`、`practice_service`、`practice_capability_service`、`practice_readiness_service` |
-| 依赖 UI | `dialogs.show_warning`、`route_builder_dialogs`、`ai_worker.AIRouteBuilderWorker`、`route_dialogs`、`styles.apply_secondary_button_text` |
+| 依赖 UI | `dialogs.show_warning`、`route_builder_dialogs`、`ai_worker.AIRouteBuilderWorker`、`route_dialogs`、`route_overview_widgets`、`route_detail_sections`、`route_scroll` |
 | 依赖 database | `ROUTE_TYPE_GROUP`（仅常量）、`RouteValidationError`/`RouteStructureError`（异常类型） |
 | 局部 style/QSS | 无 `setStyleSheet`；仅 `objectName` |
-| 是否值得拆分 | **是**。总览与详情可拆为两个文件；详情内「知识掌握/能力」「技能」「课程缺口」「项目」四组区块可独立组件化。 |
+| 是否值得拆分 | 已拆出概览条目与详情课程分区纯视图；现有服务操作和 worker 生命周期继续由原页面编排，避免为搬文件重构业务。 |
 
-`RouteDetailDialog.refresh()` 一个方法内叠加了大量 section：路线进度、Mastery、学习活动、知识掌握/能力逐行、Phase 卡片、技能、课程缺口、关联项目、Practice blocker。
+2026-10 精修：概览采用轻量条目与管理菜单；详情将课程结构提前，阶段及证据/辅助分区可折叠。概览与详情的纯视图分别位于 `route_overview_widgets.py` / `route_detail_sections.py`，操作由 `routes_page.py` 编排，滚动恢复由 `route_scroll.py` 管理。
 
 ## 3. `app/ui/practice_page.py` — 723 LOC
 
