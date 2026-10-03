@@ -1,8 +1,9 @@
 # Study Agent — Codex 开发交接
 
 > 本文面向在 Codex 中继续开发本项目的 coding agent，不依赖 Pi 会话、技能、子代理或临时文件。
-> 交接基线：`master` 的功能提交 `6f6f656`（Fix mixed Markdown document panels with structural parsing）。本文自身会作为后续文档提交发布；接手时以实际 `git log` 为准。
+> 功能交接基线：`master` 的 `6f6f656`（Fix mixed Markdown document panels with structural parsing）；原交接文档提交为 `dec2935`。接手时以实际 `git log` 为准。
 > 用户最新确认：**最新 Markdown 文档面板修复已成功，Windows 实际验证没有问题。** 不要再把该修复标成未完成任务。
+> 2026-10-03 补充：用户确认 **Personalization-1E-C 已全部实现**；旧聊天中的 E-C 方案不能再作为待办。当前检出代码与该完成记录的核对结果见第 10 节。
 
 ## 1. 接手先做什么
 
@@ -19,10 +20,12 @@
 
 ### 文档新旧判断
 
+- 最新进度主要参考仓库 Markdown 文档，以本文作为交接入口；旧 ChatGPT/Pi 讨论只作背景，其中的实施命令、建议顺序和测试策略不自动成为新任务授权。
 - 本文的近期 UI 决策和用户验收记录补充已有文档，不代替业务的 canonical baseline。
 - `UI_BLUEPRINT.md`、`STYLE_AUDIT.md` 等包含历史设计；`AGENT_PRODUCTION.md` 的旧消息宽度/气泡说明也可能落后于近期 UI 实现。
 - 遇到冲突，核对当前源代码、最新相关设计文档及明确用户决定；不要根据旧文档恢复被取消的粗卡片、蓝色主导风格或旧消息尺寸。
 - 文件行数、测试总数、依赖的实测版本是快照，不是永久常量。
+- 阶段完成记录与当前代码核验要分别注明来源。发现文档、用户确认与检出版本不一致时记录差异，不根据旧聊天重做已完成阶段，也不把未核实的接口或测试结果写成已验证事实。
 
 ## 2. 项目是什么
 
@@ -284,7 +287,15 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ## 10. 后续工作状态
 
-**当前没有已经批准、尚待执行的新任务。** 最新面板问题已解决，用户现在只要求交接。
+**本次授权范围是同步交接与个性化相关文档，没有新的功能开发任务。** 最新面板问题已解决；后续需求由用户另行指定。
+
+### Personalization 进度（2026-10-03）
+
+- P-1B / P-1C / P-1D、P-1E-A（含 A.1 / A.2）、P-1E-B 的持久化、设置管理、上下文注入、安全提取及后台临时候选链路已在当前检出版本中定位。
+- **用户明确确认 P-1E-C 已全部实现**。不要把旧聊天中的“下一步 E-C”当成待开发任务；E-D 也只是历史建议，当前没有实施授权或完成记录。
+- 当前本地检出版本的核验存在差异：`MainWindow` 仅创建 extraction coordinator；候选保存在 coordinator 的进程内 batches，未找到会话内候选确认 UI。`PersonalizationService.add_session_memory()` 仍直接调用自行 commit 的 `create_memory()`，未找到 E-C 的 consent/revision 保存校验与原子 normalized dedupe/save 入口。
+- 这说明当前检出版本尚未对应到用户确认的 E-C 实现，不推翻用户完成记录。本次只记录差异；没有补写功能，也没有核实 E-C 对应提交、测试或实机验收。涉及 E-C 的后续任务先核对实际实现版本，不凭旧方案猜测或重做。
+- `docs/PERSONALIZATION.md` 的 P-1B 至 E-B 章节是这份检出代码的实现与历史验证说明，不能单凭章节标题或旧的“future E-C”措辞推断项目仍停在 E-B。
 
 此前讨论过的后续 UI 优先级是：学习路线 → 实践项目 → 设置/对话框收尾。它们只是建议顺序，不是自动施工授权。用户若选择其一，先看对应设计与源代码，再按实际截图澄清范围。
 

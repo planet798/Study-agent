@@ -2,6 +2,11 @@
 
 > Canonical product boundary. Product simplification is complete; do not continue product removal. Agent implementation status is recorded below; future capabilities are explicitly marked not implemented.
 
+> Progress reference (2026-10-03): start with [`CODEX_HANDOFF.md`](../CODEX_HANDOFF.md).
+> The user confirms P-1E-C is complete; the corresponding confirmation/save implementation
+> has not been located in this checkout. See [`PERSONALIZATION.md`](PERSONALIZATION.md)
+> for the recorded version mismatch. E-B scope statements below are not an E-C backlog.
+
 ## Position and surfaces
 
 Study-Agent is an agentic learning environment, not a generic Todo manager, review scheduler, career dashboard or generic chatbot. The static Sidebar navigation has **Today**, **Learning Routes**, **Practice**, and **Settings** (footer), plus a dynamic **学习会话 / Learning Sessions** section. Session entries open the internal Agent Workspace; they are not a generic static Agent `PageKey` page.
@@ -11,7 +16,7 @@ Study-Agent is an agentic learning environment, not a generic Todo manager, revi
 - **Today**: execution-focused learning surface: date, pending count, estimated minutes, route filter, current phase, Planner status/explanation, 今日学习 tasks and manual learning entry. It does not display JD/Skill dashboard data.
 - **Assessment / Mastery**: completed task ≠ mastered. Formal Mastery updates happen only through Assessment; weak points and latest assessment remain evidence for learning decisions.
 - **Capability**: Task / Assessment / Experiment / Project evidence contributes according to existing rules. Capability and Mastery remain separate; L5 PROJECT requires confirmed qualifying project-use evidence.
-- **Practice**: separate projects, milestones, outputs, requirements/readiness and evidence. Settings defaults to Personalization (Agent Instructions and manual local memory management), followed by Model/API and Advanced. AI Profiles, internal Prompt overrides (under Advanced) and the theme system remain active; P-1D injects persisted Personal Instructions and enabled Personal Memories into Agent turns through worker-owned dependencies, with current explicit requests taking precedence. P-1E-B adds consent-gated background extraction of transient candidates from new successful turns, using separate worker-owned read-only connections. No automatic saving, confirmation UI or history backfill exists. TaskReviewService (AI review of the user's *unfinished-task reason*) remains active; it is not the retired Review Scheduler. Obsidian notes remain available.
+- **Practice**: separate projects, milestones, outputs, requirements/readiness and evidence. Settings defaults to Personalization (Agent Instructions and manual local memory management), followed by Model/API and Advanced. AI Profiles, internal Prompt overrides (under Advanced) and the theme system remain active; P-1D injects persisted Personal Instructions and enabled Personal Memories into Agent turns through worker-owned dependencies, with current explicit requests taking precedence. P-1E-B adds consent-gated background extraction of transient candidates from new successful turns, using separate worker-owned read-only connections. The extraction layer performs no silent saving or history backfill; candidates require user confirmation before persistence. TaskReviewService (AI review of the user's *unfinished-task reason*) remains active; it is not the retired Review Scheduler. Obsidian notes remain available.
 
 ## Manual learning
 

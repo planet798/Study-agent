@@ -1,12 +1,35 @@
-# Personalization — P-1B / P-1C / P-1D / P-1E-A / P-1E-B
+# Personalization — 交接状态与实现说明
 
 Current versions: **schema 27 / fingerprint 7 / evaluator 2**.
+
+## 当前交接状态（2026-10-03）
+
+最新进度以仓库 Markdown 文档为主要参考，交接入口为
+[`CODEX_HANDOFF.md`](../CODEX_HANDOFF.md)。旧聊天中的阶段计划只作背景，不是待办或实施授权。
+
+| 范围 | 状态与依据 |
+|---|---|
+| P-1B / P-1C / P-1D | 当前检出代码包含持久化、设置及手动记忆管理、Agent 上下文注入 |
+| P-1E-A / A.1 / A.2 / B | 当前检出代码包含安全候选提取、主题词过滤修正、授权与后台临时候选链路 |
+| P-1E-C | 用户明确确认已全部实现，不再列为待开发阶段；当前检出版本尚未定位到对应确认 UI 与原子保存链路 |
+| P-1E-D | 旧讨论中的集成收口建议，没有本次实施授权或新的完成记录 |
+
+当前检出代码只将候选保存在 extraction coordinator 的内存 batches 中；
+`add_session_memory()` 仍直接调用自行 commit 的 `create_memory()`。
+本次未找到候选确认 UI、保存前 consent/revision 校验或数据库精确去重的原子保存入口。
+这是检出版本与用户完成记录的差异，不是重新实施 E-C 的依据。
+涉及 E-C 时先核对实际实现版本；本文没有声称已验证其提交、测试数量或实机表现。
+
+下文保留 P-1B 至 E-B 在当前检出代码中的职责及历史验证记录。
+“该阶段没有 UI/写入”等说明限定于所述阶段或本地代码快照，不代表 E-C 未完成。
+
+## 当前检出代码概览
 
 P-1B established persistence; P-1C added Settings UI and manual memory management.
 P-1D adds **Agent personalization context injection** through worker-owned dependencies.
 P-1E-B adds consent-gated background extraction of **transient candidates only**
-from new successful turns. There is still **no automatic memory saving or candidate
-confirmation UI**. Structured workflows, Skill selection, Session compaction,
+from new successful turns. The E-B extraction layer does not save memories or render
+candidate confirmation UI. Structured workflows, Skill selection, Session compaction,
 PromptRegistry and Prompt Manager semantics are unchanged.
 
 ## Separate concepts
@@ -20,8 +43,8 @@ PromptRegistry and Prompt Manager semantics are unchanged.
 - **Personal Memory:** distilled cross-session user preferences stored locally in
   SQLite application data. Editable, disable-able and physically deletable. Content
   is non-empty stripped plain text, at most 1000 characters, with the same character
-  safety rules. Saved memories remain manually/user-controlled; E-B candidates are
-  separate in-memory suggestions, never copied or automatically saved here. This is not
+  safety rules. Saved memories remain user-controlled; E-B candidates are
+  separate in-memory suggestions, never silently saved by extraction. This is not
   Mastery, Capability, Evidence, LearningOutcome, Task or conversation history.
 - **Session Memory:** existing `agent_session_memory`, introduced in v22, remains
   Session-scoped rolling conversation compaction. It is neither renamed nor reused.
@@ -41,9 +64,9 @@ without changing the stored auto preference when the master is off.
 `agent_personal_memories` has an autoincrement id, content, source type, optional
 Session/Message references, enabled flag and creation/update timestamps. Manual
 items have no provenance ids; Session items require an existing Session. An optional
-Message must exist and belong to that Session (repository validation). Future
-extraction uses exact user Messages in E-B, but saved-memory provenance APIs remain
-unchanged and no automatic saving is added. Edits preserve provenance and creation time. Listing is ascending id order,
+Message must exist and belong to that Session (repository validation). E-B
+extraction uses exact user Messages, but does not call saved-memory provenance APIs
+or save candidates. Edits preserve provenance and creation time. Listing is ascending id order,
 including disabled items by default. Missing edits/toggles raise ValueError;
 deletion is idempotent and physically removes only the personal-memory row.
 
@@ -54,8 +77,9 @@ operations. P-1C constructs the service from the main-thread connection for Sett
 only, passing it through MainWindow to AISettingsPage. P-1D separately constructs
 its repository/service from the worker-owned fresh connection in `build_agent_runtime`.
 There is no global DB singleton or
-main-thread connection stored in AgentRuntime. Each mutation commits, matching
-existing Agent repository conventions. Fresh-schema snapshots derive from the
+main-thread connection stored in AgentRuntime. In this checkout, each mutation commits,
+matching existing Agent repository conventions; this is not evidence of an atomic
+E-C dedupe/save transaction. Fresh-schema snapshots derive from the
 same real migration path and include the singleton seed.
 
 ## Settings UX (P-1C)
@@ -77,7 +101,8 @@ the auto-memory consent checkbox without clearing its checked preference or any
 memory rows. Re-enabling restores interaction; 管理记忆 remains available while off.
 The second checkbox was preference-only in P-1C; E-B now uses it to gate transient
 candidate extraction from new successful turns. It still does not authorize silent
-memory saving. No old Sessions are scanned; confirmation UI is deferred to E-C.
+memory saving. No old Sessions are scanned. E-C completion and the checkout mismatch
+are recorded above; the E-B checkbox behavior is not an E-C implementation claim.
 
 `PersonalMemoriesDialog` is a modal manager listing all memories, including disabled
 ones. Source labels are 手动添加 / 学习会话, never raw source IDs. The empty state says
@@ -146,7 +171,7 @@ separate two-message request (extraction instructions + JSON-wrapped source data
 with no tools or conversation context, and returns transient candidates. It reads
 no database, produces no Agent messages and saves no Personal Memories. It does not
 verify successful-turn status or database provenance: those are caller obligations
-for future integration, not reasons to read history in E-A.
+for the E-B integration layer, not reasons to read history in E-A.
 
 `app/agent/memory_candidate.py` defines the frozen `MemoryCandidate` DTO, normalization
 and independent strict parser. Model objects contain exactly `content`, `kind`,
@@ -216,8 +241,8 @@ a continuous excerpt of normalized evidence. This extra conservative check rejec
 unverifiable additions and rewordings. NFC + stripped/collapsed whitespace generates
 the key; technical punctuation and case are preserved. Identical keys within one
 response are deduplicated in first-occurrence order. No database dedupe or semantic
-merge occurs. Literal evidence/excerpts do not prove every semantic interpretation;
-future user confirmation remains necessary.
+merge occurs within E-A. Literal evidence/excerpts do not prove every semantic interpretation;
+user confirmation remains necessary before saving a candidate.
 
 Malformed/oversized/deep JSON, unsupported structures/fields, invalid evidence/text,
 excess candidates, tool calls, incomplete responses and model exceptions fail closed
@@ -228,12 +253,12 @@ credentials, raw exception text or paths. The output-size limit is 65,536 charac
 model requests use temperature 0 and a 2048-token output ceiling, with truncated
 responses rejected rather than accepted partially.
 
-Confirmed future product decisions remain: generation gate is `memory_enabled AND
- auto_memory_enabled`; candidates require user confirmation before saving; pending
+Product boundaries remain: generation gate is `memory_enabled AND
+auto_memory_enabled`; candidates require user confirmation before saving; pending
 candidates stay in memory, without old-history scans, automatic merge, rejected-row
-persistence or cross-restart exactly-once. **E-A implements none of that scheduling,
-consent orchestration, confirmation UI, QThreads or persistence.** It must not be
-wired into automatic turns until E-B supplies the consent boundary. Personal
+persistence or cross-restart exactly-once. **The E-A extractor itself implements no scheduling,
+consent orchestration, confirmation UI, QThreads or persistence.** E-B supplies the
+consent boundary for automatic turns. Personal
 Instructions, Session Memory/compaction and PromptRegistry are unchanged. Schema /
 fingerprint / evaluator stay **27 / 7 / 2**.
 
@@ -272,8 +297,9 @@ as a read-only revision so off→on cannot revive an old job between checkpoints
 Conservatively, ANY settings edit (including Instructions) during pending/in-flight
 extraction discards that job/result; saving/applying Instructions and normal turns
 are unaffected. No revision is written by extraction and no schema field is added.
-The shared `consent_allowed(service)` interface
-is also mandatory for future E-C confirmation/save; E-B implements no save path.
+The shared `consent_allowed(service)` interface is the E-B integration point for
+confirmation/save consent checks; E-B itself implements no save path. Do not treat
+this E-B scope statement as a project-level E-C completion assessment.
 
 Events originate ONLY from a successful `send_message()` result. Failed turns,
 opening/resuming/closing Sessions and enabling consent do not schedule extraction.
@@ -291,8 +317,9 @@ the process lifetime, including dropped/failed attempts. Duplicate events, full
 queues and failures are dropped without retries. There is no history replay,
 persistent cursor, rejected-candidate storage, merge or DB dedupe. Transient batches
 are bounded to **16 batches** (oldest evicted), expose `candidates_ready(batch)` and
-are accessible through MainWindow's coordinator for future E-C. Empty or revoked
-results never publish; no popups or candidate confirmation UI exists.
+are accessible through MainWindow's coordinator. Empty or revoked results never
+publish. This checkout's E-B wiring does not render candidate confirmation UI;
+the E-C completion record and version mismatch are recorded above.
 
 Shutdown clears pending tasks and transient batches, closes scheduling and requests
 cooperative interruption. Workers close connections in `finally`. Extraction never
