@@ -48,6 +48,7 @@ def test_set_page_header(shell):
     shell.set_page_header(PageKey.ROUTES)
     assert shell.page_header.title() == "学习路线"
     assert shell.page_header.subtitle() == "管理学习路线与能力进度"
+    assert shell.page_header.leading_label().isHidden() is True
     shell.set_page_header(PageKey.SETTINGS)
     assert shell.page_header.title() == "设置"
 

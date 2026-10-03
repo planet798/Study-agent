@@ -55,6 +55,7 @@ class SAEmptyState(QWidget):
         self._action_row = QHBoxLayout()
         self._action_row.setContentsMargins(0, _spacing.XS, 0, 0)
         self._action_row.addStretch()
+        self._action_row.addStretch()
         self._action: QWidget | None = None
         self._layout.addLayout(self._action_row)
         if action is not None:

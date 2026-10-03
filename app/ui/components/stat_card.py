@@ -22,9 +22,12 @@ class SAStatCard(QFrame):
         helper: str = "",
         icon_name=None,
         parent: QWidget | None = None,
+        compact: bool = False,
     ):
         super().__init__(parent)
         self.setObjectName("SAStatCard")
+        self._compact = bool(compact)
+        self.setProperty("saStatStyle", "compact" if self._compact else "card")
         self._icon_name = icon_name
         self._value_label = QLabel(value)
         self._value_label.setObjectName("SAStatValue")
@@ -40,21 +43,31 @@ class SAStatCard(QFrame):
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon_label.setVisible(icon_name is not None)
 
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(_spacing.SM)
-        top.addWidget(self._icon_label)
-        top.addWidget(self._value_label)
-        top.addStretch()
+        if self._compact:
+            self._icon_label.hide()
+            root = QHBoxLayout(self)
+            root.setContentsMargins(0, 0, 0, 0)
+            root.setSpacing(_spacing.XS)
+            root.addWidget(self._label_label)
+            root.addWidget(self._value_label)
+            root.addWidget(self._helper_label)
+            self._helper_label.hide()
+        else:
+            top = QHBoxLayout()
+            top.setContentsMargins(0, 0, 0, 0)
+            top.setSpacing(_spacing.SM)
+            top.addWidget(self._icon_label)
+            top.addWidget(self._value_label)
+            top.addStretch()
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(
-            _spacing.MD, _spacing.MD, _spacing.MD, _spacing.MD
-        )
-        root.setSpacing(_spacing.XS)
-        root.addLayout(top)
-        root.addWidget(self._label_label)
-        root.addWidget(self._helper_label)
+            root = QVBoxLayout(self)
+            root.setContentsMargins(
+                _spacing.MD, _spacing.MD, _spacing.MD, _spacing.MD
+            )
+            root.setSpacing(_spacing.XS)
+            root.addLayout(top)
+            root.addWidget(self._label_label)
+            root.addWidget(self._helper_label)
 
         theme_manager().theme_changed.connect(self._on_theme_changed)
         self._apply_icon()

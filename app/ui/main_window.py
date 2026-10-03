@@ -400,7 +400,7 @@ class MainWindow(QMainWindow):
             # Today subtitle = 当前日期；date_label 即同一个 label。
             self.page_header.set_title(spec.title)
             self.page_header.set_subtitle(getattr(self, "current_date", ""))
-            self.page_header.set_icon(spec.icon)
+            self.page_header.set_icon(None)
         else:
             self.app_shell.set_page_header(key)
         self.sidebar.set_current(key)
@@ -952,23 +952,37 @@ class MainWindow(QMainWindow):
         self.today_page.set_summary_metrics(len(pending), pending_minutes)
 
         # 今日学习
-        self._add_section_header("今日学习")
-        for t in new_tasks:
-            self._add_task_widget(t)
-        if cancelled_tasks:
-            names = "、".join(t.title for t in cancelled_tasks)
-            self._add_section_hint(
-                f"已移除今日任务 {len(cancelled_tasks)} 个（不计入完成率）：{names}"
-            )
+        if new_tasks:
+            for t in new_tasks:
+                self._add_task_widget(t)
+            if cancelled_tasks:
+                names = "、".join(t.title for t in cancelled_tasks)
+                self._add_section_hint(
+                    f"已移除今日任务 {len(cancelled_tasks)} 个（不计入完成率）：{names}"
+                )
 
         self.list_layout.addStretch()
 
-        has_effective = any(
-            t.task_type != "review" and t.status != STATUS_CANCELLED
+        has_tasks_outside_filter = any(
+            t.task_type not in ("review", "extra")
+            and t.status != STATUS_CANCELLED
             for t in tasks
         )
-        self.empty_hint.setVisible(not bool(self._task_widgets))
-        self.scroll.setVisible(has_effective)
+        if not new_tasks and selected_route not in (None, "all") and has_tasks_outside_filter:
+            empty_title = "当前筛选下没有学习任务"
+            empty_description = "可以切换路线筛选，或添加学习任务。"
+        else:
+            empty_title = "今天还没有学习任务"
+            empty_description = "可以添加任务，或等待学习计划生成。"
+        if not new_tasks and cancelled_tasks:
+            names = "、".join(t.title for t in cancelled_tasks)
+            removed_note = (
+                f"已移除今日任务 {len(cancelled_tasks)} 个（不计入完成率）：{names}。"
+            )
+            empty_description = f"{removed_note} {empty_description}"
+        self.today_page.set_empty_message(empty_title, empty_description)
+        self.today_page.set_empty_visible(not bool(new_tasks))
+        self.scroll.setVisible(bool(new_tasks))
 
         if state is not None:
             self.restore_today_view_state(state)
@@ -1406,18 +1420,15 @@ class MainWindow(QMainWindow):
     def _update_phase_info(self, today_str: str) -> None:
         """显示当前学习阶段与今日学习目标。"""
         if self.study_plan_service is None:
-            self.phase_container.setVisible(False)
+            self.today_page.hide_phase_context()
             return
         phase = self.study_plan_service.get_current_phase(today_str)
         if phase is None:
-            self.phase_container.setVisible(True)
-            self.phase_label.setText("当前阶段：未处于计划期内")
-            self.phase_goal_label.setText("")
+            self.today_page.set_phase_context("当前阶段：未处于计划期内")
             return
-        self.phase_container.setVisible(True)
-        self.phase_label.setText(f"当前阶段：{phase.name}")
         goal = (phase.goals or "").strip()
-        self.phase_goal_label.setText(f"今日学习目标：{goal}" if goal else "")
+        goal_text = f"今日学习目标：{goal}" if goal else ""
+        self.today_page.set_phase_context(f"当前阶段：{phase.name}", goal_text)
 
     def _planning_paused(self) -> bool:
         if self.study_plan_service is None:
@@ -1453,44 +1464,43 @@ class MainWindow(QMainWindow):
                 plannable = []
             if plannable:
                 names = "、".join(r.name for r in plannable)
-                self.planner_status_label.setText(
-                    f"AI 状态：多路线调度已启用（{len(plannable)} 条路线）"
+                self.today_page.set_planner_state(
+                    f"AI 状态：多路线调度已启用（{len(plannable)} 条路线）",
+                    f"可自动规划：{names}",
+                    replan_enabled=True,
                 )
-                self.planner_note_label.setText(f"可自动规划：{names}")
-                self.planner_replan_btn.setEnabled(True)
-                self.today_page.planner_banner.set_variant("info")
             else:
-                self.planner_status_label.setText(
-                    "AI 状态：当前没有可自动规划的学习路线"
+                self.today_page.set_planner_state(
+                    "AI 状态：当前没有可自动规划的学习路线",
+                    "请在“学习路线”中启用自动规划或创建学习计划",
+                    available=False,
+                    replan_enabled=False,
+                    variant="warning",
                 )
-                self.planner_note_label.setText(
-                    "请在“学习路线”中启用自动规划或创建学习计划"
-                )
-                self.planner_replan_btn.setEnabled(False)
-                self.today_page.planner_banner.set_variant("warning")
-            self.planner_container.setVisible(True)
             return
         if self.daily_planner_service is None:
             self.planner_container.setVisible(False)
             return
         if self._planning_paused():
-            self.planner_status_label.setText(
-                f"AI 状态：{self._planning_route_name()} 自动规划已暂停"
+            self.today_page.set_planner_state(
+                f"AI 状态：{self._planning_route_name()} 自动规划已暂停",
+                available=False,
+                replan_enabled=False,
+                variant="warning",
             )
-            self.planner_replan_btn.setEnabled(False)
-            self.today_page.planner_banner.set_variant("warning")
-            self.planner_container.setVisible(True)
             return
         planner = self.daily_planner_service.planner
         if planner is not None and planner.is_configured():
-            self.planner_status_label.setText("AI 状态：AI 已启用")
-            self.planner_replan_btn.setEnabled(True)
-            self.today_page.planner_banner.set_variant("info")
+            self.today_page.set_planner_state(
+                "AI 状态：AI 已启用", replan_enabled=True
+            )
         else:
-            self.planner_status_label.setText("AI 状态：AI 不可用")
-            self.planner_replan_btn.setEnabled(False)
-            self.today_page.planner_banner.set_variant("warning")
-        self.planner_container.setVisible(True)
+            self.today_page.set_planner_state(
+                "AI 状态：AI 不可用",
+                available=False,
+                replan_enabled=False,
+                variant="warning",
+            )
 
     # ---------- AI 重新规划 ----------
 

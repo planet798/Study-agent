@@ -27,6 +27,7 @@ from app.database.assessment_repository import AssessmentRepository
 from app.database.study_plan_repository import StudyPlanRepository
 from app.services.assessment_service import AssessmentService
 from app.services.study_plan_service import StudyPlanService
+from app.ui.design import colors
 from app.ui.main_window import MainWindow
 from app.ui.task_widget import TaskWidget
 
@@ -211,7 +212,7 @@ class TestWidgetVisibility:
         w.render(repo.get(t.id))
         assert _btns(w).count("开始验收") == 1
 
-    def test_assessment_button_text_is_blue(self, qtbot, repo, conn):
+    def test_assessment_button_uses_neutral_secondary_text(self, qtbot, repo, conn):
         from PySide6.QtGui import QPalette
 
         _, topics = _plan(conn)
@@ -220,11 +221,11 @@ class TestWidgetVisibility:
         w = self._widget(qtbot, t)
         btn = w.assessment_btn
         assert btn.text() == "开始验收"
-        # 蓝字（次级按钮样式 + palette 兜底），不改尺寸 / 布局
+        # 中性次级按钮样式 + palette 兜底，不改尺寸 / 布局
         assert btn.objectName() == "SecondaryButton"
         for grp in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
             color = btn.palette().color(grp, QPalette.ColorRole.ButtonText)
-            assert color.name() == "#2c6fbb"
+            assert color.name() == colors.LIGHT_COLORS["text_primary"]
 
 
 # ================= UI 流程：done new 可验收 =================

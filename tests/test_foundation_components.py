@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtGui import QPalette
 
 from app.ui.components.button import SAButton, SAIconButton
 from app.ui.components.card import SACard
@@ -43,23 +44,34 @@ def test_sa_button_secondary_palette_follows_theme():
     tm = ThemeManager.instance()
     btn = SAButton("done", variant="secondary")
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.LIGHT_COLORS["accent"].lower()
+        colors.LIGHT_COLORS["text_primary"].lower()
 
     tm.set_theme("dark")
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.DARK_COLORS["accent"].lower()
+        colors.DARK_COLORS["text_primary"].lower()
 
 
-def test_sa_button_primary_palette_is_on_accent():
+def test_sa_button_primary_palette_uses_neutral_action_text():
     btn = SAButton("go", variant="primary")
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.LIGHT_COLORS["text_on_accent"].lower()
+        colors.LIGHT_COLORS["action_text"].lower()
+    btn.setEnabled(False)
+    assert btn.palette().color(QPalette.ColorGroup.Disabled,
+                               QPalette.ColorRole.ButtonText).name().lower() == \
+        colors.LIGHT_COLORS["action_text_disabled"].lower()
 
 
 def test_sa_button_disabled_state():
     btn = SAButton("go", variant="primary")
     btn.setEnabled(False)
     assert not btn.isEnabled()
+    assert btn.palette().color(QPalette.ColorGroup.Disabled,
+                               QPalette.ColorRole.ButtonText).name().lower() == \
+        colors.LIGHT_COLORS["action_text_disabled"].lower()
+    ThemeManager.instance().set_theme("dark")
+    assert btn.palette().color(QPalette.ColorGroup.Disabled,
+                               QPalette.ColorRole.ButtonText).name().lower() == \
+        colors.DARK_COLORS["action_text_disabled"].lower()
 
 
 def test_sa_button_set_variant_updates_objectname():
@@ -152,6 +164,10 @@ def test_sa_empty_state_action_optional():
     action = SAButton("新建", variant="primary")
     state.set_action(action)
     assert state.action() is action
+    action_row = state.layout().itemAt(3).layout()
+    assert action_row.count() == 3
+    assert action_row.itemAt(0).spacerItem() is not None
+    assert action_row.itemAt(2).spacerItem() is not None
 
     state2 = SAEmptyState(title="x", action=SAButton("a"))
     assert state2.action() is not None

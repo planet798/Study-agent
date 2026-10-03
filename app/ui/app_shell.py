@@ -98,7 +98,7 @@ class AppShell(QWidget):
         self.page_header.set_subtitle(
             spec.subtitle if subtitle is None else subtitle
         )
-        self.page_header.set_icon(spec.icon)
+        self.page_header.set_icon(None)
 
     def select_page(self, key) -> None:
         self.sidebar.set_current(key)

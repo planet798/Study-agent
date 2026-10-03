@@ -1,13 +1,11 @@
-"""Semantic color tokens（Fluent 2 风格，Light / Dark 两套完整取值）。
+"""Semantic warm-neutral color tokens for Light and Dark themes.
 
-约束：
-- 业务代码只使用 semantic name（如 ``surface`` / ``danger``），不直接写 hex。
-- Dark 不是 Light 的反色，而是独立设计的一套 neutral / accent 层级。
-- status 色在两种主题下语义一致（success 永远表示成功，不随主题变色义）。
-- 对比度：secondary / disabled 使用比旧 ``#95a5a6`` / ``#b0b7bf`` 更高的对比。
-
-Light accent 保留项目既有品牌蓝 ``#2c6fbb``（兼容旧 QSS / 现有测试），
-其余 neutral 层级按 Fluent 2 重新建立。
+- UI code uses semantic names instead of literal colors.
+- Dark is an independently tuned palette, not an inverted Light theme.
+- Primary actions use dedicated neutral tokens; accent remains for links, focus,
+  and meaningful accent states.
+- Status colors retain their semantic meaning across both themes.
+- The existing Light brand accent is retained for compatibility.
 """
 
 from __future__ import annotations
@@ -16,28 +14,35 @@ LIGHT = "light"
 DARK = "dark"
 
 LIGHT_COLORS: dict[str, str] = {
-    # ---- neutral / surfaces ----
-    "background": "#f5f7fa",
+    # ---- warm neutral / surfaces ----
+    "background": "#faf9f7",
     "surface": "#ffffff",
-    "surface_alt": "#eef2f6",
-    "surface_hover": "#e8edf3",
-    "surface_pressed": "#dce4ec",
-    "surface_selected": "#e3edf8",
+    "surface_alt": "#f3f1ed",
+    "surface_hover": "#ebe9e4",
+    "surface_pressed": "#e1ded8",
+    "surface_selected": "#eae7e1",
     # ---- text ----
-    "text_primary": "#1f2937",
-    "text_secondary": "#56606d",
-    "text_tertiary": "#6f7a87",
-    "text_disabled": "#9aa3ae",
+    "text_primary": "#262521",
+    "text_secondary": "#65635e",
+    "text_tertiary": "#817f79",
+    "text_disabled": "#a09d96",
     "text_on_accent": "#ffffff",
     # ---- borders ----
-    "border": "#d5dbe2",
-    "border_subtle": "#e4e9ef",
-    "border_strong": "#b9c2cd",
-    # ---- accent ----
+    "border": "#d7d4ce",
+    "border_subtle": "#e8e5df",
+    "border_strong": "#c1bdb5",
+    # ---- link / focus accent ----
     "accent": "#2c6fbb",
     "accent_hover": "#255e9e",
     "accent_pressed": "#1f508a",
     "accent_disabled": "#a9c4e4",
+    # ---- neutral primary action ----
+    "action_background": "#292824",
+    "action_background_hover": "#3b3933",
+    "action_background_pressed": "#1d1c19",
+    "action_background_disabled": "#dedbd5",
+    "action_text": "#faf9f7",
+    "action_text_disabled": "#625f58",
     # ---- status ----
     "success": "#107c41",
     "success_background": "#e7f4ec",
@@ -48,33 +53,40 @@ LIGHT_COLORS: dict[str, str] = {
     "info": "#0f6cbd",
     "info_background": "#e8f1fb",
     # ---- misc ----
-    "focus": "#2c6fbb",
+    "focus": "#376fa6",
     "overlay": "rgba(0, 0, 0, 0.35)",
 }
 
 DARK_COLORS: dict[str, str] = {
-    # ---- neutral / surfaces ----
-    "background": "#1c1c1e",
-    "surface": "#26262a",
-    "surface_alt": "#2d2d31",
-    "surface_hover": "#34343a",
-    "surface_pressed": "#3c3c42",
-    "surface_selected": "#2b3a4d",
+    # ---- warm neutral / surfaces ----
+    "background": "#1b1a18",
+    "surface": "#232220",
+    "surface_alt": "#282724",
+    "surface_hover": "#34322e",
+    "surface_pressed": "#3c3a35",
+    "surface_selected": "#302e2a",
     # ---- text ----
-    "text_primary": "#f3f3f5",
-    "text_secondary": "#c5c8ce",
-    "text_tertiary": "#9aa0a8",
-    "text_disabled": "#6b7079",
+    "text_primary": "#f1efeb",
+    "text_secondary": "#c3c0b9",
+    "text_tertiary": "#99968f",
+    "text_disabled": "#74716a",
     "text_on_accent": "#ffffff",
     # ---- borders ----
-    "border": "#3a3a40",
-    "border_subtle": "#323237",
-    "border_strong": "#4a4a52",
-    # ---- accent ----
-    "accent": "#6cb8ff",
-    "accent_hover": "#8ac8ff",
-    "accent_pressed": "#4fa8f5",
-    "accent_disabled": "#3f5a72",
+    "border": "#3d3b36",
+    "border_subtle": "#302f2b",
+    "border_strong": "#514f49",
+    # ---- link / focus accent ----
+    "accent": "#91b5d2",
+    "accent_hover": "#a9c5dc",
+    "accent_pressed": "#779ebd",
+    "accent_disabled": "#4a5963",
+    # ---- neutral primary action ----
+    "action_background": "#e9e6df",
+    "action_background_hover": "#f5f2ec",
+    "action_background_pressed": "#d4d0c8",
+    "action_background_disabled": "#3d3b36",
+    "action_text": "#22211e",
+    "action_text_disabled": "#aaa7a0",
     # ---- status ----
     "success": "#54b054",
     "success_background": "#1e2f22",
@@ -85,7 +97,7 @@ DARK_COLORS: dict[str, str] = {
     "info": "#6cb8ff",
     "info_background": "#1d2c3a",
     # ---- misc ----
-    "focus": "#6cb8ff",
+    "focus": "#91b5d2",
     "overlay": "rgba(0, 0, 0, 0.55)",
 }
 

@@ -45,7 +45,7 @@ def test_theme_switch_has_no_one_step_lag(qapp):
     assert qapp.palette().color(QPalette.ColorRole.Window).name().lower() == \
         colors.LIGHT_COLORS["background"].lower()
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.LIGHT_COLORS["accent"].lower()
+        colors.LIGHT_COLORS["text_primary"].lower()
 
     # 一次切到 Dark，立即生效（不需要再点一次）
     tm.set_theme(ThemeMode.DARK)
@@ -54,7 +54,7 @@ def test_theme_switch_has_no_one_step_lag(qapp):
     assert qapp.palette().color(QPalette.ColorRole.Base).name().lower() == \
         colors.DARK_COLORS["surface"].lower()
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.DARK_COLORS["accent"].lower()
+        colors.DARK_COLORS["text_primary"].lower()
     assert page.list_container.palette().color(
         QPalette.ColorRole.Window
     ).name().lower() == colors.DARK_COLORS["background"].lower()
@@ -64,7 +64,7 @@ def test_theme_switch_has_no_one_step_lag(qapp):
     assert qapp.palette().color(QPalette.ColorRole.Window).name().lower() == \
         colors.LIGHT_COLORS["background"].lower()
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.LIGHT_COLORS["accent"].lower()
+        colors.LIGHT_COLORS["text_primary"].lower()
     assert page.list_container.palette().color(
         QPalette.ColorRole.Window
     ).name().lower() == colors.LIGHT_COLORS["background"].lower()
@@ -138,13 +138,13 @@ def test_secondary_button_follows_theme_once(qapp):
     tm.apply(qapp)
     btn = SAButton("重新规划", variant="secondary")
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.LIGHT_COLORS["accent"].lower()
+        colors.LIGHT_COLORS["text_primary"].lower()
     tm.set_theme(ThemeMode.DARK)
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.DARK_COLORS["accent"].lower()
+        colors.DARK_COLORS["text_primary"].lower()
     tm.set_theme(ThemeMode.LIGHT)
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.LIGHT_COLORS["accent"].lower()
+        colors.LIGHT_COLORS["text_primary"].lower()
 
 
 def test_legacy_helper_reads_current_theme(qapp):
@@ -156,7 +156,7 @@ def test_legacy_helper_reads_current_theme(qapp):
     btn = QPushButton("legacy")
     apply_secondary_button_text(btn)
     assert btn.palette().buttonText().color().name().lower() == \
-        colors.DARK_COLORS["accent"].lower()
+        colors.DARK_COLORS["text_primary"].lower()
 
 
 def test_today_readability_contrast(qapp):

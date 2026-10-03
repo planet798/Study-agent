@@ -35,7 +35,30 @@ def test_set_summary_metrics(page):
     page.set_summary_metrics(3, 120)
     assert page.pending_card.value() == "3"
     assert page.minutes_card.value() == "120 分钟"
+    assert page.pending_card.property("saStatStyle") == "compact"
+    assert page.minutes_card.property("saStatStyle") == "compact"
     assert not hasattr(page, "review_card")
+
+
+def test_empty_state_uses_single_primary_add_action(page):
+    assert page.empty_action_btn.variant() == "primary"
+    page.set_empty_visible(True)
+    assert page.empty_state.isHidden() is False
+    assert page.add_task_btn.isHidden() is True
+    page.set_empty_visible(False)
+    assert page.empty_state.isHidden() is True
+    assert page.add_task_btn.isHidden() is False
+
+
+def test_planner_state_updates_label_visibility(page):
+    page.set_planner_state("规划暂停", "原因说明", available=False,
+                           replan_enabled=False, variant="warning")
+    assert page.planner_status_label.isHidden() is False
+    assert page.planner_note_label.isHidden() is False
+    page.set_planner_state("AI 已启用", "")
+    assert page.planner_status_label.isHidden() is False
+    assert page.planner_note_label.isHidden() is True
+    assert page.planner_replan_btn.isEnabled() is True
 
 
 def test_add_task_signal_from_button(qtbot, page):

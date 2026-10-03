@@ -27,16 +27,22 @@ _OBJECT_NAMES = {
 }
 
 
-def apply_button_text_palette(button: QPushButton, color: str) -> None:
-    """把 ``ButtonText`` palette 显式设为指定颜色。
-
-    Windows 原生 QPushButton style 可能忽略 QSS 的 ``color``，导致文字不可读。
-    只影响文字颜色，不改尺寸 / 边框 / 布局。供 SAButton 内部与 legacy helper 复用。
-    """
-    qcolor = QColor(color)
+def apply_button_text_palette(
+    button: QPushButton,
+    color: str,
+    disabled_color: str | None = None,
+) -> None:
+    """显式设置按钮文字 palette，避免 Windows 原生样式覆盖 QSS 颜色。"""
     pal = button.palette()
+    qcolor = QColor(color)
     for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
         pal.setColor(group, QPalette.ColorRole.ButtonText, qcolor)
+    if disabled_color is not None:
+        pal.setColor(
+            QPalette.ColorGroup.Disabled,
+            QPalette.ColorRole.ButtonText,
+            QColor(disabled_color),
+        )
     button.setPalette(pal)
 
 
@@ -104,14 +110,19 @@ class SAButton(QPushButton):
     def _text_color(self) -> str:
         t = theme_manager().tokens()
         return {
-            "primary": t["text_on_accent"],
-            "secondary": t["accent"],
+            "primary": t["action_text"],
+            "secondary": t["text_primary"],
             "danger": t["danger"],
             "subtle": t["text_primary"],
         }[self._variant]
 
     def _apply_palette(self) -> None:
-        apply_button_text_palette(self, self._text_color())
+        tokens = theme_manager().tokens()
+        apply_button_text_palette(
+            self,
+            self._text_color(),
+            tokens["action_text_disabled"] if self._variant == "primary" else None,
+        )
 
     def _apply_font(self) -> None:
         role = _type.BODY if self._size == "medium" else _type.BODY_SECONDARY

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -27,7 +28,6 @@ from .components.button import SAButton
 from .components.empty_state import SAEmptyState
 from .components.info_banner import SAInfoBanner
 from .components.stat_card import SAStatCard
-from .design import icons as _icons
 from .design import spacing as _spacing
 
 
@@ -49,27 +49,31 @@ class TodayPage(QWidget):
         summary_row = QHBoxLayout(self.summary_container)
         summary_row.setContentsMargins(0, 0, 0, 0)
         summary_row.setSpacing(_spacing.MD)
-        self.pending_card = SAStatCard(
-            "待处理", "0", icon_name=_icons.IconName.PLAY
-        )
-        self.minutes_card = SAStatCard(
-            "预计时长", "0 分钟", icon_name=_icons.IconName.CALENDAR
-        )
+        self.pending_card = SAStatCard("待处理", "0", compact=True)
+        self.minutes_card = SAStatCard("预计时长", "0 分钟", compact=True)
         for card in (self.pending_card, self.minutes_card):
-            summary_row.addWidget(card, stretch=1)
+            summary_row.addWidget(card)
+        summary_row.addStretch()
         root.addWidget(self.summary_container)
 
         # ----- Controls -----
         controls = QHBoxLayout()
         controls.setSpacing(_spacing.SM)
-        controls.addWidget(QLabel("路线筛选"))
+        route_filter_label = QLabel("路线")
+        route_filter_label.setObjectName("TaskMeta")
+        controls.addWidget(route_filter_label)
         self.route_filter_combo = QComboBox()
+        self.route_filter_combo.setMinimumWidth(150)
+        self.route_filter_combo.setMaximumWidth(280)
+        self.route_filter_combo.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
         controls.addWidget(self.route_filter_combo)
         self.route_stats_label = QLabel("")
         self.route_stats_label.setObjectName("TaskMeta")
         controls.addWidget(self.route_stats_label)
         controls.addStretch()
-        self.add_task_btn = SAButton("＋ 添加学习任务", variant="secondary")
+        self.add_task_btn = SAButton("＋ 添加学习任务", variant="primary")
         controls.addWidget(self.add_task_btn)
         root.addLayout(controls)
 
@@ -77,11 +81,13 @@ class TodayPage(QWidget):
         self.phase_container = QWidget()
         phase_box = QVBoxLayout(self.phase_container)
         phase_box.setContentsMargins(0, 0, 0, 0)
-        phase_box.setSpacing(2)
+        phase_box.setSpacing(_spacing.XS)
         self.phase_label = QLabel("")
         self.phase_label.setObjectName("TaskMeta")
         self.phase_goal_label = QLabel("")
         self.phase_goal_label.setObjectName("TaskMeta")
+        self.phase_goal_label.setWordWrap(True)
+        self.phase_goal_label.hide()
         phase_box.addWidget(self.phase_label)
         phase_box.addWidget(self.phase_goal_label)
         root.addWidget(self.phase_container)
@@ -98,6 +104,10 @@ class TodayPage(QWidget):
         root.addWidget(self.planner_container)
 
         # ----- Task list -----
+        self.tasks_heading = QLabel("今日学习")
+        self.tasks_heading.setObjectName("SectionTitle")
+        root.addWidget(self.tasks_heading)
+
         self.scroll = QScrollArea()
         self.scroll.setObjectName("SATodayScroll")
         self.scroll.setWidgetResizable(True)
@@ -119,16 +129,15 @@ class TodayPage(QWidget):
         root.addWidget(self.scroll, stretch=1)
 
         # ----- Empty state -----
-        self.empty_action_btn = SAButton("添加学习任务", variant="secondary")
+        self.empty_action_btn = SAButton("添加学习任务", variant="primary")
         self.empty_state = SAEmptyState(
             title="今天还没有学习任务",
             description="可以添加任务，或等待学习计划生成。",
-            icon_name=_icons.IconName.BOOK,
             action=self.empty_action_btn,
         )
         # 兼容旧属性名
         self.empty_hint = self.empty_state
-        root.addWidget(self.empty_state)
+        root.addWidget(self.empty_state, stretch=1)
 
         # ----- signals -----
         self.add_task_btn.clicked.connect(self.add_task_requested)
@@ -146,6 +155,7 @@ class TodayPage(QWidget):
     def set_phase_context(self, text: str, goal: str = "") -> None:
         self.phase_label.setText(text)
         self.phase_goal_label.setText(goal)
+        self.phase_goal_label.setVisible(bool(goal))
         self.phase_container.setVisible(True)
 
     def hide_phase_context(self) -> None:
@@ -160,10 +170,8 @@ class TodayPage(QWidget):
         replan_enabled: bool = True,
         variant: str = "info",
     ) -> None:
-        self.planner_status_label.setText(status)
-        self.planner_status_label.setVisible(bool(status))
-        self.planner_note_label.setText(note)
-        self.planner_note_label.setVisible(bool(note))
+        self.planner_banner.set_title(status)
+        self.planner_banner.set_description(note)
         self.planner_banner.set_variant(variant if not available else "info")
         self.planner_replan_btn.setEnabled(replan_enabled)
         self.planner_container.setVisible(True)
@@ -199,8 +207,13 @@ class TodayPage(QWidget):
     def finish_tasks(self) -> None:
         self.list_layout.addStretch()
 
+    def set_empty_message(self, title: str, description: str) -> None:
+        self.empty_state.set_title(title)
+        self.empty_state.set_description(description)
+
     def set_empty_visible(self, visible: bool) -> None:
         self.empty_state.setVisible(visible)
+        self.add_task_btn.setVisible(not visible)
 
     def set_scroll_visible(self, visible: bool) -> None:
         self.scroll.setVisible(visible)

@@ -8,6 +8,7 @@ from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QFrame
 
 from app.ui import agent_message_widget as widget_module
+from app.ui.design import colors
 from app.ui.agent_message_widget import (
     ASSISTANT_MAX_WIDTH,
     ASSISTANT_ROLE,
@@ -338,8 +339,8 @@ def test_markdown_view_restyles_on_theme_change(qtbot, qapp):
     manager.apply(qapp)
     dark_html = view.document().toHtml()
     assert light_html != dark_html
-    assert "#2d2d31" in dark_html.lower()  # dark surface_alt code surface
-    assert "#eef2f6" in light_html.lower()  # light surface_alt code surface
+    assert colors.DARK_COLORS["surface_alt"].lower() in dark_html.lower()
+    assert colors.LIGHT_COLORS["surface_alt"].lower() in light_html.lower()
 
 
 def test_markdown_height_covers_fractional_layout_and_theme_resize(qtbot, qapp):

@@ -116,6 +116,19 @@ class TestTodayRouteFilter:
         assert env["repo"].get(a.id) is not None
         assert env["repo"].get(b.id) is not None
 
+    def test_filter_without_matches_shows_contextual_empty_state(self, qtbot, env):
+        rl, *_ = _second_route(env)
+        env["manual"].create_learning_activity(
+            "默认路线任务", scheduled_date=TODAY, route_id=env["default"].id
+        )
+        w = self._window(qtbot, env)
+        w.route_filter_combo.setCurrentIndex(w.route_filter_combo.findData(rl.id))
+        assert w.today_page.empty_state.isHidden() is False
+        assert w.today_page.empty_state.title() == "当前筛选下没有学习任务"
+        assert w.scroll.isHidden() is True
+        assert w.add_task_btn.isHidden() is True
+        assert w.today_page.pending_card.value() == "0"
+
     def test_filter_does_not_change_status(self, qtbot, env):
         t = env["manual"].create_learning_activity("x", scheduled_date=TODAY)
         w = self._window(qtbot, env)

@@ -1,7 +1,18 @@
-# Study-Agent Design System (UI-1)
+# Study-Agent Design System
 
-> Fluent 2 foundation：semantic tokens + theme + QSS + icons + foundation components。
-> UI-1 只做基础层；页面 redesign 属于 UI-2+。业务语义零改动。
+> 现行视觉方向：受现代 Codex 工作空间启发的暖中性、克制排版与轻量层级。
+> 语义 tokens + Light/Dark 主题 + QSS + SVG 图标 + 公共组件；保持业务语义不变。
+
+## Current visual direction
+
+- Warm charcoal / warm white neutral surfaces; dark theme receives first visual review.
+- Neutral selected navigation and primary actions. `accent` remains reserved for links,
+  keyboard focus and meaningful accent states; warning/danger/success keep their semantics.
+- Prefer spacing, alignment, readable typography and restrained separators over nested cards,
+  decorative icons, gradients or broad colored outlines.
+- Today summary uses compact inline metrics and tasks use lightweight rows; shared styles
+  must still be checked on Routes, Practice, Settings and dialogs.
+- The native Windows title bar remains outside the current QSS styling boundary.
 
 ## 目录
 
@@ -41,6 +52,7 @@ app/ui/app_shell.py   # AppShell + PageKey / PageSpec registry (UI-2)
 | text | `text_primary` `text_secondary` `text_tertiary` `text_disabled` `text_on_accent` |
 | border | `border` `border_subtle` `border_strong` |
 | accent | `accent` `accent_hover` `accent_pressed` `accent_disabled` |
+| primary action | `action_background` `action_background_hover` `action_background_pressed` `action_background_disabled` `action_text` `action_text_disabled` |
 | status | `success` `success_background` `warning` `warning_background` `danger` `danger_background` `info` `info_background` |
 | misc | `focus` `overlay` |
 
@@ -120,7 +132,7 @@ semantic tokens → ThemeManager.render_qss(template, map) → setStyleSheet
 | `SAStatusBadge` | active / paused / archived / planned / in_progress / completed / warning |
 | `SAEmptyState` | 可选 icon + title + description + 可选 action |
 
-`SAButton` 内部处理 Windows `ButtonText` palette 兜底（secondary/primary/danger），
+`SAButton` 内部处理 Windows `ButtonText` palette 兜底（neutral primary / secondary / danger），
 **新组件不得再调用 `apply_secondary_button_text`**；主题切换时组件自动重着色。
 
 ## Icon rules
@@ -151,4 +163,5 @@ semantic tokens → ThemeManager.render_qss(template, map) → setStyleSheet
 - 不在业务文件写 `setStyleSheet("color: #xxxxxx")`。
 - 不在 light.qss / dark.qss 写死 hex。
 - 不做 pill 泛滥、不默认加阴影、不引入第三方 UI 框架依赖。
+- Accent 不承担普通导航选中态和 primary action 的默认颜色；这些优先使用中性色 tokens。
 - 不改业务 Service / DB / Planner / Scheduler / Mastery / Capability / Practice / Prompt 语义。

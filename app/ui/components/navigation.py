@@ -1,8 +1,7 @@
-"""SANavigationItem / SANavigationSidebar（Fluent 2 左侧导航）。
+"""SANavigationItem / SANavigationSidebar（暖中性色左侧导航）。
 
-- ``SANavigationItem`` 继承 ``QPushButton``，因此天然支持 click / text / isEnabled /
-  checkable / keyboard（Tab + Enter/Space），同时由全局 QSS 提供 Fluent 视觉：
-  accent indicator + surface_selected + Filled icon。
+- ``SANavigationItem`` 继承 ``QPushButton``，支持 click / text / isEnabled /
+  checkable / keyboard（Tab + Enter/Space）；全局 QSS 负责中性选中背景和 Filled icon。
 - ``SANavigationSidebar`` 管理 items、collapsed 状态、可用性降级与 page_requested 信号。
   不包含任何业务逻辑。
 """
@@ -125,7 +124,7 @@ class SANavigationItem(QPushButton):
         t = theme_manager().tokens()
         if not self.isEnabled():
             return t["text_disabled"]
-        return t["accent"] if self.isChecked() else t["text_secondary"]
+        return t["text_primary"] if self.isChecked() else t["text_secondary"]
 
     def _refresh_icon(self) -> None:
         self.setIcon(
@@ -231,10 +230,13 @@ class SANavigationSidebar(QWidget):
         # Pins are unbounded: keep the dynamic section scrollable while static
         # navigation and the Settings footer remain in place.
         sessions_scroll = QScrollArea(self)
+        sessions_scroll.setObjectName("SASessionsScroll")
         sessions_scroll.setWidgetResizable(True)
         sessions_scroll.setFrameShape(QFrame.Shape.NoFrame)
         sessions_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         sessions_body = QWidget(sessions_scroll)
+        sessions_body.setObjectName("SASessionsBody")
+        sessions_body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         sessions_root = QVBoxLayout(sessions_body)
         sessions_root.setContentsMargins(0, 0, 0, 0)
         sessions_root.setSpacing(_spacing.XS)
@@ -357,6 +359,7 @@ class SANavigationSidebar(QWidget):
             if session.get("pinned"):
                 # No PIN asset exists; a subtle visible marker plus menu state.
                 marker = QLabel("固定", row)
+                marker.setObjectName("SASessionPinMarker")
                 marker.setToolTip("已固定")
                 marker.setVisible(not self._collapsed)
                 layout.insertWidget(1, marker)
@@ -449,7 +452,7 @@ class SANavigationSidebar(QWidget):
         self.page_requested.emit(key)
 
     def _apply_brand_icon(self) -> None:
-        color = theme_manager().tokens()["accent"]
+        color = theme_manager().tokens()["text_secondary"]
         self.brand_icon.setPixmap(
             _icons.pixmap(_icons.IconName.BOOK, size=20, color=color, filled=True)
         )

@@ -1,4 +1,4 @@
-"""Study-Agent Design System (Fluent 2 foundation).
+"""Study-Agent semantic UI foundation (warm-neutral visual direction).
 
 只提供 token、主题、QSS、图标与基础组件；不包含任何业务逻辑。
 业务层（页面 / 对话框）只使用 semantic token 与组件，不直接写 hex。
