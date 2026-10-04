@@ -186,12 +186,13 @@ def test_panel_first_open_and_new_reply_keep_native_scroll_targets(qtbot, repo):
     page.load_session({"id": 1}, messages + [_row(32, "assistant", panel_text)], task, None, True)
     row = next(w for w in page.findChildren(AgentMessageWidget) if w.message_id == 32)
     assert isinstance(row.markdown_view, AgentAssistantContent)
-    qtbot.waitUntil(lambda: abs(bar.value() - min(max(0, row.mapTo(
-        page.conversation_body, QPoint()).y() - 16), bar.maximum())) <= 2)
+    def target():
+        return min(max(0, row.mapTo(page.conversation_body, QPoint()).y() - 16), bar.maximum())
+    # 重建布局时范围会暂时归零；不能把 0 == 0 当成已完成滚动。
+    qtbot.waitUntil(lambda: bar.maximum() > target() + 100 and abs(bar.value() - target()) <= 2)
     assert bar.value() < bar.maximum() - 100
     assert page._pending_scroll_handler is not None
     # Programmatic theme/width changes must retain the new-reply positioning.
     page.resize(420, 630)
-    qtbot.waitUntil(lambda: abs(bar.value() - min(max(0, row.mapTo(
-        page.conversation_body, QPoint()).y() - 16), bar.maximum())) <= 2)
+    qtbot.waitUntil(lambda: bar.maximum() > target() + 100 and abs(bar.value() - target()) <= 2)
     assert page._pending_scroll_handler is not None

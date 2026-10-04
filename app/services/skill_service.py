@@ -37,7 +37,9 @@ from ..database.skill_repository import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CAREER_CONTEXT_PATH = PROJECT_ROOT / "docs" / "career_context.json"
+from app.runtime_paths import context_path
+
+DEFAULT_CAREER_CONTEXT_PATH = context_path()
 
 # ---------------- 权重与常量 ----------------
 W_TIER = 0.45

@@ -81,9 +81,9 @@ _PLUS_MARKERS = ("优先", "加分", "更佳", "优势")
 _SEGMENT_SPLIT_RE = re.compile(r"[。！？；\n，,]")
 _INTERN_RE = re.compile(r"实习|intern", re.IGNORECASE)
 
-DEFAULT_CAREER_CONTEXT_PATH = (
-    Path(__file__).resolve().parents[2] / "docs" / "career_context.json"
-)
+from app.runtime_paths import context_path
+
+DEFAULT_CAREER_CONTEXT_PATH = context_path()
 
 # ---------------- AI 解析（optional enhancement） ----------------
 

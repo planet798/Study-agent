@@ -23,6 +23,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from app.runtime_paths import is_frozen, hidden_process_options
+
 from ..ai.prompt_registry import PromptRegistry
 from ..ai.prompts import (
     build_resume_material_vars,
@@ -76,7 +78,7 @@ class LearningOutcomeService:
         capability_service=None,
     ):
         self.outcome_repo = outcome_repo
-        self.project_root = Path(project_root) if project_root else PROJECT_ROOT
+        self.project_root = Path(project_root) if project_root else (None if is_frozen() else PROJECT_ROOT)
         # 可选：简历素材的 AI 语言组织；None / 失败 / 非法输出都走确定性模板
         self.ai_client = ai_client
         # 可选注入：生产环境传入 DB 支持的 PromptRegistry（支持用户覆盖）
@@ -89,10 +91,12 @@ class LearningOutcomeService:
     def current_git_commit(self, root: str | Path | None = None) -> str | None:
         """读取仓库当前 HEAD commit（只作“当时版本证据”，不推断功能）。"""
         cwd = Path(root) if root is not None else self.project_root
+        if cwd is None:
+            return None  # 安装目录不是学习项目，不能采集应用自身的 Git 版本证据。
         try:
             out = subprocess.run(
                 ["git", "-C", str(cwd), "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=3,
+                capture_output=True, text=True, timeout=3, **hidden_process_options(),
             )
         except (OSError, subprocess.TimeoutExpired, ValueError):
             return None

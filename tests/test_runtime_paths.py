@@ -40,3 +40,29 @@ def test_source_node_override(monkeypatch):
     monkeypatch.delattr(sys, "frozen", raising=False)
     monkeypatch.setenv("STUDY_AGENT_NODE", "/operator/node")
     assert paths.node_executable() == "/operator/node"
+
+
+def test_frozen_business_modules_share_user_context_and_skip_application_git(tmp_path):
+    import json
+    import os
+    import subprocess
+
+    code = """
+import sys, json
+sys.frozen = True
+from app.ai.long_term_context import DEFAULT_CONTEXT_PATH
+from app.services.skill_service import DEFAULT_CAREER_CONTEXT_PATH as skill
+from app.services.jd_service import DEFAULT_CAREER_CONTEXT_PATH as jd
+from app.services.learning_outcome_service import LearningOutcomeService
+print(json.dumps({'paths': [str(DEFAULT_CONTEXT_PATH), str(skill), str(jd)],
+                  'git': LearningOutcomeService(None).current_git_commit()}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "LOCALAPPDATA": str(tmp_path)},
+        capture_output=True, text=True, check=True,
+    )
+    report = json.loads(result.stdout)
+    assert report["paths"] == [str(tmp_path / "StudyAgent/data/career_context.json")] * 3
+    assert report["git"] is None
+    assert not (tmp_path / "StudyAgent").exists()
