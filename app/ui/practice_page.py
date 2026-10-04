@@ -10,7 +10,6 @@ from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -25,7 +24,6 @@ from ..services.practice import (
     STATUS_COMPLETED,
     STATUS_IN_PROGRESS,
     STATUS_PLANNED,
-    milestone_status_label,
     output_type_label,
     project_status_label,
     project_type_label,
@@ -44,16 +42,15 @@ from .practice_dialogs import (
     RevokeEvidenceDialog,
 )
 from .components.button import SAButton
-from .components.card import SACard
 from .components.empty_state import SAEmptyState
-from .components.progress_bar import SAProgressBar
-from .components.section_header import SASectionHeader
-from .components.status_badge import SAStatusBadge
-from .components.tag import SATag
 from .design import icons as _icons
 from .design import spacing as _spacing
 from .components.scroll_position import ScrollPositionKeeper
 from .components.workspace_sections import plain_label
+from .practice_detail_sections import (
+    PracticeDetailSection, PracticeDetailSummary,
+    PracticeMilestonesSection, PracticeOutputsSection,
+)
 from .practice_overview_widgets import PracticeOverviewRow, ProjectMetrics
 
 
@@ -203,7 +200,7 @@ class PracticeProjectsPage(QWidget):
             if not all_projects:
                 self._show_empty("还没有实践项目", "新建项目，安排里程碑并记录实践成果。", "create", "新建项目")
                 self.create_btn.hide()
-            elif status is None:
+            elif all(project['status'] == STATUS_ARCHIVED for project in all_projects):
                 self._show_empty("项目已全部归档", "可查看归档记录，或从上方新建项目。", "archived", "查看已归档")
             else:
                 self._show_empty("当前筛选下没有项目", "切换到全部未归档项目继续浏览。", "clear", "清除筛选")
@@ -337,10 +334,19 @@ class PracticeProjectDetailDialog(QDialog):
         self._closing = False
         self.setWindowTitle("实践项目")
         self.setModal(True)
-        self.resize(680, 640)
+        self.resize(880, 720)
+        if self.screen() is not None:
+            available = self.screen().availableGeometry()
+            self.resize(min(880, int(available.width() * 0.9)),
+                        min(720, int(available.height() * 0.9)))
+        self._expanded_states: dict[str, bool] = {}
         root = QVBoxLayout(self)
+        root.setContentsMargins(_spacing.LG, _spacing.LG, _spacing.LG, _spacing.LG)
+        root.setSpacing(_spacing.SM)
         self.title_label = QLabel("")
         self.title_label.setObjectName("AppTitle")
+        self.title_label.setWordWrap(True)
+        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
         root.addWidget(self.title_label)
 
         self.scroll = QScrollArea()
@@ -378,6 +384,7 @@ class PracticeProjectDetailDialog(QDialog):
         val = QLabel(value if value else "—")
         val.setObjectName("SAValueStrong")
         val.setWordWrap(True)
+        val.setTextFormat(Qt.TextFormat.PlainText)
         row.addWidget(key)
         row.addWidget(val, stretch=1)
         lay.addLayout(row)
@@ -386,36 +393,54 @@ class PracticeProjectDetailDialog(QDialog):
         value = self._scroll_bar.value()
         self._clear_scroll_restore()
         _clear_layout(self.body_layout)
-        detail = self.service.get_project_detail(self.project_id)
-        p = detail["project"]
-        self.title_label.setText(p["name"])
-        prog = self.service.get_project_progress(self.project_id)
-        ms_txt = (f"{prog['milestones_done']} / {prog['milestones_total']}"
-                  if prog["has_milestones"] else "尚未设置里程碑")
-        card = SACard()
-        card.add_widget(SASectionHeader("概览"))
-        lay = card.body_layout
-        self._value_pair(lay, "状态", project_status_label(p['status']))
-        self._value_pair(lay, "类型", project_type_label(p['project_type']))
-        self._value_pair(lay, "目标", p.get('goal') or '—')
-        self._value_pair(lay, "描述", p.get('description') or '—')
-        self._value_pair(lay, "里程碑", ms_txt)
-        self._value_pair(lay, "成果", str(prog['output_count']))
-        self.body_layout.addWidget(card)
-
-        scope_card = SACard()
-        scope_card.add_widget(SASectionHeader("项目范围"))
-        scope_lay = scope_card.body_layout
-        self.body_layout.addWidget(scope_card)
-        self._routes_section(detail["routes"], lay=scope_lay)
-        self._skills_section(detail["skills"], lay=scope_lay)
-        self._topics_section(detail["topics"], lay=scope_lay)
-        self._readiness_section()
-        self._milestones_section(detail["milestones"])
-        self._outputs_section(detail["outputs"])
-        self._evidence_section()
+        try:
+            detail = self.service.get_project_detail(self.project_id)
+        except Exception:
+            retry = _secondary("重试", self.refresh)
+            self.body_layout.addWidget(SAEmptyState(
+                "项目数据暂不可用", "稍后重试，项目记录不会被修改。", action=retry,
+            ))
+            self.body_layout.addStretch()
+            return
+        project = detail['project']
+        self.title_label.setText(project['name'])
+        self.setWindowTitle(f"实践项目：{project['name']}")
+        metrics = _project_metrics(self.service, self.capability_service,
+                                   self.readiness_service, self.project_id)
+        self.body_layout.addWidget(PracticeDetailSummary(
+            goal=project.get('goal') or '', status=_project_status_key(project['status']),
+            project_type=project_type_label(project['project_type']), metrics=metrics,
+        ))
+        info = self._new_section("info", "项目信息")
+        for name, data in (("状态", project_status_label(project['status'])),
+                           ("类型", project_type_label(project['project_type'])),
+                           ("目标", project.get('goal') or '—'),
+                           ("描述", project.get('description') or '—')):
+            self._value_pair(info.body_layout, name, data)
+        self._milestones_section(detail['milestones'])
+        self._outputs_section(detail['outputs'])
+        self._readiness_section(metrics.readiness, detail['topics'])
+        self._evidence_section(metrics.evidence)
+        scope = self._new_section("scope", "项目关联",
+                                  f"{len(detail['routes'])} 条路线 · {len(detail['topics'])} 个知识点")
+        self._routes_section(detail['routes'], lay=scope.body_layout)
+        self._skills_section(detail['skills'], lay=scope.body_layout)
+        self._topics_section(detail['topics'], lay=scope.body_layout)
         self.body_layout.addStretch()
+        self.body_layout.activate()
         self._restore_scroll(value)
+
+    def _remember_expanded(self, key, expanded):
+        self._expanded_states[key] = expanded
+        self._clear_scroll_restore()
+
+    def _new_section(self, key, title, summary="", *, expanded=False):
+        section = PracticeDetailSection(
+            key, title, summary, expanded=self._expanded_states.get(key, expanded)
+        )
+        section.expanded_changed.connect(self._remember_expanded)
+        self.body_layout.addWidget(section)
+        return section
 
     def _clear_scroll_restore(self) -> None:
         """Invalidate queued restores and disconnect the only range handler."""
@@ -457,6 +482,11 @@ class PracticeProjectDetailDialog(QDialog):
                     QEvent.Type.Wheel, QEvent.Type.MouseButtonPress,
                     QEvent.Type.TouchBegin,
                 ):
+            self._clear_scroll_restore()
+        elif event.type() == QEvent.Type.KeyPress and event.key() in (
+            Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_PageUp,
+            Qt.Key.Key_PageDown, Qt.Key.Key_Home, Qt.Key.Key_End,
+        ):
             self._clear_scroll_restore()
         return super().eventFilter(watched, event)
 
@@ -524,84 +554,42 @@ class PracticeProjectDetailDialog(QDialog):
         lay.addWidget(lbl)
 
     def _milestones_section(self, milestones) -> None:
-        card = SACard()
-        card.add_widget(SASectionHeader("里程碑"))
-        lay = card.body_layout
-        self.body_layout.addWidget(card)
-        head = QHBoxLayout()
-        head.addStretch()
-        head.addWidget(_secondary("新增里程碑", self._add_milestone))
-        lay.addLayout(head)
-        if not milestones:
-            lbl = QLabel("尚未设置里程碑")
-            lbl.setObjectName("TaskMeta")
-            lay.addWidget(lbl)
-            return
-        for m in milestones:
-            row = QHBoxLayout()
-            lbl = QLabel(
-                f"#{m['order_index']} {m['title']}　"
-                f"[{milestone_status_label(m['status'])}]"
-            )
-            lbl.setObjectName("TaskMeta")
-            lbl.setWordWrap(True)
-            row.addWidget(lbl, stretch=1)
-            nxt = {"todo": "in_progress", "in_progress": "done",
-                   "done": "todo"}[m["status"]]
-            row.addWidget(_secondary(
-                "推进", lambda _=False, mm=m, n=nxt: self._advance_milestone(mm, n)
-            ))
-            row.addWidget(_secondary(
-                "编辑", lambda _=False, mm=m: self._edit_milestone(mm)
-            ))
-            row.addWidget(_secondary(
-                "删除", lambda _=False, mm=m: self._delete_milestone(mm)
-            ))
-            lay.addLayout(row)
+        section = PracticeMilestonesSection(
+            milestones, expanded=self._expanded_states.get("milestones", True)
+        )
+        section.expanded_changed.connect(self._remember_expanded)
+        section.add_requested.connect(self._add_milestone)
+        by_id = {m['id']: m for m in milestones}
+        def requested(action, entity_id):
+            milestone = by_id[entity_id]
+            if action in ("start", "complete", "reset"):
+                status = {"start": "in_progress", "complete": "done", "reset": "todo"}[action]
+                self._advance_milestone(milestone, status)
+            elif action == "edit":
+                self._edit_milestone(milestone)
+            elif action == "delete":
+                self._delete_milestone(milestone)
+        section.requested.connect(requested)
+        self.body_layout.addWidget(section)
 
     def _outputs_section(self, outputs) -> None:
-        card = SACard()
-        card.add_widget(SASectionHeader("项目成果"))
-        lay = card.body_layout
-        self.body_layout.addWidget(card)
-        head = QHBoxLayout()
-        head.addStretch()
-        head.addWidget(_secondary("新增成果", self._add_output))
-        lay.addLayout(head)
-        if not outputs:
-            lbl = QLabel("暂无项目成果")
-            lbl.setObjectName("TaskMeta")
-            lay.addWidget(lbl)
-            return
-        for o in outputs:
-            row = QHBoxLayout()
-            row.setSpacing(8)
-            row.addWidget(
-                SATag(output_type_label(o['output_type']), "neutral")
-            )
-            uri = f"　{o['uri']}" if o.get("uri") else ""
-            lbl = QLabel(f"{o['title']}{uri}")
-            lbl.setObjectName("TaskMeta")
-            lbl.setWordWrap(True)
-            row.addWidget(lbl, stretch=1)
-            row.addWidget(_secondary(
-                "编辑", lambda _=False, oo=o: self._edit_output(oo)
-            ))
-            row.addWidget(_secondary(
-                "删除", lambda _=False, oo=o: self._delete_output(oo)
-            ))
-            lay.addLayout(row)
+        snapshots = [{**output, 'type_label': output_type_label(output['output_type'])}
+                     for output in outputs]
+        section = PracticeOutputsSection(
+            snapshots, expanded=self._expanded_states.get("outputs", True)
+        )
+        section.expanded_changed.connect(self._remember_expanded)
+        section.add_requested.connect(self._add_output)
+        by_id = {o['id']: o for o in outputs}
+        handlers = {"edit": self._edit_output, "delete": self._delete_output}
+        section.requested.connect(lambda key, oid: handlers[key](by_id[oid]))
+        self.body_layout.addWidget(section)
 
     # ---------- Phase 6：学习准备度 ----------
 
-    def _readiness_section(self) -> None:
-        card = SACard()
-        card.add_widget(SASectionHeader("学习准备"))
-        lay = card.body_layout
-        self.body_layout.addWidget(card)
-        head = QHBoxLayout()
-        head.addStretch()
-        lay.addLayout(head)
+    def _readiness_section(self, summary="", topics=()) -> None:
+        section = self._new_section("readiness", "学习准备", summary)
+        lay = section.body_layout
         if self.readiness_service is None:
             lbl = QLabel("未启用学习准备度")
             lbl.setObjectName("TaskMeta")
@@ -611,8 +599,8 @@ class PracticeProjectDetailDialog(QDialog):
             readiness = self.readiness_service.get_project_readiness(
                 self.project_id
             )
-        except Exception as e:  # noqa: BLE001
-            lbl = QLabel(f"学习准备度不可用：{e}")
+        except Exception:  # optional data failure is distinct from no requirements
+            lbl = QLabel("学习准备度暂不可用")
             lbl.setObjectName("TaskMeta")
             lay.addWidget(lbl)
             return
@@ -661,11 +649,11 @@ class PracticeProjectDetailDialog(QDialog):
             lay.addLayout(row)
 
         # 已关联但未设置要求的 Topic（§75：不强制，用户需要时再设）
-        for tid in self.service.projects.list_topic_ids(self.project_id):
+        for topic in topics:
+            tid = topic['id']
             if int(tid) in covered:
                 continue
-            topic = self.plan_repo.get_topic(tid)
-            name = getattr(topic, "name", "") if topic else ""
+            name = topic['name']
             row = QHBoxLayout()
             lbl = QLabel(f"{name}\n能力要求：未设置")
             lbl.setObjectName("TaskMeta")
@@ -691,22 +679,23 @@ class PracticeProjectDetailDialog(QDialog):
 
     # ---------- Phase 5：项目能力证据 ----------
 
-    def _evidence_section(self) -> None:
-        card = SACard()
-        card.add_widget(SASectionHeader("项目能力证据"))
-        lay = card.body_layout
-        self.body_layout.addWidget(card)
-        head = QHBoxLayout()
-        head.addStretch()
-        lay.addLayout(head)
+    def _evidence_section(self, summary="") -> None:
+        section = self._new_section("evidence", "项目能力证据", summary)
+        lay = section.body_layout
+        lay.addWidget(plain_label(
+            "项目完成、里程碑或成果数量不会自动改变掌握度。"
+            "显式确认的真实项目使用证据可形成 PROJECT 级能力证据。"
+        ))
         if self.capability_service is None:
             lbl = QLabel("未启用项目能力证据")
             lbl.setObjectName("TaskMeta")
             lay.addWidget(lbl)
             return
-        candidates = self.capability_service.list_evidence_candidates(
-            self.project_id
-        )
+        try:
+            candidates = self.capability_service.list_evidence_candidates(self.project_id)
+        except Exception:
+            lay.addWidget(plain_label("项目能力证据暂不可用"))
+            return
         if not candidates:
             lbl = QLabel(
                 "项目尚未关联 Topic；关联后可逐 Topic 确认项目使用证据。"
@@ -718,9 +707,13 @@ class PracticeProjectDetailDialog(QDialog):
         for c in candidates:
             row = QHBoxLayout()
             if c["has_active_evidence"]:
-                ev = self.capability_service.get_topic_evidence(
-                    c["active_evidence_id"]
-                ) or {}
+                try:
+                    ev = self.capability_service.get_topic_evidence(c["active_evidence_id"])
+                except Exception:
+                    ev = None
+                if ev is None:
+                    lay.addWidget(plain_label(f"{c['topic_name']}：证据详情暂不可用"))
+                    continue
                 outputs = " · ".join(ev.get("output_labels") or [])
                 lbl = QLabel(
                     f"{c['topic_name']}\n已确认项目使用证据\n"
@@ -758,6 +751,7 @@ class PracticeProjectDetailDialog(QDialog):
                 row.addWidget(btn)
             lbl.setObjectName("TaskMeta")
             lbl.setWordWrap(True)
+            lbl.setTextFormat(Qt.TextFormat.PlainText)
             lay.addLayout(row)
 
     def _confirm_topic_evidence(self, candidate) -> None:
@@ -873,5 +867,9 @@ class PracticeProjectDetailDialog(QDialog):
             self.refresh()
 
     def _delete_output(self, output) -> None:
-        self.service.delete_output(output["id"])
+        try:
+            self.service.delete_output(output["id"])
+        except (PracticeError, ValueError) as error:
+            QMessageBox.warning(self, "无法删除", str(error))
+            return
         self.refresh()

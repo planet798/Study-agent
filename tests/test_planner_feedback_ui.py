@@ -158,7 +158,10 @@ class TestRouteDetailBlockers:
         )
         dlg = self._dialog(env, qtbot)
         joined = "\n".join(_labels(dlg))
-        assert "项目学习阻塞：1" in joined
+        assert "项目学习需求" in joined
+        from app.ui.route_detail_sections import RouteDetailSection
+        section = next(s for s in dlg.findChildren(RouteDetailSection) if s.key == "blockers")
+        assert "1 项" in _labels(section)
         assert "vLLM 与 PagedAttention" in joined
         assert "未学习 → 能够写代码" in joined
 
@@ -166,7 +169,10 @@ class TestRouteDetailBlockers:
         env = practice_readiness_env
         dlg = self._dialog(env, qtbot)
         joined = "\n".join(_labels(dlg))
-        assert "项目学习阻塞：0" in joined
+        assert "暂无项目学习需求" in joined
+        from app.ui.route_detail_sections import RouteDetailSection
+        section = next(s for s in dlg.findChildren(RouteDetailSection) if s.key == "blockers")
+        assert "0 项" in _labels(section)
 
     def test_needs_assessment_hint(self, practice_readiness_env, qtbot):
         env = practice_readiness_env

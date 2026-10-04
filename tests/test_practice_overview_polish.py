@@ -1,6 +1,8 @@
 """实践概览的空态、操作与位置回归。"""
 from types import SimpleNamespace
 
+import pytest
+
 from PySide6.QtWidgets import QLabel, QMessageBox
 
 from app.ui.components.workspace_sections import ActionsMenuButton
@@ -46,10 +48,13 @@ def test_default_filter_excludes_archived_and_empty_filter_can_clear(practice_en
     assert page.findChild(PracticeOverviewRow).property('projectId') == active['id']
 
 
-def test_only_archived_empty_links_to_archived_filter(practice_env, qtbot):
+@pytest.mark.parametrize('status', [None, 'planned', 'completed'])
+def test_only_archived_empty_links_to_archived_filter(practice_env, qtbot, status):
     project = practice_env.service.create_project('Archive')
     practice_env.service.archive_project(project['id'])
     page = _page(practice_env, qtbot)
+    if status is not None:
+        page.filter_combo.setCurrentIndex(page.filter_combo.findData(status))
     assert page.empty_state.title() == '项目已全部归档'
     page.empty_action_btn.click()
     assert page.filter_combo.currentData() == 'archived'

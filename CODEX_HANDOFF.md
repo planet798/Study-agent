@@ -1,7 +1,7 @@
 # Study Agent — Codex 开发交接
 
 > 本文面向在 Codex 中继续开发本项目的 coding agent，不依赖 Pi 会话、技能、子代理或临时文件。
-> 2026-10-03 最新功能范围：学习路线概览与详情精修；概览提交为 `a40394d`，详情提交请核对实际 `git log`。此前 Markdown 面板功能基线为 `6f6f656`，原交接文档提交为 `dec2935`。
+> 2026-10-04 最新功能范围：实践项目概览与详情精修；概览提交为 `cdd5255`，详情提交请核对实际 `git log`。学习路线提交 `a40394d` / `5aeffca` 已获用户实机验收。此前 Markdown 面板功能基线为 `6f6f656`。
 > 用户最新确认：**最新 Markdown 文档面板修复已成功，Windows 实际验证没有问题。** 不要再把该修复标成未完成任务。
 > 2026-10-03 补充：用户确认 **Personalization-1E-C 已全部实现**；旧聊天中的 E-C 方案不能再作为待办。当前检出代码与该完成记录的核对结果见第 10 节。
 
@@ -198,6 +198,36 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
   tests/test_routes_ui3.py tests/test_route_details_polish.py -q
 ```
 
+### 实践项目本轮验证（2026-10-04 · WSL2）
+
+- 概览阶段交互与路线兼容：**79 passed in 43.41s**。
+- 最终实践 UI / 菜单 / 复制 / 折叠 / 生命周期 / 准备度 UI / 已验收路线兼容：
+  **127 passed in 78.91s**。
+- 成果与证据历史保护、准备度、能力确认校验、里程碑及主题：**105 passed in 5.78s**。
+- compileall / diff-check 通过；隔离临时 DB 的深浅主题与 100%/125%/150%/175% scale 离屏渲染通过，
+  默认详情及展开的准备度/证据分区实际 widget 图像已查看。未运行完整 Release Gate，尚无实践页用户实机验收。
+- 旧 UI-4 的卡片结构断言，以及路线 blocker 的旧文案断言，已同步到当前已确认的视图；
+  对应指标独立、需求数量与实际知识点/能力方向仍有明确断言，没有删掉业务验证。
+
+最终交互命令：
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
+  tests/test_practice_detail_polish.py tests/test_practice_overview_polish.py \
+  tests/test_practice_ui.py tests/test_practice_capability_ui.py \
+  tests/test_practice_scroll_lifecycle.py tests/test_planner_feedback_ui.py \
+  tests/test_ui4_pages.py tests/test_routes_ui3.py tests/test_route_details_polish.py -q
+```
+
+业务保护与主题命令：
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
+  tests/test_practice_outputs.py tests/test_practice_evidence_history.py \
+  tests/test_practice_readiness.py tests/test_practice_capability_validation.py \
+  tests/test_practice_milestones.py tests/test_theme_runtime.py -q
+```
+
 ## 7. 环境与 Windows 常用命令
 
 以下在项目根目录执行。使用项目 `.venv`，不用全局 Python/pip，不能提交 `.venv`。
@@ -315,7 +345,7 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ## 10. 后续工作状态
 
-**最新授权范围是学习路线概览与详情精修。** 用户确认保留详情弹窗与三类进度摘要后，已明确要求“开始实施”。本轮不涉及实践页、设置页及个性化功能开发。
+**最新授权范围是实践项目概览与详情精修。** 用户明确要求实施已确认方案：保留弹窗、优先里程碑与成果、四类摘要独立。本轮不涉及设置页及个性化功能开发。
 
 ### 学习路线精修（2026-10-03）
 
@@ -327,6 +357,17 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 - 用户于 2026-10-04 明确反馈实际验收已完成、达到预期效果。学习路线已通过 Windows 实机验收；未逐项报告的极端场景不作扩张性声明。
 
 
+### 实践项目精修（2026-10-04）
+
+- 概览轻量化，四类摘要保持独立；默认“全部未归档”，筛选范围与排序不变。
+- 空态区分首次无项目、筛选无结果、仅归档项目、读取失败，各有相应入口；管理操作进入菜单。
+- 详情保留弹窗，里程碑与成果在前且默认展开；资料、准备度、证据、项目关联折叠，标题显示数量。
+- 里程碑操作明确为开始 / 标记完成，重置收进菜单；成果地址可选择复制，保护删除失败可见。
+- 无 schema、规划 gate、业务算法变化。历史证据引用的成果及关联保护仍由原服务负责。
+- 菜单与折叠复用 `components/workspace_sections.py`；概览位置恢复复用 `components/scroll_position.py`。
+  路线兼容入口与样式标识保留，实践代码不依赖路线专用类。
+- 实践项目尚未获用户 Windows 实机验收；离屏检查不能代替该验收。
+
 ### Personalization 进度（2026-10-03）
 
 - P-1B / P-1C / P-1D、P-1E-A（含 A.1 / A.2）、P-1E-B 的持久化、设置管理、上下文注入、安全提取及后台临时候选链路已在当前检出版本中定位。
@@ -335,7 +376,7 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 - 这说明当前检出版本尚未对应到用户确认的 E-C 实现，不推翻用户完成记录。本次只记录差异；没有补写功能，也没有核实 E-C 对应提交、测试或实机验收。涉及 E-C 的后续任务先核对实际实现版本，不凭旧方案猜测或重做。
 - `docs/PERSONALIZATION.md` 的 P-1B 至 E-B 章节是这份检出代码的实现与历史验证说明，不能单凭章节标题或旧的“future E-C”措辞推断项目仍停在 E-B。
 
-学习路线已通过用户实机验收（2026-10-04）。本轮用户已授权实践项目概览与详情精修；设置与通用弹窗仍需另行明确范围。
+学习路线已通过用户实机验收（2026-10-04）。本轮实践项目精修已实施，待用户实机验收；设置与通用弹窗仍需另行明确范围。
 
 不要为「彻底去 AI 味」改模型输出原文、删状态/权限说明，或重写业务。视觉问题首先用完整用户场景复现，验收需断言目标控件真实存在，不只看测试总数。
 
@@ -354,4 +395,4 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ---
 
-交接摘要：**保留已验收的暖中性桌面 UI 与 Markdown 文档面板；学习路线概览及详情精修已通过用户 Windows 实机验收（2026-10-04）。下一位 Codex 从新的用户任务继续，不重做已完成项。**
+交接摘要：**保留已验收的暖中性桌面 UI 与 Markdown 文档面板；学习路线概览及详情精修已通过用户 Windows 实机验收（2026-10-04）。实践项目概览及详情精修已实施，待用户实机验收。下一位 Codex 从新的用户任务继续，不重做已完成项。**

@@ -948,3 +948,9 @@ QFrame#PracticeOverviewRow {
 QFrame#PracticeOverviewRow:hover {
     background-color: {{surface_hover}};
 }
+
+QFrame#PracticeDetailSection, QFrame#PracticeMilestoneRow, QFrame#PracticeOutputRow {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {{border_subtle}};
+}

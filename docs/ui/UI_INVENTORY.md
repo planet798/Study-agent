@@ -63,7 +63,7 @@
 
 2026-10 精修：概览采用轻量条目与管理菜单；详情将课程结构提前，阶段及证据/辅助分区可折叠。概览与详情的纯视图分别位于 `route_overview_widgets.py` / `route_detail_sections.py`，操作由 `routes_page.py` 编排，滚动恢复由 `route_scroll.py` 管理。
 
-## 3. `app/ui/practice_page.py` — 723 LOC
+## 3. `app/ui/practice_page.py` — 实践视图已拆分（2026-10-04）
 
 | 项 | 内容 |
 |---|---|
@@ -72,7 +72,7 @@
 | 依赖 service | `practice_service`、`route_repo`、`skill_repo`、`plan_repo`、`capability_service`(practice_capability)、`readiness_service` |
 | 依赖 UI | `practice_dialogs`（10 个对话框）、`capability_dialog`（延迟）、`styles` |
 | 局部 style/QSS | 无；含自定义 `_secondary()` 工厂、`_clear_layout()` 递归工具、`_FILTERS` 常量 |
-| 是否值得拆分 | **是**。详情 dialog 内部 7 个 section 可复用 `SACard`/`SASectionHeader`；`_secondary` 与 `routes_page._secondary` 重复。 |
+| 是否值得拆分 | 已拆出概览条目和详情里程碑/成果纯视图；菜单、折叠分区与滚动恢复复用小型公共组件。原页面继续组织查询、对话框和服务调用。 |
 
 ## 4. `app/ui/ai_settings_page.py` — 671 LOC
 

@@ -100,14 +100,14 @@ def _practice_page(env, qtbot):
     return page
 
 
-def test_practice_card_uses_sacard_and_badge(practice_env, qtbot):
-    from app.ui.components.card import SACard
+def test_practice_row_uses_lightweight_container_and_badge(practice_env, qtbot):
+    from app.ui.practice_overview_widgets import PracticeOverviewRow
     from app.ui.components.status_badge import SAStatusBadge
 
     env = practice_env
     env.service.create_project("P", "llm_training", route_ids=[env.r1.id])
     page = _practice_page(env, qtbot)
-    assert page.list_container.findChildren(SACard)
+    assert page.list_container.findChildren(PracticeOverviewRow)
     badges = page.list_container.findChildren(SAStatusBadge)
     assert badges and badges[0].text() == "计划中"
 
@@ -147,7 +147,7 @@ def test_practice_detail_sections(practice_env, qtbot):
     )
     qtbot.addWidget(dlg)
     joined = "\n".join(l.text() for l in dlg.findChildren(QLabel))
-    for section in ("概览", "关联学习路线", "关联技能", "关联 Topic",
+    for section in ("项目信息", "项目关联", "关联学习路线", "关联技能", "关联 Topic",
                     "里程碑", "项目成果"):
         assert section in joined, section
     assert "【" not in joined
