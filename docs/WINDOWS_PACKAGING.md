@@ -43,3 +43,10 @@ python -m pip check
 - [ ] 用户数据不出现在安装目录，安装包包含第三方许可文件。
 
 完整记录 CI 结果与上述人工结果后，才将 Release 草稿公开发布。首版无自动更新和签名，不把自动检查通过记为实机验收通过。
+
+## 0.2.0 自动验证记录（2026-10-04）
+
+- 安装包对应应用提交 `e3dd3bf0580716bd4b9cff9542a3fc5df8b979c0`；[构建与完整回归](https://github.com/planet798/Study-agent/actions/runs/37192762034) 全部通过：Linux 3034 项、Windows 123 项。
+- 冻结程序离线自检通过，内置 OAuth 桥返回 9 个提供商；中文/空格自选安装目录、隔离 PATH、覆盖安装与卸载后数据保留检查通过。本机下载后 SHA256 复核通过。
+- [发布草稿生成](https://github.com/planet798/Study-agent/actions/runs/37194089299) 已通过；[0.2.0 草稿](https://github.com/planet798/Study-agent/releases/tag/untagged-16f1b51bde46709dee1b) 包含安装程序与 SHA256 校验文件。
+- 上述为自动验证；正常桌面交互、真实订阅登录及人工验收仍待用户执行，未公开正式发布。
