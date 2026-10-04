@@ -324,7 +324,7 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 - 同次打开的折叠选择与刷新位置保留；用户滚动或关闭会使旧恢复请求失效。无计划创建入口只有一组，读取失败不冒充零进度。
 - 视图拆入 `route_overview_widgets.py` / `route_detail_sections.py`，恢复生命周期在 `route_scroll.py`；服务、schema、规划 gate 与证据算法未更改。
 - 概览沿用 `RoutePlanService` 的课程统计，详情沿用 `RouteProgressService` 的 component-aware 覆盖口径；不可在视觉精修中悄悄统一它们。理论完成而必需实验未完成的场景已有回归。
-- Windows 实机视觉验收尚未完成。WSL2 离屏渲染不能代替 Windows 验收，详细场景见 `docs/ui/ROUTES_DESIGN.md` 与 `docs/ui/FINAL_UI_ACCEPTANCE.md`。
+- 用户于 2026-10-04 明确反馈实际验收已完成、达到预期效果。学习路线已通过 Windows 实机验收；未逐项报告的极端场景不作扩张性声明。
 
 
 ### Personalization 进度（2026-10-03）
@@ -335,7 +335,7 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 - 这说明当前检出版本尚未对应到用户确认的 E-C 实现，不推翻用户完成记录。本次只记录差异；没有补写功能，也没有核实 E-C 对应提交、测试或实机验收。涉及 E-C 的后续任务先核对实际实现版本，不凭旧方案猜测或重做。
 - `docs/PERSONALIZATION.md` 的 P-1B 至 E-B 章节是这份检出代码的实现与历史验证说明，不能单凭章节标题或旧的“future E-C”措辞推断项目仍停在 E-B。
 
-学习路线本轮已实施，尚待 Windows 实机验收。后续建议是实践项目 → 设置/对话框收尾；这些仍不是自动施工授权，用户选定后先明确范围。
+学习路线已通过用户实机验收（2026-10-04）。本轮用户已授权实践项目概览与详情精修；设置与通用弹窗仍需另行明确范围。
 
 不要为「彻底去 AI 味」改模型输出原文、删状态/权限说明，或重写业务。视觉问题首先用完整用户场景复现，验收需断言目标控件真实存在，不只看测试总数。
 
@@ -354,4 +354,4 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ---
 
-交接摘要：**保留已验收的暖中性桌面 UI 与 Markdown 文档面板；学习路线概览及详情精修已实施，尚待 Windows 实机验收。下一位 Codex 从新的用户任务继续，不重做已完成项。**
+交接摘要：**保留已验收的暖中性桌面 UI 与 Markdown 文档面板；学习路线概览及详情精修已通过用户 Windows 实机验收（2026-10-04）。下一位 Codex 从新的用户任务继续，不重做已完成项。**

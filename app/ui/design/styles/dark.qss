@@ -938,3 +938,13 @@ QFrame#RouteDetailSection, QFrame#RouteTopicRow {
     border: none;
     border-bottom: 1px solid {{border_subtle}};
 }
+
+/* Practice workspace: scoped lightweight project rows. */
+QFrame#PracticeOverviewRow {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {{border_subtle}};
+}
+QFrame#PracticeOverviewRow:hover {
+    background-color: {{surface_hover}};
+}

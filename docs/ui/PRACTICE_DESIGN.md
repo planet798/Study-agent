@@ -3,20 +3,15 @@
 > Project Portfolio / Evidence Workspace。回答“在做哪些项目、做到什么程度、
 > 产出什么、还缺哪些能力？”不是 project dashboard。
 
-## Overview
-- Controls：状态筛选 + `SAButton`（ADD icon）“新建项目”。
-- Project Cards（`SACard(interactive)`）。
-- `SAEmptyState`：“还没有实践项目 / 创建项目，把学习路线、技能和 Topic 转化为可验证成果。”
+## Overview（2026-10-04 精修）
 
-文案已修正（不再声称“项目不参与能力等级判定”）：
-“实践项目用于沉淀真实成果与能力证据；学习准备度可帮助确定项目相关知识的下一学习步骤。”
-secondary：“项目证据不会直接改变 Mastery；显式确认的项目使用证据可形成 PROJECT 级能力证据。”
-
-## Project Card
-`SAStatusBadge`（planned / in_progress / completed / archived，沿用现有 status semantics）
-+ project type `SATag` + related route `SATag`（route 名，不显示数字 id）。
-四类进度**必须分离，不合并为统一 project %**：
-`里程碑：x / y`、`成果：N`、`项目能力证据：N`、`学习准备度：x / y 已满足`（有 readiness 时）。
+- 状态筛选默认“全部未归档”，沿用未归档查询范围，不包含归档历史。
+- 项目为轻量条目：名称 / 状态 / 查看项目 / 更多；类型与关联路线为次要信息，可换行。
+- 四类指标独立：里程碑 x/y、成果数量、有效项目能力证据数量、学习准备度 x/y；禁止统一 project %。
+- 编辑 / 归档 / 恢复进入菜单，沿用原服务与确认流程。
+- 全库无项目 → 创建；当前状态无匹配 → 清除筛选；默认范围仅有归档项目 → 查看已归档；读取失败 → 重试。
+- 四类指标读取失败独立显示“暂不可用”，未启用的模块显示“未启用”；不伪造零证据或零成果。
+- 刷新与关闭详情保留概览滚动位置；切换筛选回到顶部。
 
 ## Detail（保留 PracticeProjectDetailDialog）
 Cards：概览（状态/类型/目标/描述/里程碑/成果，`_value_pair`）→ 关联学习路线 →

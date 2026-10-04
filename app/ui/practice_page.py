@@ -52,6 +52,35 @@ from .components.status_badge import SAStatusBadge
 from .components.tag import SATag
 from .design import icons as _icons
 from .design import spacing as _spacing
+from .components.scroll_position import ScrollPositionKeeper
+from .components.workspace_sections import plain_label
+from .practice_overview_widgets import PracticeOverviewRow, ProjectMetrics
+
+
+def _project_metrics(service, capability_service, readiness_service, project_id):
+    """服务读取的可展示快照；未知值不可伪装为零。"""
+    try:
+        progress = service.get_project_progress(project_id)
+        milestones = (f"{progress['milestones_done']} / {progress['milestones_total']}"
+                      if progress['has_milestones'] else "尚未设置里程碑")
+        outputs = str(progress['output_count'])
+    except Exception:
+        milestones = outputs = "暂不可用"
+    evidence = "未启用"
+    if capability_service is not None:
+        try:
+            evidence = str(capability_service.count_active_by_project(project_id))
+        except Exception:
+            evidence = "暂不可用"
+    readiness = "未启用"
+    if readiness_service is not None:
+        try:
+            data = readiness_service.get_project_readiness(project_id)
+            readiness = f"{data['satisfied_count']} / {data['total_count']} 已满足"
+        except Exception:
+            readiness = "暂不可用"
+    return ProjectMetrics(milestones, outputs, evidence, readiness)
+
 
 
 def _project_status_key(status: str) -> str:
@@ -85,7 +114,7 @@ def _clear_layout(layout) -> None:
 
 
 _FILTERS = (
-    ("全部", None),
+    ("全部未归档", None),
     ("进行中", STATUS_IN_PROGRESS),
     ("计划中", STATUS_PLANNED),
     ("已完成", STATUS_COMPLETED),
@@ -117,7 +146,7 @@ class PracticeProjectsPage(QWidget):
         self.filter_combo = QComboBox()
         for label, value in _FILTERS:
             self.filter_combo.addItem(label, value)
-        self.filter_combo.currentIndexChanged.connect(lambda *_: self.refresh())
+        self.filter_combo.currentIndexChanged.connect(lambda *_: self.refresh(reset_scroll=True))
         head.addWidget(self.filter_combo)
         head.addStretch()
         self.create_btn = SAButton(
@@ -127,20 +156,8 @@ class PracticeProjectsPage(QWidget):
         head.addWidget(self.create_btn)
         root.addLayout(head)
 
-        hint = QLabel(
-            "实践项目用于沉淀真实成果与能力证据；"
-            "学习准备度可帮助确定项目相关知识的下一学习步骤。"
-        )
-        hint.setObjectName("TaskMeta")
-        hint.setWordWrap(True)
+        hint = plain_label("用里程碑推进项目，用成果与确认的证据记录实践能力。")
         root.addWidget(hint)
-        hint2 = QLabel(
-            "项目证据不会直接改变 Mastery；"
-            "显式确认的项目使用证据可形成 PROJECT 级能力证据。"
-        )
-        hint2.setObjectName("TaskMeta")
-        hint2.setWordWrap(True)
-        root.addWidget(hint2)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -150,10 +167,12 @@ class PracticeProjectsPage(QWidget):
         self.list_layout.setContentsMargins(0, 0, 6, 0)
         self.list_layout.setSpacing(_spacing.SM)
         self.scroll.setWidget(self.list_container)
+        self._scroll_keeper = ScrollPositionKeeper(self.scroll)
         self.empty_action_btn = SAButton(
             "新建项目", variant="secondary", icon_name=_icons.IconName.ADD
         )
-        self.empty_action_btn.clicked.connect(self._on_create)
+        self._empty_action = "create"
+        self.empty_action_btn.clicked.connect(self._on_empty_action)
         self.empty_state = SAEmptyState(
             title="还没有实践项目",
             description="创建项目，把学习路线、技能和 Topic 转化为可验证成果。",
@@ -166,86 +185,66 @@ class PracticeProjectsPage(QWidget):
 
     # ---------- 渲染 ----------
 
-    def refresh(self) -> None:
+    def refresh(self, *, reset_scroll=False) -> None:
+        value = self._scroll_keeper.capture()
         _clear_layout(self.list_layout)
-
+        self.empty_state.setVisible(False)
+        self.scroll.setVisible(True)
+        self.create_btn.setVisible(True)
         status = self.filter_combo.currentData()
-        if status is None:
-            projects = self.service.projects.list_active()
-        else:
-            projects = self.service.list_projects(status=status)
-        self.empty_state.setVisible(not projects)
-        for p in projects:
-            self.list_layout.addWidget(self._project_card(p))
+        try:
+            projects = (self.service.projects.list_active() if status is None
+                        else self.service.list_projects(status=status))
+            all_projects = self.service.list_projects() if not projects else None
+        except Exception:
+            self._show_empty("项目数据暂不可用", "稍后重试，当前筛选保持不变。", "retry", "重试")
+            return
+        if not projects:
+            if not all_projects:
+                self._show_empty("还没有实践项目", "新建项目，安排里程碑并记录实践成果。", "create", "新建项目")
+                self.create_btn.hide()
+            elif status is None:
+                self._show_empty("项目已全部归档", "可查看归档记录，或从上方新建项目。", "archived", "查看已归档")
+            else:
+                self._show_empty("当前筛选下没有项目", "切换到全部未归档项目继续浏览。", "clear", "清除筛选")
+            return
+        for project in projects:
+            self.list_layout.addWidget(self._project_card(project))
         self.list_layout.addStretch()
+        self.list_layout.activate()
+        self._scroll_keeper.restore(0 if reset_scroll else value)
+
+    def _show_empty(self, title, description, action, action_text):
+        self._empty_action = action
+        self.empty_state.set_title(title)
+        self.empty_state.set_description(description)
+        self.empty_action_btn.setText(action_text)
+        self.empty_state.show()
+        self.scroll.hide()
+
+    def _on_empty_action(self):
+        if self._empty_action == "create":
+            self._on_create()
+        elif self._empty_action == "archived":
+            self.filter_combo.setCurrentIndex(self.filter_combo.findData(STATUS_ARCHIVED))
+        elif self._empty_action == "clear":
+            self.filter_combo.setCurrentIndex(0)
+        else:
+            self.refresh()
 
     def _project_card(self, project: dict) -> QWidget:
-        card = SACard(variant="interactive")
-        lay = card.body_layout
-
-        top = QHBoxLayout()
-        name = QLabel(project["name"])
-        name.setObjectName("TaskTitle")
-        name.setWordWrap(True)
-        top.addWidget(name)
-        top.addStretch()
-        top.addWidget(SAStatusBadge(_project_status_key(project["status"])))
-        lay.addLayout(top)
-
-        type_row = QHBoxLayout()
-        type_row.setSpacing(6)
-        type_row.addWidget(
-            SATag(project_type_label(project["project_type"]), "neutral")
+        row = PracticeOverviewRow(
+            name=project['name'], status=_project_status_key(project['status']),
+            project_type=project_type_label(project['project_type']),
+            routes=self._project_route_names(project['id']),
+            metrics=_project_metrics(self.service, self.capability_service,
+                                     self.readiness_service, project['id']),
         )
-        route_names = self._project_route_names(project["id"])
-        for name_ in route_names:
-            type_row.addWidget(SATag(name_, "accent"))
-        type_row.addStretch()
-        lay.addLayout(type_row)
-
-        prog = self.service.get_project_progress(project["id"])
-        ms_txt = (
-            f"{prog['milestones_done']} / {prog['milestones_total']}"
-            if prog["has_milestones"] else "尚未设置里程碑"
-        )
-        evidence_n = 0
-        if self.capability_service is not None:
-            try:
-                evidence_n = self.capability_service.count_active_by_project(
-                    project["id"]
-                )
-            except Exception:  # noqa: BLE001
-                evidence_n = 0
-        metrics = QHBoxLayout()
-        metrics.setSpacing(12)
-        metrics.addWidget(self._meta(f"里程碑：{ms_txt}"))
-        metrics.addWidget(self._meta(f"成果：{prog['output_count']}"))
-        metrics.addWidget(self._meta(f"项目能力证据：{evidence_n}"))
-        metrics.addStretch()
-        lay.addLayout(metrics)
-
-        readiness_txt = self._project_readiness_text(project["id"])
-        if readiness_txt:
-            lay.addWidget(self._meta(readiness_txt))
-
-        row = QHBoxLayout()
-        row.addWidget(_secondary(
-            "查看项目", lambda _=False, p=project: self._open_detail(p)
-        ))
-        row.addWidget(_secondary(
-            "编辑", lambda _=False, p=project: self._edit(p)
-        ))
-        if project["status"] != STATUS_ARCHIVED:
-            row.addWidget(_secondary(
-                "归档", lambda _=False, p=project: self._archive(p)
-            ))
-        else:
-            row.addWidget(_secondary(
-                "恢复", lambda _=False, p=project: self._restore(p)
-            ))
-        row.addStretch()
-        lay.addLayout(row)
-        return card
+        row.setProperty("projectId", project['id'])
+        handlers = {"open": self._open_detail, "edit": self._edit,
+                    "archive": self._archive, "restore": self._restore}
+        row.requested.connect(lambda key, p=project: handlers[key](p))
+        return row
 
     @staticmethod
     def _meta(text: str) -> QLabel:
@@ -255,30 +254,17 @@ class PracticeProjectsPage(QWidget):
         return lbl
 
     def _project_route_names(self, project_id) -> list[str]:
-        names: list[str] = []
         if self.route_repo is None:
-            return names
+            return []
         try:
-            route_ids = self.service.projects.list_route_ids(project_id)
-        except Exception:  # noqa: BLE001
+            names = []
+            for rid in self.service.projects.list_route_ids(project_id):
+                route = self.route_repo.get(rid)
+                if route is not None:
+                    names.append(route.name)
             return names
-        for rid in route_ids:
-            r = self.route_repo.get(rid)
-            if r is not None:
-                names.append(r.name)
-        return names
-
-    def _project_readiness_text(self, project_id) -> str:
-        if self.readiness_service is None:
-            return ""
-        try:
-            readiness = self.readiness_service.get_project_readiness(project_id)
-        except Exception:  # noqa: BLE001
-            return ""
-        return (
-            f"学习准备度：{readiness['satisfied_count']} / "
-            f"{readiness['total_count']} 已满足"
-        )
+        except Exception:
+            return ["暂不可用"]
 
     # ---------- 操作 ----------
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QVBoxLayout
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout
 
 from .components.button import SAButton
 from .components.flow_layout import FlowWidget
@@ -14,31 +14,16 @@ from .components.status_badge import SAStatusBadge
 from .design import spacing
 
 
-def route_label(text: str, role: str = "TaskMeta") -> QLabel:
-    label = QLabel(text)
-    label.setObjectName(role)
-    label.setTextFormat(Qt.TextFormat.PlainText)
-    label.setWordWrap(True)
-    return label
+from .components.workspace_sections import ActionsMenuButton, plain_label as route_label
 
 
-class RouteActionsButton(SAButton):
-    """带语义操作 key 的菜单；菜单不执行业务写入。"""
+class RouteActionsButton(ActionsMenuButton):
+    """保留路线菜单的既有导入入口与可访问标识。"""
 
-    requested = Signal(str)
-
-    def __init__(self, actions: list[tuple[str, str]], parent=None):
-        super().__init__("更多", variant="subtle", size="small", parent=parent)
+    def __init__(self, actions, parent=None):
+        super().__init__(actions, parent)
         self.setAccessibleName("更多路线操作")
-        menu = QMenu(self)
-        menu.setObjectName("RouteActionsMenu")
-        for key, text in actions:
-            action = menu.addAction(text)
-            action.setData(key)
-            action.triggered.connect(
-                lambda _checked=False, k=key: self.requested.emit(k)
-            )
-        self.setMenu(menu)
+        self.menu().setObjectName("RouteActionsMenu")
 
 
 @dataclass(frozen=True)
