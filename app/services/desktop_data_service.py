@@ -66,13 +66,13 @@ def prepare_database(path: Path) -> None:
         if not preflight.get("ok"):
             raise DesktopDataError("数据库升级预演失败，原数据已保留，请检查备份。")
         # 复用既有发布迁移流程，避免另造业务迁移规则。
-        from app.main import _run_release_migrate
+        from app.diagnostics.release_executor import run_release_migrate
 
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         try:
-            _run_release_migrate(conn, apply_capability=True, skip_preflight=True)
+            run_release_migrate(conn, apply_capability=True, skip_preflight=True)
             conn.commit()
         finally:
             conn.close()
