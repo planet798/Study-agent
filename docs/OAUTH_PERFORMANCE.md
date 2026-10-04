@@ -24,4 +24,7 @@ python scripts/benchmark_bridge.py --output build/bridge-benchmark.json
 | 每次独立进程 | 102.29 ms |
 | 已预热复用进程 | 1.64 ms |
 
+同日 Windows Server 2022 构建环境、Node.js 22.19.0、同样五次离线查询，独立进程中位数为 187.77 ms，预热复用为 1.87 ms。
+数据来自 [v0.2.1 构建验证](https://github.com/planet798/Study-agent/actions/runs/37206030188)。这属于自动验证；真实账号的冷、暖模型请求和桌面交互体验需要分别实测，不能据此推断完整模型响应耗时。
+
 该基准不请求真实模型，不代表原 7061 ms 模型请求已降至 1.64 ms。真实模型性能应在同账号、模型、提示和网络条件下比较首字与完整请求耗时；不能通过降低推理量、输出量或重命名指标制造改善。
