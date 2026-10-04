@@ -140,7 +140,10 @@ def test_composer_wrapping_font_theme_and_page_height_recompute(qtbot, qapp, rep
     edit = page.input_edit
     qtbot.wait(30)
     initial = edit.height()
-    page.composer.set_text("wrapped draft " * 26)
+    # 依据当前平台字体，让宽窗口约三行、窄窗口更多行，避免两侧都触及七行上限。
+    phrase = "wrapped draft "
+    repeats = max(3, int(3 * edit.viewport().width() / edit.fontMetrics().horizontalAdvance(phrase)))
+    page.composer.set_text(phrase * repeats)
     page.resize(440, 900)
     qtbot.waitUntil(lambda: edit.height() > initial)
     narrow_height = edit.height()
@@ -150,10 +153,14 @@ def test_composer_wrapping_font_theme_and_page_height_recompute(qtbot, qapp, rep
     page.composer.set_text("draft " * 800)
     qtbot.waitUntil(lambda: edit.verticalScrollBar().maximum() > 0)
     qtbot.wait(30)
-    tall_cap = edit.height()
     page.resize(1000, 380)
-    qtbot.waitUntil(lambda: edit.height() < tall_cap)
-    assert edit.height() <= max(2 * edit.fontMetrics().lineSpacing() + 20, int(page.height() * .30))
+    # 小字体下七行上限可能已低于页面预算，正确行为无需再缩小。
+    import math
+    margins = edit.contentsMargins()
+    chrome = margins.top() + margins.bottom() + math.ceil(2 * edit.document().documentMargin())
+    line = edit.fontMetrics().lineSpacing()
+    expected_cap = max(2 * line + chrome, min(7 * line + chrome, int(page.height() * .30)))
+    qtbot.waitUntil(lambda: edit.height() == expected_cap)
     page.resize(1000, 900)
     page.composer.set_text(draft)
     for theme in ("dark", "light"):
