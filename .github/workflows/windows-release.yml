@@ -39,11 +39,10 @@ jobs:
           path: regression.xml
 
   windows:
-    needs: regression
     runs-on: windows-2022
     timeout-minutes: 60
-    permissions:
-      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,6 +52,7 @@ jobs:
         with:
           node-version: '22.19.0'
       - name: Resolve version
+        id: version
         shell: pwsh
         env:
           INPUT_VERSION: ${{ inputs.version }}
@@ -60,12 +60,13 @@ jobs:
           $Version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { $env:INPUT_VERSION }
           if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
           "RELEASE_VERSION=$Version" >> $env:GITHUB_ENV
+          "version=$Version" >> $env:GITHUB_OUTPUT
       - run: python -m pip install -r packaging/windows-build.txt -r packaging/windows-test.txt
       - run: python -m pip check
       - name: Windows data and startup regressions
         run: python -m pytest -q tests/test_runtime_paths.py tests/test_desktop_data_service.py tests/test_desktop_startup.py tests/test_pi_ai_bridge.py tests/test_main_cli.py tests/test_release_migration_hardening.py tests/test_migration_verifier_regression.py
       - name: Install compiler
-        run: choco install innosetup --version=6.5.4 --yes --no-progress
+        run: choco install innosetup --version=6.5.4 --yes --no-progress --allow-downgrade --force
       - name: Build installer
         run: ./scripts/build_windows.ps1 -Version $env:RELEASE_VERSION
       - name: Verify installation, frozen runtime, upgrade and uninstall
@@ -81,10 +82,26 @@ jobs:
         with:
           name: StudyAgent-Windows-${{ env.RELEASE_VERSION }}
           path: dist/installer/*
-      - name: Create draft release
-        if: github.ref_type == 'tag'
-        shell: pwsh
+
+  publish-draft:
+    needs: [regression, windows]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: StudyAgent-Windows-${{ needs.windows.outputs.version }}
+          path: release-assets
+      - name: Create draft release after all checks pass
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create $env:GITHUB_REF_NAME "dist/installer/StudyAgent-Setup-$env:RELEASE_VERSION-x64.exe" dist/installer/SHA256SUMS.txt --verify-tag --draft --title "Study Agent $env:RELEASE_VERSION" --notes-file docs/WINDOWS_RELEASE_NOTES.md
+          RELEASE_VERSION: ${{ needs.windows.outputs.version }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          "release-assets/StudyAgent-Setup-$RELEASE_VERSION-x64.exe"
+          release-assets/SHA256SUMS.txt --verify-tag --draft
+          --title "Study Agent $RELEASE_VERSION"
+          --notes-file docs/WINDOWS_RELEASE_NOTES.md

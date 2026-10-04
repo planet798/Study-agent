@@ -39,7 +39,7 @@ def get_raw_connection(
     if read_only:
         if not Path(path).exists():
             raise FileNotFoundError(f"数据库不存在: {path}")
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         # 双保险：即使代码路径尝试写入也直接失败
         conn.execute("PRAGMA query_only = ON")

@@ -461,7 +461,7 @@ def readonly_copy(db_path: str) -> Iterator[sqlite3.Connection]:
     with tempfile.TemporaryDirectory(prefix="study_agent_ro_") as td:
         tmp = str(Path(td) / "copy.db")
         _sqlite_backup(str(src), tmp)
-        conn = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)
+        conn = sqlite3.connect(Path(tmp).absolute().as_uri() + "?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
         try:
@@ -552,7 +552,7 @@ def dry_run_on_copy(db_path: str) -> dict:
     if not src.exists():
         raise FileNotFoundError(f"数据库不存在: {db_path}")
     # 0) 源库只读 pre-flight：先发现「会被静默改写的业务条件」
-    src_conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    src_conn = sqlite3.connect(src.absolute().as_uri() + "?mode=ro", uri=True)
     src_conn.row_factory = sqlite3.Row
     src_conn.execute("PRAGMA query_only = ON")
     try:

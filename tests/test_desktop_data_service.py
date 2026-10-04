@@ -13,7 +13,7 @@ from app.services import desktop_data_service as service
 
 @pytest.fixture
 def legacy(tmp_path):
-    data = tmp_path / "旧 项目/data"
+    data = tmp_path / "旧 项目#备份/data"
     data.mkdir(parents=True)
     conn = get_connection(data / "study_agent.db")
     TaskService(TaskRepository(conn)).create_task("保留学习记录")
@@ -132,7 +132,7 @@ def test_real_v25_upgrade_preserves_session_history_and_local_binding(tmp_path, 
     from app.database.agent_repository import AgentRepository
     from app.database.task_workspace_repository import TaskWorkspaceRepository
 
-    source = tmp_path / "legacy/data"
+    source = tmp_path / "legacy #项目/data"
     path = source / "study_agent.db"
     conn = get_raw_connection(path)
     migrate_stepwise(conn, target=25)
