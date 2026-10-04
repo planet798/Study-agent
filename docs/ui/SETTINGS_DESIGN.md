@@ -28,3 +28,14 @@ Appearance 仍可用；缺失的 panel 显示 unavailable 状态（按钮 disabl
 ## Compatibility
 保留 `AISettingsPage` / `AIProfilesPanel` / `PromptManagerPanel` 类名与关键属性
 （theme_combo / list_widget / source_label / legacy_btn / editor / tree / *_btn / *_label）。
+
+## 2026-10 设置页精修与内存草稿
+
+- 外观保持独立可用，保留个性化 / 模型与 API / 高级三个标签页。
+- 面板控件构造在 `settings_views.py`，服务与 worker 编排保留在原控制层。
+- 窄窗口列表/详情纵向排布；操作组自动换行；次级命令进入菜单，原按钮属性保留为兼容入口。
+- Agent 说明和每个 Prompt 的草稿只存在本页面实例内，切换/刷新不覆盖；不包含 API Key。
+- 保存成功读回服务结果并清除对应草稿；保存失败保留；显式放弃读取最新已保存版本。
+- Prompt 默认恢复仍需原确认，成功才清除对应草稿；预览始终使用已保存 effective template。
+- 保存与校验反馈就近展示，语义颜色跟随主题；连接测试仍异步，禁止重复测试，停止后忽略迟到结果。
+- 未启用和暂不可用仍有明确状态，不增加自动保存、授权或记忆候选确认功能。

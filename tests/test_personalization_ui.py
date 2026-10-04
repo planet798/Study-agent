@@ -63,8 +63,8 @@ def test_structure_default_advanced_and_appearance(qtbot, ai_config_service, pro
     normal_text = ' '.join(label.text() for label in page.personalization_panel.findChildren(QLabel))
     assert all(word not in normal_text for word in ['system prompt', 'user prompt', 'PromptRegistry', '{{variables}}'])
     assert (
-        'Agent 会在新的学习对话中使用已保存的说明和已启用记忆；'
-        '根据学习会话自动生成记忆将在后续提供。'
+        'Agent 会在新的学习对话中使用已保存的说明和已启用记忆。'
+        '记忆开关不会自动保存尚未确认的内容。'
     ) in normal_text
     assert '尚未接入 Agent' not in normal_text
     from app.ui.app_shell import PAGE_SPECS_BY_KEY
@@ -110,6 +110,8 @@ def test_instructions_save_load_clear_counter(qtbot, service, conn, monkeypatch)
     QApplication.processEvents()
     assert fresh.editor.toPlainText() == 'unsaved'
     fresh.refresh()
+    assert fresh.editor.toPlainText() == 'unsaved'
+    fresh.discard_btn.click()
     assert fresh.editor.toPlainText() == text.strip()
     p.editor.clear()
     p.save_btn.click()

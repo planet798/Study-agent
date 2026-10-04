@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QSignalBlocker
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
@@ -57,6 +57,10 @@ from .ai_settings_dialogs import (
 from .ai_worker import AIConnectionTestWorker, OAuthLoginWorker
 from .styles import apply_secondary_button_text
 from .personalization_panel import PersonalizationPanel
+from .settings_views import build_profiles_view, build_prompt_view
+from .settings_drafts import SettingsDrafts
+from .components.settings_controls import feedback
+
 
 
 # ============================================================
@@ -71,6 +75,8 @@ class AIProfilesPanel(QWidget):
         super().__init__(parent)
         self.service = ai_config_service
         self._test_worker: AIConnectionTestWorker | None = None
+        self._stopping = False
+        self._test_profile_id = None
         self._oauth_worker: OAuthLoginWorker | None = None
         self._oauth_provider_catalog: dict[str, dict] = {}
         self._build_ui()
@@ -79,97 +85,24 @@ class AIProfilesPanel(QWidget):
     # ---------- UI ----------
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-
-        top = QHBoxLayout()
-        self.add_btn = SAButton(
-            "添加 API Key 配置", variant="primary",
-            icon_name=_icons.IconName.ADD,
-        )
-        self.add_btn.clicked.connect(self._on_add)
-        top.addWidget(self.add_btn)
-
-        self.oauth_btn = SAButton("订阅账号登录", variant="secondary")
-        self.oauth_btn.clicked.connect(self._on_oauth_login)
-        top.addWidget(self.oauth_btn)
-
-        self.legacy_btn = SAButton("保存为配置", variant="secondary")
-        self.legacy_btn.clicked.connect(self._on_import_legacy)
-        top.addWidget(self.legacy_btn)
-
-        top.addStretch()
-        layout.addLayout(top)
-
-        self.source_banner = SAInfoBanner("", "", variant="info")
-        self.source_label = self.source_banner.description_label()
-        layout.addWidget(self.source_banner)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        self.list_widget = QListWidget()
-        self.list_widget.currentItemChanged.connect(
-            lambda *_: self._load_selected()
-        )
-        splitter.addWidget(self.list_widget)
-
-        detail = QWidget()
-        form = QVBoxLayout(detail)
-        form.setContentsMargins(12, 0, 0, 0)
-        self.detail_title = QLabel("未选择配置")
-        self.detail_title.setObjectName("SectionTitle")
-        form.addWidget(self.detail_title)
-
-        self.info_label = QLabel("")
-        self.info_label.setWordWrap(True)
-        self.info_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        form.addWidget(self.info_label)
-
-        btn_row1 = QHBoxLayout()
-        self.set_active_btn = SAButton("设为当前", variant="primary")
-        self.set_active_btn.clicked.connect(self._on_set_active)
-        self.test_btn = SAButton("测试连接", variant="secondary")
-        self.test_btn.clicked.connect(self._on_test_connection)
-        btn_row1.addWidget(self.set_active_btn)
-        btn_row1.addWidget(self.test_btn)
-        btn_row1.addStretch()
-        form.addLayout(btn_row1)
-
-        btn_row2 = QHBoxLayout()
-        self.edit_key_btn = SAButton("修改 Key", variant="secondary")
-        self.edit_key_btn.clicked.connect(self._on_edit_key)
-        self.rename_btn = SAButton("重命名", variant="subtle")
-        self.rename_btn.clicked.connect(self._on_rename)
-        self.delete_btn = SAButton("删除", variant="danger")
-        self.delete_btn.clicked.connect(self._on_delete)
-        btn_row2.addWidget(self.edit_key_btn)
-        btn_row2.addWidget(self.rename_btn)
-        btn_row2.addWidget(self.delete_btn)
-        btn_row2.addStretch()
-        form.addLayout(btn_row2)
-
-        self.test_result_label = QLabel("")
-        self.test_result_label.setWordWrap(True)
-        form.addWidget(self.test_result_label)
-        form.addStretch()
-
-        splitter.addWidget(detail)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter, stretch=1)
+        build_profiles_view(self)
 
     # ---------- 数据 ----------
 
     def refresh(self) -> None:
         if self.service is None:
-            self._set_unavailable("AI 配置不可用（未注入 AIConfigService）。")
+            self._set_unavailable("模型配置暂不可用，请稍后重试。")
             return
         current_id = self._selected_id()
+        try:
+            profiles = self.service.list_profiles()
+        except Exception:
+            self._set_unavailable("暂时无法加载模型配置，请稍后重新打开设置。")
+            return
+        self.add_btn.setEnabled(True)
+        self.oauth_btn.setEnabled(self._oauth_worker is None)
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
-        profiles = self.service.list_profiles()
         select_row = 0
         for i, p in enumerate(profiles):
             suffix = "  当前" if p.is_active else ""
@@ -192,8 +125,11 @@ class AIProfilesPanel(QWidget):
         self.list_widget.blockSignals(False)
         if profiles:
             self.list_widget.setCurrentRow(select_row)
-        self._update_source_banner()
-        self._load_selected()
+        try:
+            self._update_source_banner()
+            self._load_selected()
+        except Exception:
+            self._set_unavailable("暂时无法加载模型配置，请稍后重新打开设置。")
 
     def _set_unavailable(self, message: str) -> None:
         self.list_widget.blockSignals(True)
@@ -241,7 +177,7 @@ class AIProfilesPanel(QWidget):
             self.source_banner.set_variant("info")
             if cfg.profile_name:
                 self.source_label.setText(
-                    f"当前使用的配置：{cfg.profile_name}（source={cfg.source}）"
+                    f"当前使用的配置：{cfg.profile_name}"
                 )
             elif has_selection:
                 self.source_label.setText(
@@ -256,7 +192,9 @@ class AIProfilesPanel(QWidget):
         for b in (self.set_active_btn, self.test_btn, self.edit_key_btn,
                   self.rename_btn, self.delete_btn):
             b.setEnabled(enabled)
-        self.test_result_label.setText("")
+        self.test_btn.setEnabled(enabled and self._test_worker is None)
+        feedback(self.test_result_label, "测试中…" if self._test_worker is not None
+                 and pid == self._test_profile_id else "")
         if pid is None:
             self.detail_title.setText("未选择配置")
             self.info_label.setText("")
@@ -307,6 +245,7 @@ class AIProfilesPanel(QWidget):
     def _on_oauth_login(self) -> None:
         if self._oauth_worker is not None:
             return
+        self._stopping = False
         try:
             from ..ai.pi_ai_bridge import PiAIBridge
             providers = [p for p in PiAIBridge().catalog() if p.get("isSubscription") and p.get("models")]
@@ -334,6 +273,8 @@ class AIProfilesPanel(QWidget):
         worker.start()
 
     def _on_oauth_event(self, event: dict) -> None:
+        if self._stopping:
+            return
         auth_event = event.get("authEvent", {})
         kind = auth_event.get("type")
         if kind == "auth_url":
@@ -358,6 +299,8 @@ class AIProfilesPanel(QWidget):
                 QMessageBox.information(self, "订阅登录", text)
 
     def _on_oauth_prompt(self, event: dict) -> None:
+        if self._stopping:
+            return
         worker = self._oauth_worker
         if worker is None:
             return
@@ -380,6 +323,8 @@ class AIProfilesPanel(QWidget):
             worker.answer_prompt(value if accepted else None)
 
     def _on_oauth_login_succeeded(self, provider: dict, credential: dict) -> None:
+        if self._stopping:
+            return
         models = provider.get("models", [])
         labels = [f"{model['name']} ({model['id']})" for model in models]
         label, accepted = QInputDialog.getItem(
@@ -425,11 +370,8 @@ class AIProfilesPanel(QWidget):
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "保存失败", str(e))
             return
-        QMessageBox.information(
-            self, "已保存",
-            f"已把环境变量配置保存为「{profile.display_name}」并设为当前。",
-        )
         self.refresh()
+        feedback(self.test_result_label, f"已保存「{profile.display_name}」并设为当前。", "success")
 
     def _on_set_active(self) -> None:
         pid = self._selected_id()
@@ -451,8 +393,8 @@ class AIProfilesPanel(QWidget):
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "保存失败", str(e))
             return
-        QMessageBox.information(self, "已保存", "API Key 已写入系统凭据存储。")
         self._load_selected()
+        feedback(self.test_result_label, "API Key 已保存。", "success")
 
     def _on_rename(self) -> None:
         pid = self._selected_id()
@@ -502,6 +444,9 @@ class AIProfilesPanel(QWidget):
         self.refresh()
 
     def _on_test_connection(self) -> None:
+        if self._test_worker is not None:
+            return
+        self._stopping = False
         pid = self._selected_id()
         if pid is None:
             return
@@ -512,13 +457,12 @@ class AIProfilesPanel(QWidget):
         is_oauth = p.provider_type.startswith("pi_oauth:")
         cfg = self.service.resolve_profile_config(pid) if is_oauth else None
         if is_oauth and cfg is not None and not cfg.is_configured:
-            self.test_result_label.setText(
-                f"连接失败：{cfg.error_message or 'OAuth 凭据无效，请重新登录'}"
-            )
+            feedback(self.test_result_label,
+                     f"连接失败：{cfg.error_message or 'OAuth 凭据无效，请重新登录'}", "error")
             return
         api_key = "" if is_oauth else (self.service.secrets.get(p.secret_ref) or "")
         self.test_btn.setEnabled(False)
-        self.test_result_label.setText("测试中…")
+        feedback(self.test_result_label, "测试中…")
         worker = AIConnectionTestWorker(
             base_url=p.base_url, model=p.model, api_key=api_key,
             timeout=10.0, parent=self,
@@ -526,22 +470,26 @@ class AIProfilesPanel(QWidget):
             oauth_credential=cfg.oauth_credential if cfg else None,
         )
         self._test_worker = worker
+        self._test_profile_id = pid
 
         def _done(result) -> None:
-            self.test_btn.setEnabled(True)
+            if self._stopping:
+                return
+            self.test_btn.setEnabled(self._selected_id() is not None)
             self._test_worker = None
             if result.oauth_credential and is_oauth:
                 try:
                     self.service.save_oauth_credential(pid, result.oauth_credential)
                 except Exception as error:  # noqa: BLE001
-                    self.test_result_label.setText(f"连接成功，但凭据更新失败：{error}")
+                    feedback(self.test_result_label, "连接成功，但凭据更新未成功。请重新登录。", "error")
                     return
+            if self._selected_id() != pid:
+                return
             if result.ok:
-                self.test_result_label.setText(
-                    f"连接成功 · Model: {result.model} · {result.latency_ms} ms"
-                )
+                feedback(self.test_result_label,
+                         f"连接成功 · Model: {result.model} · {result.latency_ms} ms", "success")
             else:
-                self.test_result_label.setText(f"连接失败：{result.message}")
+                feedback(self.test_result_label, f"连接失败：{result.message}", "error")
 
         worker.succeeded.connect(_done)
         worker.finished.connect(worker.deleteLater)
@@ -549,6 +497,7 @@ class AIProfilesPanel(QWidget):
 
     def stop_test_worker(self) -> None:
         """退出前停止连接测试线程，避免 QThread 仍在运行时被销毁。"""
+        self._stopping = True
         worker = self._test_worker
         self._test_worker = None
         if worker is not None and worker.isRunning():
@@ -585,129 +534,69 @@ class PromptManagerPanel(QWidget):
         self.registry = prompt_registry
         self.preview_service = preview_service
         self._current_key: str | None = None
+        self._drafts = SettingsDrafts()
         self._build_ui()
         self.refresh()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.tree = QTreeWidget()
-        self.tree.setHeaderHidden(True)
-        self.tree.itemSelectionChanged.connect(self._on_select)
-        splitter.addWidget(self.tree)
-
-        right = QWidget()
-        form = QVBoxLayout(right)
-        form.setContentsMargins(12, 0, 0, 0)
-
-        self.name_label = QLabel("请选择 Prompt")
-        self.name_label.setObjectName("SectionTitle")
-        form.addWidget(self.name_label)
-
-        self.desc_label = QLabel("")
-        self.desc_label.setWordWrap(True)
-        self.desc_label.setObjectName("TaskMeta")
-        form.addWidget(self.desc_label)
-
-        self.status_label = QLabel("")
-        form.addWidget(self.status_label)
-        self.status_tag = SATag("", "neutral")
-        self.status_tag.setVisible(False)
-        form.addWidget(self.status_tag, alignment=Qt.AlignmentFlag.AlignLeft)
-
-        self.var_label = QLabel("")
-        self.var_label.setWordWrap(True)
-        self.var_label.setObjectName("TaskMeta")
-        self.var_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        form.addWidget(self.var_label)
-
-        self.editor = QPlainTextEdit()
-        self.editor.setObjectName("SAPromptEditor")
-        self.editor.setFont(_type.font_for(_type.MONOSPACE))
-        self.editor.setAccessibleName("Prompt 编辑器")
-        self.editor.setPlaceholderText("选择左侧 Prompt 后可在此编辑…")
-        form.addWidget(self.editor, stretch=1)
-
-        row = QHBoxLayout()
-        self.save_btn = SAButton("保存修改", variant="primary")
-        self.save_btn.clicked.connect(self._on_save)
-        self.reset_btn = SAButton("恢复默认", variant="subtle")
-        self.reset_btn.clicked.connect(self._on_reset)
-        self.default_btn = SAButton("查看系统默认", variant="subtle")
-        self.default_btn.clicked.connect(self._on_view_default)
-        self.preview_btn = SAButton("最终 Prompt 预览", variant="secondary")
-        self.preview_btn.clicked.connect(self._on_preview)
-        for b in (self.save_btn, self.reset_btn, self.default_btn, self.preview_btn):
-            row.addWidget(b)
-        row.addStretch()
-        form.addLayout(row)
-
-        route_row = QHBoxLayout()
-        route_row.addWidget(QLabel("预览路线"))
-        self.route_combo = QComboBox()
-        route_row.addWidget(self.route_combo)
-        route_row.addStretch()
-        form.addLayout(route_row)
-
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
-        layout.addWidget(splitter, stretch=1)
-
-        self._set_editor_enabled(False)
+        build_prompt_view(self)
 
     # ---------- 数据 ----------
 
     def refresh(self) -> None:
+        key = self._current_key
+        if key is not None:
+            self._drafts.edit(key, self.editor.toPlainText())
         if self.registry is None:
             self.tree.clear()
-            self.name_label.setText("Prompt 管理不可用")
-            self.desc_label.setText("未注入 PromptRegistry。")
-            self.status_label.setText("")
-            self.status_tag.setVisible(False)
-            self.var_label.setText("")
-            self.editor.setPlainText("")
-            self.editor.setEnabled(False)
-            for b in (self.save_btn, self.reset_btn, self.default_btn,
-                      self.preview_btn):
-                b.setEnabled(False)
-            self.route_combo.clear()
+            self.name_label.setText("Prompt 管理暂不可用")
+            self.desc_label.setText("请稍后重试，未保存内容会保留在当前页面。")
+            self._set_editor_enabled(False)
             self.route_combo.setEnabled(False)
             return
-        self.tree.clear()
-        by_cat = self.registry.by_category()
-        for category, defs in by_cat.items():
-            cat_item = QTreeWidgetItem([category])
-            cat_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.tree.addTopLevelItem(cat_item)
-            for d in defs:
-                status = "已自定义" if self.registry.is_customized(d.key) else "系统默认"
-                child = QTreeWidgetItem([f"{d.display_name}  [{status}]"])
-                child.setData(0, Qt.ItemDataRole.UserRole, d.key)
-                cat_item.addChild(child)
-            cat_item.setExpanded(True)
-        self._reload_routes()
-        self._set_editor_enabled(False)
+        try:
+            by_cat = self.registry.by_category()
+            with QSignalBlocker(self.tree):
+                self.tree.clear()
+                for category, definitions in by_cat.items():
+                    cat_item = QTreeWidgetItem([category])
+                    cat_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    self.tree.addTopLevelItem(cat_item)
+                    for definition in definitions:
+                        status = "已自定义" if self.registry.is_customized(definition.key) else "系统默认"
+                        child = QTreeWidgetItem([f"{definition.display_name}  [{status}]"])
+                        child.setData(0, Qt.ItemDataRole.UserRole, definition.key)
+                        cat_item.addChild(child)
+                    cat_item.setExpanded(True)
+            self._reload_routes()
+            if key is not None and self._reselect(key):
+                return
+        except Exception:
+            self._set_editor_enabled(False)
+            feedback(self.feedback, "暂时无法加载 Prompt，草稿已保留。", "error")
+            return
         self._current_key = None
+        self._set_editor_enabled(False)
         self.name_label.setText("请选择 Prompt")
-        self.desc_label.setText("")
-        self.status_label.setText("")
-        self.status_tag.setVisible(False)
-        self.var_label.setText("")
-        self.editor.setPlainText("")
+        self.desc_label.clear()
+        self.status_label.clear()
+        self.status_tag.hide()
+        self.var_label.clear()
+        with QSignalBlocker(self.editor):
+            self.editor.clear()
+        self._update_draft_status()
 
     def _reload_routes(self) -> None:
+        route_id = self.route_combo.currentData()
         self.route_combo.clear()
         self.route_combo.addItem("（当前路线）", None)
         if self.preview_service is None:
             self.route_combo.setEnabled(False)
             return
-        for r in self.preview_service.available_routes():
-            self.route_combo.addItem(r["name"], r["id"])
+        for route in self.preview_service.available_routes():
+            self.route_combo.addItem(route["name"], route["id"])
+        index = self.route_combo.findData(route_id)
+        self.route_combo.setCurrentIndex(index if index >= 0 else 0)
         self.route_combo.setEnabled(True)
 
     def _selected_key(self) -> str | None:
@@ -721,7 +610,9 @@ class PromptManagerPanel(QWidget):
         key = self._selected_key()
         if not key:
             return
-        self._current_key = key
+        previous = self._current_key
+        if previous is not None:
+            self._drafts.edit(previous, self.editor.toPlainText())
         definition = self.registry.definition(key)
         self.name_label.setText(definition.display_name)
         self.desc_label.setText(
@@ -739,44 +630,82 @@ class PromptManagerPanel(QWidget):
         required = ", ".join(f"{{{{{v}}}}}" for v in definition.required_variables) or "（无）"
         optional = ", ".join(f"{{{{{v}}}}}" for v in definition.optional_variables) or "（无）"
         self.var_label.setText(f"必需变量：{required}\n可选变量：{optional}")
-        self.editor.setPlainText(self.registry.effective_template(key))
+        text = self._drafts.load(key, self.registry.effective_template(key))
+        self._current_key = key
+        with QSignalBlocker(self.editor):
+            self.editor.setPlainText(text)
         self._set_editor_enabled(True)
+        self._update_draft_status()
+        if previous != key:
+            self.feedback.clear()
 
     def _set_editor_enabled(self, enabled: bool) -> None:
         self.editor.setEnabled(enabled)
         for b in (self.save_btn, self.reset_btn, self.default_btn, self.preview_btn):
             b.setEnabled(enabled)
+        self.discard_btn.setEnabled(enabled and self._current_key is not None
+                                    and self._drafts.dirty(self._current_key))
+
+    def _on_editor_changed(self):
+        if self._current_key is not None:
+            self._drafts.edit(self._current_key, self.editor.toPlainText())
+        self._update_draft_status()
+
+    def _update_draft_status(self):
+        dirty = self._current_key is not None and self._drafts.dirty(self._current_key)
+        self.draft_label.setText("未保存 · 预览使用已保存版本" if dirty else
+                                 "已保存版本" if self._current_key else "")
+        self.discard_btn.setEnabled(self.editor.isEnabled() and dirty)
+
+    def _discard(self):
+        key = self._current_key
+        if key is None:
+            return
+        try:
+            saved = self.registry.effective_template(key)
+        except Exception:
+            feedback(self.feedback, "暂时无法重新加载 Prompt，草稿已保留。", "error")
+            return
+        self._drafts.accept(key, saved)
+        with QSignalBlocker(self.editor):
+            self.editor.setPlainText(saved)
+        self._update_draft_status()
+        feedback(self.feedback, "已放弃未保存修改。")
 
     # ---------- 操作 ----------
 
     def _on_save(self) -> None:
         key = self._current_key
-        if not key:
+        if key is None:
             return
         try:
             self.registry.set_override(key, self.editor.toPlainText())
-        except PromptValidationError as e:
-            QMessageBox.warning(
-                self, "Prompt 变量校验失败",
-                f"{e}\n\n请修正后再保存（不会写入数据库）。",
-            )
+        except PromptValidationError as error:
+            feedback(self.feedback, f"{error}；请修正后再保存。草稿已保留。", "error")
             return
-        except Exception as e:  # noqa: BLE001
-            QMessageBox.critical(self, "保存失败", str(e))
+        except Exception:
+            feedback(self.feedback, "无法保存 Prompt，请稍后重试。草稿已保留。", "error")
             return
-        QMessageBox.information(
-            self, "已保存",
-            "Prompt 已保存，下一次 AI 调用立即生效（无需重启）。",
-        )
+        self._reload_after_write(key, "Prompt 已保存，下一次 AI 调用生效。")
+
+    def _reload_after_write(self, key, message):
+        try:
+            saved = self.registry.effective_template(key)
+        except Exception:
+            feedback(self.feedback, "操作已保存，但暂时无法重新加载。请稍后刷新。", "error")
+            return
+        self._drafts.accept(key, saved)
+        with QSignalBlocker(self.editor):
+            self.editor.setPlainText(saved)
         self.refresh()
-        self._reselect(key)
+        feedback(self.feedback, message, "success")
 
     def _on_reset(self) -> None:
         key = self._current_key
-        if not key:
+        if key is None:
             return
         if not self.registry.is_customized(key):
-            QMessageBox.information(self, "无需恢复", "该 Prompt 当前就是系统默认。")
+            feedback(self.feedback, "当前已是系统默认；可用“放弃修改”撤销草稿。")
             return
         if QMessageBox.question(
             self, "恢复默认",
@@ -784,9 +713,12 @@ class PromptManagerPanel(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         ) != QMessageBox.StandardButton.Yes:
             return
-        self.registry.reset(key)
-        self.refresh()
-        self._reselect(key)
+        try:
+            self.registry.reset(key)
+        except Exception:
+            feedback(self.feedback, "无法恢复默认，草稿已保留。", "error")
+            return
+        self._reload_after_write(key, "已恢复系统默认 Prompt。")
 
     def _on_view_default(self) -> None:
         key = self._current_key
@@ -841,7 +773,8 @@ class PromptManagerPanel(QWidget):
                 child = cat.child(j)
                 if child.data(0, Qt.ItemDataRole.UserRole) == key:
                     self.tree.setCurrentItem(child)
-                    return
+                    return True
+        return False
 
 
 # ============================================================
@@ -892,7 +825,7 @@ class AISettingsPage(QWidget):
 
         hint = QLabel(
             "通过个性化设置，让 Study Agent 更符合你的学习习惯。"
-            "模型与 API 设置负责连接模型，高级设置用于内部 Prompt 调整。"
+            "模型与 API 用于连接模型，高级用于调整 Prompt。"
         )
         hint.setObjectName("TaskMeta")
         hint.setWordWrap(True)

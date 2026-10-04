@@ -214,7 +214,9 @@ class TestPromptPanel:
                     panel.tree.setCurrentItem(cat.child(j))
         panel.editor.setPlainText("缺少所有必需变量")
         panel.save_btn.click()
-        assert warnings, "应弹出校验警告"
+        assert panel.feedback.text(), "应显示就近校验反馈"
+        assert panel.feedback.property("feedbackState") == "error"
+        assert panel.editor.toPlainText() == "缺少所有必需变量"
         assert prompt_registry.is_customized(key) is False
 
     def test_preview_dialog_receives_rendered_content(

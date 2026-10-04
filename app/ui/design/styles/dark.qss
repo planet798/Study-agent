@@ -954,3 +954,8 @@ QFrame#PracticeDetailSection, QFrame#PracticeMilestoneRow, QFrame#PracticeOutput
     border: none;
     border-bottom: 1px solid {{border_subtle}};
 }
+
+/* Settings/forms feedback uses semantic colors in both themes. */
+QLabel#SettingsFeedback { color: {{text_secondary}}; }
+QLabel#SettingsFeedback[feedbackState="success"] { color: {{success}}; }
+QLabel#SettingsFeedback[feedbackState="error"] { color: {{danger}}; }
