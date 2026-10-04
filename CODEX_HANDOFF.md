@@ -1,7 +1,7 @@
 # Study Agent — Codex 开发交接
 
 > 本文面向在 Codex 中继续开发本项目的 coding agent，不依赖 Pi 会话、技能、子代理或临时文件。
-> 2026-10-04 最新功能范围：实践项目概览与详情精修；概览提交为 `cdd5255`，详情提交请核对实际 `git log`。学习路线提交 `a40394d` / `5aeffca` 已获用户实机验收。此前 Markdown 面板功能基线为 `6f6f656`。
+> 2026-10-04 最新功能范围：设置页与高频弹窗收尾；设置页提交 `c861baf`，弹窗提交请核对实际 `git log`。学习路线与实践项目均已获用户实机验收。
 > 用户最新确认：**最新 Markdown 文档面板修复已成功，Windows 实际验证没有问题。** 不要再把该修复标成未完成任务。
 > 2026-10-03 补充：用户确认 **Personalization-1E-C 已全部实现**；旧聊天中的 E-C 方案不能再作为待办。当前检出代码与该完成记录的核对结果见第 10 节。
 
@@ -228,6 +228,37 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
   tests/test_practice_milestones.py tests/test_theme_runtime.py -q
 ```
 
+### 设置与高频弹窗本轮验证（2026-10-04 · WSL2）
+
+- 设置阶段：**67 passed in 4.75s**，覆盖草稿、持久化/预览边界、菜单、窄窗口及主题。
+- 弹窗与业务综合：**166 passed in 26.14s**，覆盖表单、设置、验收闭环/线程、手动学习、Prompt 实际生效与预览及主题。
+- 最终界面与兼容：**166 passed in 29.37s**，覆盖最终键盘确认、草稿、设置、个性化注入、主题、已验收路线与实践页面。
+- 两组 166 测试有重叠，不表示 332 个独立测试；未运行完整 Release Gate。
+- 隔离临时 DB / fake keyring 的深浅主题和 100%/125%/150%/175% scale 离屏构造与实际 widget 图像检查通过；不是 Windows 用户验收。
+- compileall 与 diff-check 通过；无新增依赖或 schema / 服务算法变更。
+
+综合命令：
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
+  tests/test_form_dialog_polish.py tests/test_settings_draft_ui.py \
+  tests/test_ai_settings_ui.py tests/test_personalization_ui.py \
+  tests/test_assessment_flow.py tests/test_assessment_threading.py tests/test_dialog_worker_lifecycle.py \
+  tests/test_manual_learning_semantics.py tests/test_manual_daily_tasks.py tests/test_activity_manual_tasks.py \
+  tests/test_prompt_effective_use.py tests/test_prompt_preview.py tests/test_theme_runtime.py -q
+```
+
+最终兼容命令：
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
+  tests/test_form_dialog_polish.py tests/test_settings_draft_ui.py \
+  tests/test_ai_settings_ui.py tests/test_personalization_ui.py tests/test_ui4_pages.py \
+  tests/test_theme_runtime.py tests/test_agent_personalization.py \
+  tests/test_routes_ui3.py tests/test_route_details_polish.py \
+  tests/test_practice_detail_polish.py tests/test_practice_overview_polish.py -q
+```
+
 ## 7. 环境与 Windows 常用命令
 
 以下在项目根目录执行。使用项目 `.venv`，不用全局 Python/pip，不能提交 `.venv`。
@@ -345,7 +376,7 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ## 10. 后续工作状态
 
-**最新授权范围是实践项目概览与详情精修。** 用户明确要求实施已确认方案：保留弹窗、优先里程碑与成果、四类摘要独立。本轮不涉及设置页及个性化功能开发。
+**最新授权范围是设置页与高频弹窗收尾。** 用户明确要求实施三个标签页、内存草稿保护及高频弹窗统一；不扩展业务、凭据、记忆候选确认、Prompt 生效或验收算法。
 
 ### 学习路线精修（2026-10-03）
 
@@ -368,6 +399,16 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
   路线兼容入口与样式标识保留，实践代码不依赖路线专用类。
 - 实践项目已由用户明确确认实机验收通过（2026-10-04）；离屏检查记录仍与实机反馈分别保留。
 
+### 设置与高频弹窗（2026-10-04）
+
+- 保留三个标签页；视图构造在 `settings_views.py`，草稿在纯内存 `settings_drafts.py`，服务/worker 编排仍在原控制层。
+- Agent 说明与各 Prompt 切换/刷新不丢草稿；成功保存与显式放弃清除对应草稿，失败保留。
+- Prompt 预览只读已保存模板，原变量校验与默认恢复确认保留；Key 不进入草稿缓存。
+- 模型次级操作进入菜单，状态明确；连接测试串行化，停止后的测试/登录回调不弹出迟到结果。
+- 高效表单正文滚动、页脚固定、语义错误反馈、默认确认与键盘操作；原构造接口、字段、校验和模态保留。
+- 验收题目/结果共用视口，结果完成后可见；旧退出等待和判题线程资源策略保留。
+- 新设置页与高频弹窗尚待用户 Windows 实机验收；之前的路线与实践页验收记录仍有效。
+
 ### Personalization 进度（2026-10-03）
 
 - P-1B / P-1C / P-1D、P-1E-A（含 A.1 / A.2）、P-1E-B 的持久化、设置管理、上下文注入、安全提取及后台临时候选链路已在当前检出版本中定位。
@@ -376,7 +417,7 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 - 这说明当前检出版本尚未对应到用户确认的 E-C 实现，不推翻用户完成记录。本次只记录差异；没有补写功能，也没有核实 E-C 对应提交、测试或实机验收。涉及 E-C 的后续任务先核对实际实现版本，不凭旧方案猜测或重做。
 - `docs/PERSONALIZATION.md` 的 P-1B 至 E-B 章节是这份检出代码的实现与历史验证说明，不能单凭章节标题或旧的“future E-C”措辞推断项目仍停在 E-B。
 
-学习路线已通过用户实机验收（2026-10-04）。实践项目已通过用户实机验收。本轮用户已授权设置页与高频弹窗精修，保留三个标签页并增加内存草稿保护。
+学习路线已通过用户实机验收（2026-10-04）。实践项目已通过用户实机验收。设置页与高频弹窗精修已实施，待用户实机验收；低频弹窗或后续功能需另行明确范围。
 
 不要为「彻底去 AI 味」改模型输出原文、删状态/权限说明，或重写业务。视觉问题首先用完整用户场景复现，验收需断言目标控件真实存在，不只看测试总数。
 
@@ -395,4 +436,4 @@ Linux 同样使用 `.venv/bin/python -m pytest`。不要依赖 `pytest` 恰好�
 
 ---
 
-交接摘要：**保留已验收的暖中性桌面 UI 与 Markdown 文档面板；学习路线概览及详情精修已通过用户 Windows 实机验收（2026-10-04）。实践项目概览及详情精修已通过用户实机验收。下一位 Codex 从新的用户任务继续，不重做已完成项。**
+交接摘要：**保留已验收的暖中性桌面 UI 与 Markdown 文档面板；学习路线概览及详情精修已通过用户 Windows 实机验收（2026-10-04）。实践项目概览及详情精修已通过用户实机验收。设置页与高频弹窗精修已实施，待用户实机验收。下一位 Codex 从新的用户任务继续，不重做已完成项。**

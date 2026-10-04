@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from .styles import apply_secondary_button_text
+from .components.form_dialog import finish_form
 
 KIND_ACTIVITY = "activity"
 KIND_KNOWLEDGE = "knowledge"
@@ -187,6 +188,10 @@ class AddLearningTaskDialog(QDialog):
 
         self._reload_topics()
         self._on_type_changed()
+        self.ok_btn.setObjectName("PrimaryButton")
+        self.ok_btn.setDefault(True)
+        self.cancel_btn.setAutoDefault(False)
+        finish_form(self)
 
     # ---------- 状态 ----------
 

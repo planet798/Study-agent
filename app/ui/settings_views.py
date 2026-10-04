@@ -252,7 +252,7 @@ def build_personalization_view(owner):
     note.setWordWrap(True)
     memory.add_widget(note)
     owner.manage_btn = SAButton("管理记忆", variant="secondary")
-    memory.add_widget(owner.manage_btn)
+    memory.body_layout.addWidget(owner.manage_btn, alignment=Qt.AlignmentFlag.AlignLeft)
     layout.addWidget(memory)
     owner.feedback = QLabel()
     owner.feedback.setWordWrap(True)

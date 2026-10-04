@@ -39,13 +39,20 @@
 - 长名称 / 多路线 / 多成果 / 深浅主题 / 高 DPI / 键盘菜单及折叠无裁切。
 
 ## F. Settings
-- 无 AI service 仍可切换主题（Appearance）。
-- Model/API：profile 无 ●○；Key 绝不回显；连接测试不阻塞。
-- Prompt：editor monospace；状态 tag；save/preview/reset。
+- 三标签页保持，外观独立于模型服务；窄窗口列表/详情纵向，操作自动换行。
+- Agent 说明及各 Prompt 未保存内容切换/刷新/离开返回不丢失；保存失败保留草稿。
+- 保存成功显示读回结果，放弃修改读取已保存版本，恢复默认沿用原确认。
+- 草稿无自动落盘，API Key 不进入缓存；预览明确使用已保存版本，不采用草稿。
+- 模型配置的当前 / 无配置 / 不可用 / 处理中 / 成功 / 失败状态明确；次级操作菜单保持原资格。
+- Key 不回显，登录与连接测试保持异步，重复测试与关闭后的迟到回调受到保护。
 
-## G. Dialogs
-- Add Task / Assessment / Route Detail / Practice Detail / AI profile / Prompt preview：
+## G. 高频 Dialogs
+- 模型配置、修改 Key、重命名、Prompt 预览、记忆管理/编辑、手动学习、未完成原因、学习验收：
   margins / spacing / button 层级一致；确认在右、取消在左；focus 可见。
+- 长正文可滚动；操作及错误反馈保持可达；字段值、模态行为和校验规则保持。
+- Key 默认遮挡，显示/隐藏按钮支持键盘与可访问名称。
+- 验收结果在同一正文区域，完成后可见；关闭正在判题的弹窗无 QThread 退出异常。
+- 路线与实践页维持已验收结果；低频编辑/证据弹窗后续单独评估。
 
 ## H. Light / Dark / System
 - Settings 切换 Light→Dark→System→Light 实时生效，无需重启。

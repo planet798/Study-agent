@@ -959,3 +959,8 @@ QFrame#PracticeDetailSection, QFrame#PracticeMilestoneRow, QFrame#PracticeOutput
 QLabel#SettingsFeedback { color: {{text_secondary}}; }
 QLabel#SettingsFeedback[feedbackState="success"] { color: {{success}}; }
 QLabel#SettingsFeedback[feedbackState="error"] { color: {{danger}}; }
+
+QScrollArea#FormDialogScroll, QWidget#FormDialogBody {
+    background-color: transparent;
+    border: none;
+}

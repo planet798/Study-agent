@@ -7,7 +7,7 @@ Tab 3【高级】: 现有内部 Prompt 管理与预览。
 设计约束：
 - API Key 只写系统 keyring；UI 默认遮挡，绝不回显完整 Key；
 - 网络测试在 QThread 后台执行，只传普通 base_url / model / api_key，不传 DB；
-- Prompt 修改立即写 override，下一次 AI 调用即生效（无需重启）。
+- Prompt 显式保存写 override；草稿不落盘，下一次 AI 调用使用已保存版本。
 """
 
 from __future__ import annotations
@@ -142,6 +142,7 @@ class AIProfilesPanel(QWidget):
                   self.test_btn, self.edit_key_btn, self.rename_btn,
                   self.delete_btn):
             b.setEnabled(False)
+        self.more_btn.setEnabled(False)
         self.source_banner.set_variant("warning")
         self.source_label.setText(message)
 
@@ -159,7 +160,7 @@ class AIProfilesPanel(QWidget):
         cfg = self.service.get_runtime_config()
         if count == 0:
             legacy_ok = self.service.is_legacy_configured()
-            self.legacy_btn.setVisible(True)
+            self.legacy_btn.setVisible(legacy_ok)
             self.legacy_btn.setEnabled(legacy_ok)
             self.source_banner.set_variant("info" if legacy_ok else "warning")
             if legacy_ok:
@@ -195,6 +196,8 @@ class AIProfilesPanel(QWidget):
         self.test_btn.setEnabled(enabled and self._test_worker is None)
         feedback(self.test_result_label, "测试中…" if self._test_worker is not None
                  and pid == self._test_profile_id else "")
+        self.more_btn.setEnabled(any(action.isEnabled() and action.isVisible()
+                                     for action in self.more_btn.menu().actions()))
         if pid is None:
             self.detail_title.setText("未选择配置")
             self.info_label.setText("")
@@ -213,6 +216,7 @@ class AIProfilesPanel(QWidget):
             base_url_text = p.base_url or "（未填写）"
             credential_label = "API Key："
         self.edit_key_btn.setEnabled(not is_oauth)
+        self.more_btn.setEnabled(True)
         self.info_label.setText(
             f"配置名称：{p.display_name}\n"
             f"服务：{base_url_text}\n"
@@ -268,7 +272,7 @@ class AIProfilesPanel(QWidget):
         worker.auth_event.connect(self._on_oauth_event)
         worker.prompt_requested.connect(self._on_oauth_prompt)
         worker.succeeded.connect(lambda credential: self._on_oauth_login_succeeded(provider, credential))
-        worker.failed.connect(lambda message: QMessageBox.warning(self, "登录失败", message))
+        worker.failed.connect(self._on_oauth_failed)
         worker.finished.connect(self._on_oauth_worker_finished)
         worker.start()
 
@@ -357,10 +361,15 @@ class AIProfilesPanel(QWidget):
         QMessageBox.information(self, "已连接", f"已保存 {provider['name']} 订阅，并选择模型 {model['id']}。")
         self.refresh()
 
+    def _on_oauth_failed(self, message):
+        if not self._stopping:
+            QMessageBox.warning(self, "登录失败", message)
+
     def _on_oauth_worker_finished(self) -> None:
         worker = self._oauth_worker
         self._oauth_worker = None
-        self.oauth_btn.setEnabled(True)
+        if not self._stopping:
+            self.oauth_btn.setEnabled(True)
         if worker is not None:
             worker.deleteLater()
 
@@ -481,7 +490,8 @@ class AIProfilesPanel(QWidget):
                 try:
                     self.service.save_oauth_credential(pid, result.oauth_credential)
                 except Exception as error:  # noqa: BLE001
-                    feedback(self.test_result_label, "连接成功，但凭据更新未成功。请重新登录。", "error")
+                    if self._selected_id() == pid:
+                        feedback(self.test_result_label, "连接成功，但凭据更新未成功。请重新登录。", "error")
                     return
             if self._selected_id() != pid:
                 return

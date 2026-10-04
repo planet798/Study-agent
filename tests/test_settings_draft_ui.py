@@ -218,3 +218,13 @@ def test_settings_panels_fit_narrow_window(qtbot, personal, ai_config_service, p
         panel = page.profiles_panel if tab == 1 else page.prompt_panel
         splitter = panel.findChild(SettingsSplitter)
         assert splitter.orientation() == Qt.Orientation.Vertical
+
+
+def test_stopped_oauth_failure_does_not_open_a_late_dialog(qtbot, personal, ai_config_service, prompt_registry, monkeypatch):
+    page = _page(qtbot, personal, ai_config_service, prompt_registry)
+    panel = page.profiles_panel
+    warnings = []
+    monkeypatch.setattr(QMessageBox, 'warning', lambda *args: warnings.append(args))
+    panel.stop_test_worker()
+    panel._on_oauth_failed('late failure')
+    assert not warnings

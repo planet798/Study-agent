@@ -8,6 +8,11 @@
 
 from __future__ import annotations
 
+from .components.form_dialog import finish_form
+from .components.button import SAIconButton
+from .components.settings_controls import feedback
+from .design.icons import IconName
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -30,15 +35,16 @@ def _password_row(edit: QLineEdit, parent: QWidget) -> QHBoxLayout:
     edit.setEchoMode(QLineEdit.EchoMode.Password)
     row = QHBoxLayout()
     row.addWidget(edit, stretch=1)
-    toggle = QPushButton("👁")
+    toggle = SAIconButton(IconName.EYE, tooltip="显示 API Key", parent=parent)
     toggle.setCheckable(True)
-    toggle.setFixedWidth(40)
-    toggle.setToolTip("显示 / 隐藏 API Key")
 
     def _on_toggle(checked: bool) -> None:
         edit.setEchoMode(
             QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
         )
+        text = "隐藏 API Key" if checked else "显示 API Key"
+        toggle.setToolTip(text)
+        toggle.setAccessibleName(text)
 
     toggle.toggled.connect(_on_toggle)
     row.addWidget(toggle)
@@ -52,7 +58,7 @@ class AddAIProfileDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("添加 API 配置")
         self.setModal(True)
-        self.resize(520, 320)
+        self.resize(580, 520)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -60,7 +66,7 @@ class AddAIProfileDialog(QDialog):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("例如：DeepSeek 订阅")
         self.vendor_combo = QComboBox()
-        self.vendor_combo.addItem("自定义 OpenAI 兼容接口", None)
+        self.vendor_combo.addItem("自定义兼容接口", None)
         for label, preset in [
             ("OpenAI", {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"}),
             ("DeepSeek", {"name": "DeepSeek", "base_url": "https://api.deepseek.com", "model": "deepseek-chat"}),
@@ -76,7 +82,7 @@ class AddAIProfileDialog(QDialog):
         self.model_edit = QLineEdit()
         self.model_edit.setPlaceholderText("例如：deepseek-v4-flash-ascend")
         self.provider_combo = QComboBox()
-        self.provider_combo.addItem("OpenAI 兼容 (openai_compatible)",
+        self.provider_combo.addItem("OpenAI 兼容接口",
                                     "openai_compatible")
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setPlaceholderText("API Key（写入系统凭据存储）")
@@ -98,6 +104,9 @@ class AddAIProfileDialog(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
+        self.error_label = QLabel("")
+        self.error_label.hide()
+        layout.addWidget(self.error_label)
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -107,19 +116,24 @@ class AddAIProfileDialog(QDialog):
         self.buttons.accepted.connect(self._on_accept)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        finish_form(self)
 
     def _on_accept(self) -> None:
         if not self.name_edit.text().strip():
-            QMessageBox.warning(self, "缺少名称", "请填写配置名称。")
+            feedback(self.error_label, "请填写配置名称。", "error")
+            self.error_label.show()
             return
         if not self.base_url_edit.text().strip():
-            QMessageBox.warning(self, "缺少 Base URL", "请填写 Base URL。")
+            feedback(self.error_label, "请填写 Base URL。", "error")
+            self.error_label.show()
             return
         if not self.model_edit.text().strip():
-            QMessageBox.warning(self, "缺少 Model", "请填写 Model。")
+            feedback(self.error_label, "请填写 Model。", "error")
+            self.error_label.show()
             return
         if not self.api_key_edit.text().strip():
-            QMessageBox.warning(self, "缺少 API Key", "请填写 API Key。")
+            feedback(self.error_label, "请填写 API Key。", "error")
+            self.error_label.show()
             return
         self.accept()
 
@@ -149,7 +163,7 @@ class EditAPIKeyDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"修改 API Key · {profile_name}")
         self.setModal(True)
-        self.resize(460, 160)
+        self.resize(480, 220)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -158,6 +172,9 @@ class EditAPIKeyDialog(QDialog):
         form.addRow("新 API Key", _password_row(self.api_key_edit, self))
         layout.addLayout(form)
 
+        self.error_label = QLabel("")
+        self.error_label.hide()
+        layout.addWidget(self.error_label)
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -167,10 +184,12 @@ class EditAPIKeyDialog(QDialog):
         self.buttons.accepted.connect(self._on_accept)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        finish_form(self)
 
     def _on_accept(self) -> None:
         if not self.api_key_edit.text().strip():
-            QMessageBox.warning(self, "缺少 API Key", "API Key 不能为空。")
+            feedback(self.error_label, "API Key 不能为空。", "error")
+            self.error_label.show()
             return
         self.accept()
 
@@ -185,7 +204,7 @@ class RenameProfileDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("重命名配置")
         self.setModal(True)
-        self.resize(420, 140)
+        self.resize(460, 240)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -197,6 +216,9 @@ class RenameProfileDialog(QDialog):
         hint.setObjectName("TaskMeta")
         layout.addWidget(hint)
 
+        self.error_label = QLabel("")
+        self.error_label.hide()
+        layout.addWidget(self.error_label)
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -206,10 +228,12 @@ class RenameProfileDialog(QDialog):
         self.buttons.accepted.connect(self._on_accept)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        finish_form(self)
 
     def _on_accept(self) -> None:
         if not self.name_edit.text().strip():
-            QMessageBox.warning(self, "缺少名称", "配置名称不能为空。")
+            feedback(self.error_label, "配置名称不能为空。", "error")
+            self.error_label.show()
             return
         self.accept()
 
@@ -250,6 +274,7 @@ class FinalPromptPreviewDialog(QDialog):
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
+        finish_form(self)
 
     @staticmethod
     def _section_title(text: str) -> QLabel:
@@ -276,7 +301,7 @@ class PromptDefaultDialog(QDialog):
 
         layout = QVBoxLayout(self)
         hint = QLabel(
-            "以下为 Study Agent 内置默认 Prompt（代码 canonical default）。"
+            "以下为 Study Agent 内置默认 Prompt。"
             "你的自定义版本只保存在本地数据库，不会被 git pull 覆盖。"
         )
         hint.setObjectName("TaskMeta")
@@ -293,3 +318,4 @@ class PromptDefaultDialog(QDialog):
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
+        finish_form(self)

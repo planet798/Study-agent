@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from ..services.personalization_service import PersonalizationService
 from .components.button import SAButton
 from .components.card import SACard
+from .components.form_dialog import finish_form
 
 
 class PersonalMemoryEditorDialog(QDialog):
@@ -42,6 +43,9 @@ class PersonalMemoryEditorDialog(QDialog):
         self.save_btn.clicked.connect(self._save)
         self.editor.textChanged.connect(self._update_counter)
         self._update_counter()
+        self.save_btn.setDefault(True)
+        self.cancel_btn.setAutoDefault(False)
+        finish_form(self)
 
     def _update_counter(self):
         self.counter.setText(f"{len(self.editor.toPlainText())} / 1000")
@@ -85,6 +89,7 @@ class PersonalMemoriesDialog(QDialog):
         close.clicked.connect(self.accept)
         layout.addWidget(close)
         self.rows = []
+        finish_form(self, scroll_body=False)
         self.refresh()
 
     def refresh(self):

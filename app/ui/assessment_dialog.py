@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import QEvent, Signal
+from PySide6.QtCore import QEvent, Signal, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -26,10 +26,11 @@ from PySide6.QtWidgets import (
 )
 
 from .ai_worker import AssessmentWorker, run_submit_answers
+from .components.form_dialog import finish_form
 
 
 class AssessmentDialog(QDialog):
-    # 验收成功判题后发出（task_id），供上层完成复习任务等
+    # 验收判题成功后通知上层；掌握度更新仍由原服务完成。
     assessment_completed = Signal(int)
 
     def __init__(self, assessment_service, attempt, today, parent=None,
@@ -105,6 +106,17 @@ class AssessmentDialog(QDialog):
         root.addLayout(buttons)
 
         self._render_questions(attempt)
+        # Questions and results share one viewport; submit/close stay outside it.
+        root.removeWidget(self.result_container)
+        questions = self.questions_area.takeWidget()
+        body = QWidget()
+        content = QVBoxLayout(body)
+        content.setContentsMargins(0, 0, 8, 0)
+        content.addWidget(questions)
+        content.addWidget(self.result_container)
+        self.questions_area.setWidget(body)
+        self.questions_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        finish_form(self, scroll_body=False)
 
     # ---------- 题目渲染 ----------
 
@@ -297,3 +309,8 @@ class AssessmentDialog(QDialog):
             f"薄弱点：{'、'.join(weak) if weak else '未发现明显薄弱点'}"
         )
         self.status_label.setText("验收完成")
+        QTimer.singleShot(0, self, self._reveal_result)
+
+    def _reveal_result(self):
+        if not self._closing:
+            self.questions_area.ensureWidgetVisible(self.result_container)

@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
 )
 
 
+from .components.form_dialog import finish_form
+
+
 class NotDoneDialog(QDialog):
     """填写"未完成原因"的对话框。
 
@@ -57,6 +60,7 @@ class NotDoneDialog(QDialog):
         self.buttons.accepted.connect(self._on_submit)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        finish_form(self)
 
     def reason(self) -> str:
         """读取用户填写的原因（已去首尾空白）。"""
