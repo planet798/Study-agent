@@ -64,7 +64,7 @@ jobs:
       - run: python -m pip install -r packaging/windows-build.txt -r packaging/windows-test.txt
       - run: python -m pip check
       - name: Windows data and startup regressions
-        run: python -m pytest -q tests/test_runtime_paths.py tests/test_desktop_data_service.py tests/test_desktop_startup.py tests/test_pi_ai_bridge.py tests/test_main_cli.py tests/test_release_migration_hardening.py tests/test_migration_verifier_regression.py
+        run: python -m pytest -q tests/test_runtime_paths.py tests/test_desktop_data_service.py tests/test_desktop_startup.py tests/test_desktop_entry.py tests/test_windows_launcher.py tests/test_pi_ai_bridge.py tests/test_main_cli.py tests/test_release_migration_hardening.py tests/test_migration_verifier_regression.py
       - name: Install compiler
         run: choco install innosetup --version=6.5.4 --yes --no-progress --allow-downgrade --force
       - name: Build installer

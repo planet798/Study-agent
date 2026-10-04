@@ -1,0 +1,6 @@
+Unmodified license texts from Qt qtbase v6.11.2:
+https://github.com/qt/qtbase/tree/v6.11.2/LICENSES
+Corresponding Qt source:
+https://download.qt.io/official_releases/qt/6.11/6.11.2/single/
+PySide6 source:
+https://code.qt.io/cgit/pyside/pyside-setup.git/

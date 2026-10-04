@@ -1,4 +1,4 @@
-Windows 10/11 x64 安装版，内置 Python、Qt、Node.js 与订阅登录组件。
+Windows 10（1809 或更新版本）/11 x64 安装版，内置 Python、Qt、Node.js 与订阅登录组件。
 
 1. 下载 `StudyAgent-Setup-版本-x64.exe`，双击安装；默认安装到当前用户目录，也可自主选择安装路径。
 2. 从桌面或开始菜单快捷方式启动。无需执行终端命令；AI 功能仍需在设置中配置 API Key 或登录订阅账号。

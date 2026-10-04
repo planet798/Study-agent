@@ -320,7 +320,10 @@ class TestPwshLive:
     def test_create_shortcut_dryrun_idempotent_path(self, tmp_path):
         root = _make_fake_project(tmp_path, "p4")
         launcher = root / "scripts" / "create_shortcut.ps1"
-        r = _run_ps(SHELL, launcher, root, "-DryRun")
+        # 显式隔离目录：无桌面的 Linux CI 没有 Windows known folders。
+        r = _run_ps(SHELL, launcher, root, "-DryRun",
+                    "-DesktopPath", str(tmp_path / "Desktop"),
+                    "-StartMenuPath", str(tmp_path / "Programs"))
         out = r.stdout + r.stderr
         assert r.returncode == 0, out
         assert out.count("Study Agent.lnk") >= 2

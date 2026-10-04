@@ -21,7 +21,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '图标生成失败' }
     Push-Location oauth_bridge
     try {
-        & npm ci --omit=dev
+        $BridgeNpmCli = Join-Path (Split-Path $Node -Parent) 'node_modules/npm/bin/npm-cli.js'
+        & $Node $BridgeNpmCli ci --omit=dev
         if ($LASTEXITCODE -ne 0) { throw 'OAuth 依赖安装失败' }
     } finally { Pop-Location }
     & python scripts/collect_release_licenses.py
