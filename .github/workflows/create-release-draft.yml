@@ -1,0 +1,74 @@
+name: Create verified release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Successful Windows release workflow run ID'
+        required: true
+      version:
+        description: 'Version matching the verified installer (X.Y.Z)'
+        required: true
+        default: '0.2.0'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Validate source run and version
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          run = json.loads((Path(os.environ['RUNNER_TEMP']) / 'source-run.json').read_text())
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Source checks did not pass'
+          assert run['repository']['full_name'].lower() == os.environ['GITHUB_REPOSITORY'].lower()
+          assert run['path'] == '.github/workflows/windows-release.yml', 'Unexpected source workflow'
+          assert re.fullmatch(r'[0-9a-f]{40}', run['head_sha'])
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write('SOURCE_SHA=' + run['head_sha'] + '\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: StudyAgent-Windows-${{ inputs.version }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          path: release-assets
+      - name: Verify artifact checksum and frozen runtime report
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path('release-assets')
+          version = os.environ['RELEASE_VERSION']
+          expected = f'StudyAgent-Setup-{version}-x64.exe'
+          checksum = (root / 'SHA256SUMS.txt').read_text(encoding='utf-8-sig').split()
+          assert len(checksum) == 2 and checksum[1] == expected, 'Unexpected checksum manifest'
+          with (root / expected).open('rb') as stream:
+              assert hashlib.file_digest(stream, 'sha256').hexdigest() == checksum[0]
+          report = json.loads((root / 'self-test.json').read_text())
+          assert report.get('ok') is True and report['version'] == version
+          PY
+      - name: Create draft for the exact verified commit
+        run: >-
+          gh release create "v$RELEASE_VERSION"
+          "release-assets/StudyAgent-Setup-$RELEASE_VERSION-x64.exe"
+          release-assets/SHA256SUMS.txt
+          --target "$SOURCE_SHA" --draft
+          --title "Study Agent $RELEASE_VERSION"
+          --notes-file docs/WINDOWS_RELEASE_NOTES.md

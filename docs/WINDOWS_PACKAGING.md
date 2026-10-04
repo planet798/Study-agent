@@ -4,7 +4,7 @@
 
 ## 构建
 
-在 GitHub Actions 的 **Windows release** 工作流选择 **Run workflow**，版本填写 `0.2.0`。手动触发仅生成构建附件；推送 `vX.Y.Z` 标签则在所有检查通过后创建 Release 草稿，不自动公开发布。
+在 GitHub Actions 的 **Windows release** 工作流选择 **Run workflow**，版本填写 `0.2.0`。手动触发仅生成构建附件；推送 `vX.Y.Z` 标签则在所有检查通过后创建 Release 草稿，不自动公开发布。已成功的手动构建可通过 **Create verified release draft** 工作流输入原构建 Run ID 与版本生成草稿；它复核原构建通过状态、提交、安装包校验值与冻结自检报告，并直接在 GitHub 上传附件，避免重跑构建或经本机转传大文件。
 
 工作流并行执行 Linux 完整 pytest 回归/OAuth Node 测试和 Windows 数据/迁移/启动测试、构建、安装及离线冻结程序自检；两条检查链均通过后才能创建发布草稿。Node 固定为 22.19.0，Python 为 3.12，Linux 回归、Windows 生产依赖和打包工具由 `packaging` 下锁定清单管理；两端应用运行库版本一致。
 
