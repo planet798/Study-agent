@@ -62,7 +62,7 @@ def _done(env, name):
 
 class TestSkillPool:
     def test_career_context_defines_skill(self):
-        d = json.loads(Path("docs/career_context.json").read_text("utf-8"))
+        d = json.loads((Path(__file__).resolve().parent / "fixtures/career_context.synthetic.json").read_text("utf-8"))
         assert SKILL in d["skill_pool"]["S"]
         assert d["skill_dependencies"][SKILL] == [
             "推荐系统基础", "LLM 基础", "Ranking", "Rerank", "RAG"]

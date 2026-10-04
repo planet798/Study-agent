@@ -16,18 +16,18 @@ def test_composer_placeholder_and_shortcut_hint(qtbot):
     qtbot.addWidget(composer)
     assert "围绕当前任务" in composer.input_edit.placeholderText()
     assert "Ask AI" not in composer.input_edit.placeholderText()
-    assert composer.hint_label.text() == "Ctrl+Enter 发送 · Enter 换行"
+    assert composer.hint_label.text() == "Enter 发送 · Shift+Enter 换行"
     assert composer.send_button.text() == "发送"
 
 
-def test_enter_inserts_newline_and_does_not_send(qtbot):
+def test_shift_enter_inserts_newline_and_does_not_send(qtbot):
     composer = AgentComposer()
     qtbot.addWidget(composer)
     composer.show()
     sent = []
     composer.send_clicked.connect(lambda: sent.append(True))
     composer.input_edit.setPlainText("line one")
-    qtbot.keyClick(composer.input_edit, Qt.Key.Key_Return)
+    qtbot.keyClick(composer.input_edit, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
     assert sent == []
     assert composer.input_edit.toPlainText().count("\n") == 1
 
@@ -129,6 +129,8 @@ def test_composer_wrapping_font_theme_and_page_height_recompute(qtbot, qapp, rep
     from app.ui.agent_workspace_page import AgentWorkspacePage
     from app.ui.design.theme_manager import ThemeManager
 
+    ThemeManager.instance().set_theme("dark")
+    ThemeManager.instance().apply(qapp)
     task = repo.create(title="Resize", scheduled_date="2026-01-05", source="manual")
     page = AgentWorkspacePage()
     qtbot.addWidget(page)
@@ -166,3 +168,26 @@ def test_composer_wrapping_font_theme_and_page_height_recompute(qtbot, qapp, rep
     qtbot.waitUntil(lambda: edit.height() >= 2 * edit.fontMetrics().lineSpacing() + 12)
     page.composer.clear()
     qtbot.waitUntil(lambda: edit.verticalScrollBar().maximum() == 0)
+
+
+def test_enter_send_shift_newline_and_preedit_guard(qtbot):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtGui import QInputMethodEvent, QKeyEvent
+    composer = AgentComposer()
+    qtbot.addWidget(composer)
+    composer.show()
+    sent=[]
+    composer.send_clicked.connect(lambda: sent.append(True))
+    composer.set_text('hello')
+    qtbot.keyClick(composer.input_edit, Qt.Key.Key_Return)
+    assert sent == [True]
+    QCoreApplication.sendEvent(composer.input_edit, QInputMethodEvent('拼音', []))
+    qtbot.keyClick(composer.input_edit, Qt.Key.Key_Return)
+    assert sent == [True]
+    QCoreApplication.sendEvent(composer.input_edit, QInputMethodEvent('', []))
+    repeat=QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier, '\r', True, 1)
+    QCoreApplication.sendEvent(composer.input_edit, repeat)
+    assert sent == [True]
+    composer.set_send_enabled(False)
+    qtbot.keyClick(composer.input_edit, Qt.Key.Key_Enter)
+    assert sent == [True]

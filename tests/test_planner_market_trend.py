@@ -250,7 +250,7 @@ class TestBoundaries:
 
     def test_career_context_file_unchanged(self, conn):
         from pathlib import Path
-        p = Path("docs/career_context.json")
+        p = (Path(__file__).resolve().parent / "fixtures/career_context.synthetic.json")
         before = p.read_text(encoding="utf-8")
         env = _env(conn)
         env["js"].save_summary(NEXT, "Embedding 9", 10)

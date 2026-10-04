@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "updated": "2026-01-01",
+  "career_goal": "合成示例：搜广推基础与 LLM、Agent 工程学习。",
+  "target_roles": {
+    "primary": [
+      "推荐算法工程师"
+    ],
+    "secondary": [
+      "LLM 应用工程师"
+    ]
+  },
+  "jd_evidence": {
+    "companies": [],
+    "tech_frequency": {},
+    "conclusions": []
+  },
+  "skill_roadmap": {
+    "stages": [
+      {
+        "name": "阶段一：工程基础",
+        "items": [
+          "Python",
+          "Git"
+        ]
+      },
+      {
+        "name": "阶段二：机器学习",
+        "items": [
+          "机器学习基础",
+          "PyTorch"
+        ]
+      },
+      {
+        "name": "阶段三：推荐系统",
+        "items": [
+          "推荐系统基础",
+          "Ranking"
+        ]
+      },
+      {
+        "name": "阶段四：LLM 应用",
+        "items": [
+          "LLM 基础",
+          "RAG"
+        ]
+      }
+    ],
+    "priority": {
+      "must_master": [
+        "Python",
+        "Git"
+      ],
+      "should_master": [
+        "PyTorch"
+      ],
+      "understand_only": [
+        "CUDA"
+      ]
+    }
+  },
+  "current_skill_state": {
+    "mastered": [],
+    "weak": [],
+    "deferred": []
+  },
+  "learning_principles": [
+    "示例：遵守前置依赖，使用验收证据更新掌握情况"
+  ],
+  "project_state": {
+    "name": "示例学习项目",
+    "repo": "example/study-project",
+    "version": "示例"
+  },
+  "skill_pool": {
+    "S": [
+      "Python",
+      "Git"
+    ],
+    "A": [
+      "PyTorch"
+    ],
+    "B": []
+  },
+  "skill_dependencies": {
+    "PyTorch": [
+      "Python"
+    ]
+  }
+}

@@ -107,6 +107,11 @@ class AgentWorkspacePage(QWidget):
         self.current_session_id: int | None = None
         self.current_task_id: int | None = None
         self._model_configured = False
+        self._stream_preview = None
+        self._stream_text = ""
+        self._stream_timer = QTimer(self)
+        self._stream_timer.setSingleShot(True)
+        self._stream_timer.timeout.connect(self._flush_stream)
         self._busy = False
         self._approval_busy: set[int] = set()
         self._visible_messages: tuple = ()
@@ -684,7 +689,41 @@ class AgentWorkspacePage(QWidget):
         self.error_label.setText(message or "")
         self.error_label.setVisible(bool(message))
 
+    def handle_stream_event(self, session_id, event):
+        if self.current_session_id != int(session_id) or not self._busy:
+            return
+        kind = event.get("event")
+        if kind in {"start", "discard_text"}:
+            self._stream_text = ""
+            if self._stream_preview is not None:
+                self._stream_preview.hide()
+                self._stream_preview.set_text("")
+            self._stream_timer.stop()
+        elif kind == "text_delta":
+            if self._stream_preview is None:
+                from .agent_stream_preview import AgentStreamPreview
+                self._stream_preview = AgentStreamPreview(self.conversation_body)
+                self.conversation_layout.insertWidget(max(0, self.conversation_layout.count() - 1), self._stream_preview)
+            self._stream_text += str(event.get("text") or "")
+            if not self._stream_timer.isActive():
+                self._stream_timer.start(50)
+
+    def _flush_stream(self):
+        if self._stream_preview is None:
+            return
+        self.empty_hint.hide()
+        self._stream_preview.set_text(self._stream_text)
+        self._stream_preview.show()
+        if not self._scrolled_away_during_busy:
+            self._schedule_scroll(to_bottom=True)
+        else:
+            self._unseen_reply = True
+            self._update_latest_button()
+
     def _clear_conversation(self) -> None:
+        self._stream_timer.stop()
+        self._stream_preview = None
+        self._stream_text = ""
         while self.conversation_layout.count():
             item = self.conversation_layout.takeAt(0)
             widget = item.widget()

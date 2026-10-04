@@ -176,7 +176,7 @@ def test_workspace_ctrl_enter_length_limit_and_clear(qtbot, repo):
     page.send_requested.connect(lambda *args: sent.append(args))
     page.settings_requested.connect(lambda: settings.append(True))
     page.input_edit.setPlainText("one")
-    qtbot.keyClick(page.input_edit, Qt.Key.Key_Return)
+    qtbot.keyClick(page.input_edit, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
     assert page.input_edit.toPlainText().count("\n") == 1 and not sent
     page.input_edit.setPlainText("x" * (MAX_AGENT_INPUT_CHARS + 1))
     assert page.input_warning_label.isVisible() and not page.send_button.isEnabled()

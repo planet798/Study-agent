@@ -94,6 +94,7 @@ class AIConnectionTestWorker(QThread):
         *,
         oauth_provider: str = "",
         oauth_credential: dict | None = None,
+        db_path: str | None = None, profile_id: int | None = None,
     ):
         super().__init__(parent)
         self._base_url = base_url
@@ -102,6 +103,8 @@ class AIConnectionTestWorker(QThread):
         self._timeout = timeout
         self._oauth_provider = oauth_provider
         self._oauth_credential = oauth_credential
+        self._db_path = db_path
+        self._profile_id = profile_id
 
     def run(self) -> None:  # noqa: D102
         from ..ai.config_service import ConnectionTestResult, run_connection_test
@@ -109,47 +112,11 @@ class AIConnectionTestWorker(QThread):
         refreshed_credential = {}
         try:
             if self._oauth_provider and self._oauth_credential:
-                import time
-                from ..ai.pi_ai_bridge import PiAIBridge
-                started = time.monotonic()
+                from ..ai.oauth_test import run_oauth_test
+                result = run_oauth_test(self._oauth_provider, self._model, self._oauth_credential,
+                                        timeout=self._timeout, db_path=self._db_path,
+                                        profile_id=self._profile_id, refreshed=refreshed_credential)
 
-                def capture_refresh(event: dict) -> None:
-                    if event.get("event") == "credential":
-                        credential = event.get("credential")
-                        if isinstance(credential, dict):
-                            refreshed_credential["value"] = credential
-
-                response = PiAIBridge().complete(
-                    provider=self._oauth_provider, model=self._model,
-                    credential=self._oauth_credential,
-                    messages=[{"role": "user", "content": "Reply with OK."}],
-                    temperature=0.3, max_tokens=64,
-                    on_event=capture_refresh,
-                )
-                content = (response.get("content") or "").strip()
-                finish_reason = str(response.get("finishReason") or "")
-                error_message = str(response.get("errorMessage") or "").strip()
-                failed = bool(error_message) or finish_reason in {"error", "aborted"}
-                if failed:
-                    message = error_message or f"模型请求失败（{finish_reason or '未知原因'}）"
-                elif content:
-                    message = "连接成功"
-                else:
-                    content_types = ", ".join(response.get("contentTypes") or []) or "无可见内容"
-                    message = (
-                        f"连接成功（服务已响应，但没有文本；stopReason={finish_reason or '未知'}，"
-                        f"内容类型={content_types}）"
-                    )
-                result = ConnectionTestResult(
-                    ok=not failed,
-                    message=message,
-                    model=self._model,
-                    latency_ms=int((time.monotonic() - started) * 1000),
-                    source=content[:50],
-                    oauth_credential=(
-                        response.get("credential") or refreshed_credential.get("value")
-                    ),
-                )
             else:
                 result = run_connection_test(
                     self._base_url,
@@ -168,6 +135,7 @@ class AIConnectionTestWorker(QThread):
                 ),
                 model=self._model,
                 oauth_credential=refreshed_credential.get("value"),
+                credential_persisted=bool(refreshed_credential.get("persisted")),
             )
         self.succeeded.emit(result)
 
@@ -283,6 +251,7 @@ class AgentTurnWorker(QThread):
     succeeded = Signal(object)
     failed = Signal(str)
     extraction_requested = Signal(object)
+    progress = Signal(int, object)
 
     def __init__(self, db_path, runtime_factory, session_id: int, user_text: str,
                  parent=None, *, capture_memory_consent=False):
@@ -291,9 +260,14 @@ class AgentTurnWorker(QThread):
         self._runtime_factory = runtime_factory
         self._session_id = int(session_id)
         self._user_text = user_text
+        self._cancel_event = threading.Event()
         self._capture_memory_consent = capture_memory_consent
         self.consent_at_turn_start = False
         self.consent_revision_at_turn_start = ""
+
+    def requestInterruption(self):  # noqa: N802
+        self._cancel_event.set()
+        super().requestInterruption()
 
     def _request_extraction(self, result):
         from ..agent.memory_extraction import CompletedMemoryExtractionTurn, log_extraction_skip
@@ -318,6 +292,12 @@ class AgentTurnWorker(QThread):
                 self.consent_at_turn_start = snapshot.allowed
                 self.consent_revision_at_turn_start = snapshot.revision
             runtime = self._runtime_factory(conn)
+            model = getattr(runtime, "model_client", None)
+            if hasattr(model, "set_progress_callback"):
+                model.set_progress_callback(
+                    lambda event: self.progress.emit(self._session_id, event),
+                    str(self._session_id), self._cancel_event,
+                )
             service = getattr(runtime, "session_service", None)
             if service is not None:
                 before_count = service.count_messages(self._session_id)

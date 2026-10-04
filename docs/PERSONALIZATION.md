@@ -5,7 +5,6 @@ Current versions: **schema 27 / fingerprint 7 / evaluator 2**.
 ## 当前交接状态（2026-10-03）
 
 最新进度以仓库 Markdown 文档为主要参考，交接入口为
-[`CODEX_HANDOFF.md`](../CODEX_HANDOFF.md)。旧聊天中的阶段计划只作背景，不是待办或实施授权。
 
 | 范围 | 状态与依据 |
 |---|---|

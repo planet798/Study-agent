@@ -14,3 +14,21 @@ build/
 dist/
 *.spec.bak
 .venv-build/
+
+# 本地开发记录、个人配置及运行数据
+/CODEX_HANDOFF.md
+/LEARNING_LOG.md
+/docs/career_context.json
+/docs/CODEBASE_AUDIT_2026-09-29.md
+/docs/ui/UI_BLUEPRINT.md
+/docs/ui/UI_INVENTORY.md
+/docs/ui/UI5_AUDIT.md
+/docs/ui/STYLE_AUDIT.md
+/docs/ui/SCREENSHOT_CHECKLIST.md
+/docs/ui/FINAL_UI_ACCEPTANCE.md
+/data/
+/docs/obsidian/
+.env
+.env.*
+!.env.example
+*.log

@@ -1,0 +1,239 @@
+{
+  "schema_version": 2,
+  "updated": "2026-01-01",
+  "career_goal": "合成示例：搜广推基础与 LLM、Agent 工程学习。",
+  "target_roles": {
+    "primary": [
+      "推荐算法工程师"
+    ],
+    "secondary": [
+      "LLM 应用工程师"
+    ]
+  },
+  "jd_evidence": {
+    "companies": [
+      "示例企业 A",
+      "示例企业 B"
+    ],
+    "tech_frequency": {
+      "Python": {
+        "count": 9,
+        "total": 10,
+        "priority": "最高"
+      },
+      "PyTorch": {
+        "count": 8,
+        "total": 10,
+        "priority": "高"
+      }
+    },
+    "conclusions": [
+      "合成样本用于测试，不代表真实市场统计"
+    ]
+  },
+  "skill_roadmap": {
+    "stages": [
+      {
+        "name": "阶段一：工程基础",
+        "items": [
+          "Python",
+          "Git"
+        ]
+      },
+      {
+        "name": "阶段二：机器学习",
+        "items": [
+          "机器学习基础",
+          "PyTorch"
+        ]
+      },
+      {
+        "name": "阶段三：推荐系统",
+        "items": [
+          "推荐系统基础",
+          "Ranking"
+        ]
+      },
+      {
+        "name": "阶段四：LLM 应用",
+        "items": [
+          "LLM 基础",
+          "RAG"
+        ]
+      }
+    ],
+    "priority": {
+      "must_master": [
+        "Python",
+        "Git"
+      ],
+      "should_master": [
+        "PyTorch"
+      ],
+      "understand_only": [
+        "CUDA"
+      ]
+    }
+  },
+  "current_skill_state": {
+    "mastered": [
+      "Python",
+      "Git"
+    ],
+    "weak": [
+      "PyTorch"
+    ],
+    "deferred": [
+      "CUDA",
+      "vLLM"
+    ],
+    "learning": [
+      "PyTorch"
+    ]
+  },
+  "learning_principles": [
+    "示例：遵守前置依赖，使用验收证据更新掌握情况"
+  ],
+  "project_state": {
+    "name": "示例学习项目",
+    "repo": "example/study-project",
+    "version": "示例"
+  },
+  "skill_pool": {
+    "S": [
+      "Python",
+      "PyTorch",
+      "Transformer",
+      "LLM 基础",
+      "Hugging Face",
+      "SFT",
+      "LoRA / QLoRA",
+      "Embedding",
+      "RAG",
+      "推荐系统基础",
+      "Recall",
+      "Ranking",
+      "LLM + Recommendation"
+    ],
+    "A": [
+      "CTR",
+      "Rerank",
+      "用户画像",
+      "Agent",
+      "模型评估",
+      "SQL",
+      "Linux",
+      "Git"
+    ],
+    "B": [
+      "VLM",
+      "vLLM",
+      "Docker",
+      "C++"
+    ],
+    "C": [
+      "CUDA",
+      "分布式训练底层",
+      "复杂推理优化",
+      "与主路线关系较弱的 CV / SLAM / 自动驾驶 / 语音 / 规控 / 风控 等内容"
+    ]
+  },
+  "skill_dependencies": {
+    "Hugging Face": [
+      "Python",
+      "Transformer"
+    ],
+    "LLM 基础": [
+      "Python",
+      "Transformer"
+    ],
+    "SFT": [
+      "Transformer",
+      "LLM 基础",
+      "Hugging Face"
+    ],
+    "LoRA / QLoRA": [
+      "PyTorch",
+      "Transformer",
+      "SFT"
+    ],
+    "模型评估": [
+      "LLM 基础",
+      "Hugging Face"
+    ],
+    "Embedding": [
+      "Python",
+      "PyTorch",
+      "Transformer"
+    ],
+    "RAG": [
+      "LLM 基础",
+      "Embedding"
+    ],
+    "推荐系统基础": [
+      "Python",
+      "PyTorch"
+    ],
+    "用户画像": [
+      "SQL",
+      "推荐系统基础"
+    ],
+    "Recall": [
+      "推荐系统基础",
+      "Embedding"
+    ],
+    "Ranking": [
+      "推荐系统基础",
+      "Recall"
+    ],
+    "CTR": [
+      "Ranking",
+      "Embedding"
+    ],
+    "Rerank": [
+      "Ranking",
+      "Embedding"
+    ],
+    "LLM + Recommendation": [
+      "推荐系统基础",
+      "LLM 基础",
+      "Ranking",
+      "Rerank",
+      "RAG"
+    ],
+    "Agent": [
+      "LLM 基础",
+      "RAG"
+    ],
+    "vLLM": [
+      "LoRA / QLoRA",
+      "Docker"
+    ],
+    "Docker": [
+      "Linux"
+    ],
+    "VLM": [
+      "LLM 基础",
+      "Transformer"
+    ],
+    "CUDA": [
+      "PyTorch"
+    ],
+    "分布式训练底层": [
+      "PyTorch",
+      "SFT"
+    ],
+    "复杂推理优化": [
+      "Transformer",
+      "vLLM"
+    ]
+  },
+  "connectors": {
+    "shared": [
+      "Embedding",
+      "Recall",
+      "Ranking",
+      "Rerank"
+    ]
+  }
+}

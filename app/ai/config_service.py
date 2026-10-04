@@ -144,6 +144,8 @@ class ConnectionTestResult:
     latency_ms: int = 0
     source: str = ""
     oauth_credential: dict | None = None
+    first_token_ms: int | None = None
+    credential_persisted: bool = False
 
 
 def classify_connection_error(message: str) -> str:
@@ -380,6 +382,13 @@ class AIConfigService:
         provider_id = profile.provider_type[len(PROVIDER_TYPE_PI_OAUTH_PREFIX):]
         if not _is_valid_oauth_credential(credential, provider_id):
             raise ValueError("OAuth 凭据格式无效或账户信息不完整，请重新登录")
+        existing = self._secrets.get(profile.secret_ref)
+        if existing:
+            try:
+                if json.loads(existing) == credential:
+                    return
+            except (ValueError, TypeError):
+                pass
         self._secrets.set(
             profile.secret_ref,
             json.dumps(credential, ensure_ascii=False, separators=(",", ":")),

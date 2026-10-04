@@ -463,3 +463,14 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if {"qtbot", "qapp"}.intersection(getattr(item, "fixturenames", ())):
             item.add_marker(pytest.mark.ui)
+
+
+@pytest.fixture(autouse=True)
+def synthetic_career_context(monkeypatch):
+    """业务测试不读取开发者的个人学习文件。"""
+    from app.ai import long_term_context
+    from app.services import skill_service, jd_service
+    path = PROJECT_ROOT / "tests/fixtures/career_context.synthetic.json"
+    monkeypatch.setattr(long_term_context, "DEFAULT_CONTEXT_PATH", path)
+    monkeypatch.setattr(skill_service, "DEFAULT_CAREER_CONTEXT_PATH", path)
+    monkeypatch.setattr(jd_service, "DEFAULT_CAREER_CONTEXT_PATH", path)

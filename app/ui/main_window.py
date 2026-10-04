@@ -829,6 +829,7 @@ class MainWindow(QMainWindow):
             parent=self,
             capture_memory_consent=self.memory_extraction_coordinator is not None,
         )
+        worker.progress.connect(lambda sid, event, w=worker: self._on_agent_progress(sid, w, event))
         if self.memory_extraction_coordinator is not None:
             worker.extraction_requested.connect(self.memory_extraction_coordinator.enqueue)
         worker.succeeded.connect(
@@ -840,6 +841,14 @@ class MainWindow(QMainWindow):
         worker.finished.connect(lambda w=worker: self._release_worker(w))
         self._ai_workers.append(worker)
         worker.start()
+
+    def _on_agent_progress(self, session_id, worker, event):
+        page = self.agent_workspace_page
+        if (self._quit_requested or worker not in self._ai_workers
+                or int(session_id) not in self._agent_inflight_sessions
+                or page.current_session_id != int(session_id)):
+            return
+        page.handle_stream_event(session_id, event)
 
     def _on_agent_turn_finished(self, session_id: int, error: str | None) -> None:
         self._agent_inflight_sessions.discard(int(session_id))

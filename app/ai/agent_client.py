@@ -182,6 +182,14 @@ class AdaptiveAgentModelClient(AgentModelClient):
         self._config_service = getattr(config_provider, "__self__", None)
         self.timeout = timeout
         self._urlopen = urlopen or urllib.request.urlopen
+        self._progress_callback = None
+        self._stream_session = ""
+        self._cancel_event = None
+
+    def set_progress_callback(self, callback, session_id="", cancel_event=None):
+        self._progress_callback = callback
+        self._stream_session = str(session_id)
+        self._cancel_event = cancel_event
 
     def current_config(self) -> Any:
         return self._config_provider()
@@ -209,6 +217,7 @@ class AdaptiveAgentModelClient(AgentModelClient):
         if getattr(cfg, "is_oauth", False):
             from contextlib import nullcontext
             from .pi_ai_bridge import PiAIBridge, oauth_profile_lock
+            from .bridge_pool import profile_bridge_key
 
             lock = oauth_profile_lock(
                 getattr(self._config_service, "db_path", None), cfg.profile_id
@@ -217,11 +226,16 @@ class AdaptiveAgentModelClient(AgentModelClient):
                 if self._config_service:
                     cfg = self._config_service.resolve_profile_config(cfg.profile_id)
 
+                if self._progress_callback:
+                    self._progress_callback({"event": "start"})
+
                 def persist_refresh(event: dict) -> None:
                     if event.get("event") == "credential" and self._config_service:
                         self._config_service.save_oauth_credential(
                             cfg.profile_id, event.get("credential")
                         )
+                    if self._progress_callback and event.get("event") in {"text_delta", "discard_text"}:
+                        self._progress_callback(event)
 
                 response = PiAIBridge().complete(
                     provider=cfg.oauth_provider_id,
@@ -232,6 +246,10 @@ class AdaptiveAgentModelClient(AgentModelClient):
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
                     on_event=persist_refresh,
+                    profile_key=profile_bridge_key(getattr(self._config_service, "db_path", None), cfg.profile_id),
+                    timeout=self.timeout,
+                    session_id=profile_bridge_key(getattr(self._config_service, "db_path", None), f"{cfg.profile_id}:{self._stream_session}"),
+                    cancel_event=self._cancel_event,
                 )
                 refreshed = response.get("credential")
                 if refreshed and refreshed != cfg.oauth_credential and self._config_service:

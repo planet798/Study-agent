@@ -1,8 +1,8 @@
 """AgentComposer：Workspace 输入区（纯 UI）。
 
 Interactions (unchanged from Agent-11):
-- ``Enter`` inserts a newline
-- ``Ctrl+Enter`` sends
+- ``Shift+Enter`` inserts a newline
+- ``Enter`` sends; ``Ctrl+Enter`` remains compatible
 
 The composer only owns presentation and the local interaction contract; the
 WorkspacePage owns Session/turn state and decides whether sending is allowed.
@@ -35,6 +35,7 @@ class AgentComposer(QFrame):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("AgentComposer")
+        self._preedit_active = False
         self._available_height = 800
         self._height_timer = QTimer(self)
         self._height_timer.setSingleShot(True)
@@ -63,7 +64,7 @@ class AgentComposer(QFrame):
 
         bottom = QHBoxLayout()
         bottom.setSpacing(spacing.SM)
-        self.hint_label = QLabel("Ctrl+Enter 发送 · Enter 换行")
+        self.hint_label = QLabel("Enter 发送 · Shift+Enter 换行")
         self.hint_label.setObjectName("AgentComposerHint")
         self.hint_label.setTextFormat(Qt.TextFormat.PlainText)
         bottom.addWidget(self.hint_label)
@@ -155,9 +156,17 @@ class AgentComposer(QFrame):
             QEvent.Type.ContentsRectChange,
         ):
             self._schedule_height()
+        if watched is self.input_edit and event.type() == QEvent.Type.InputMethod:
+            self._preedit_active = bool(event.preeditString())
         if (watched is self.input_edit and event.type() == QEvent.Type.KeyPress
-                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
-                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            self.send_clicked.emit()
-            return True
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)):
+            if self._preedit_active:
+                return False
+            modifiers = event.modifiers()
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                return False
+            if modifiers in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ControlModifier):
+                if not event.isAutoRepeat() and self.send_button.isEnabled():
+                    self.send_clicked.emit()
+                return True
         return super().eventFilter(watched, event)

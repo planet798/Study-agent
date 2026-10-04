@@ -4,7 +4,6 @@
 > 就能定位改动点，而不是反复整读 `main.py` / `main_window.py` / `schema.py`。
 > 详细业务语义见 `README.md`；改代码前请对照 `docs/AGENT_GUIDE.md`。
 
-> 最新交接进度先读 [`CODEX_HANDOFF.md`](../CODEX_HANDOFF.md)。用户已确认 P-1E-C 全部实现；
 > 当前检出版本尚未定位到相应确认 UI / 原子保存链路，差异见 [`PERSONALIZATION.md`](PERSONALIZATION.md)。
 > 下文 E-B 描述限定于已核对的代码职责，不把旧阶段规划重新列为待办。
 

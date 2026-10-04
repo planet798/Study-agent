@@ -2,7 +2,6 @@
 
 > Canonical product boundary. Product simplification is complete; do not continue product removal. Agent implementation status is recorded below; future capabilities are explicitly marked not implemented.
 
-> Progress reference (2026-10-03): start with [`CODEX_HANDOFF.md`](../CODEX_HANDOFF.md).
 > The user confirms P-1E-C is complete; the corresponding confirmation/save implementation
 > has not been located in this checkout. See [`PERSONALIZATION.md`](PERSONALIZATION.md)
 > for the recorded version mismatch. E-B scope statements below are not an E-C backlog.
@@ -62,7 +61,7 @@ Implemented:
 - **Agent-8**: Content-free per-turn Trace/events and deterministic protocol Evaluation (`pass` / `warn` / `fail`). Trace never duplicates conversation/tool payloads; Evaluation uses no LLM and does not assess answer quality or learning outcomes. Trace/Evaluation failures are fail-open.
 - **Agent-9**: Local approval-request Tool for Task completion; explicit Workspace approval runs canonical `TaskService.complete_task()` in a worker-owned connection. Append-only authorization events are protected history. No natural-language approval or auto-resume.
 - **Agent-10**: Adds fixed request-only Tools for formal Assessment start/resume and bounded LearningOutcome note save. Approval executes through canonical Services on a fresh worker connection. Assessment startup does not judge answers or change Mastery; Note save creates no Capability evidence and never occupies the Task-completion outcome link.
-- **Agent-11**: Agent Session production UX adds static capability status, safe errors, Settings shortcut, Ctrl+Enter, bounded input, in-flight serialization and resilient reload/shutdown. Offline `agent-diagnostic` reports read-only local health without external calls.
+- **Agent-11**: Agent Session production UX adds static capability status, safe errors, Settings shortcut, Enter-to-send / Shift+Enter newline (Ctrl+Enter compatible), bounded input, in-flight serialization and resilient reload/shutdown. Offline `agent-diagnostic` reports read-only local health without external calls.
 - **Workspace-1**: Task-scoped user-selected managed or local project binding appears in a compact conversation-header selector/menu. Managed file tools work with safe defaults even without `sandbox.json`; local projects are read-only and sensitive paths are denied. The model receives no host path and cannot switch bindings. Saving a Study-Agent Learning Note remains an approved SQLite action, distinct from writing an explicitly requested Workspace file. See `docs/WORKSPACES.md`.
 
 - **Learning Shell-1**: Active Agent Sessions remain available independently of origin Task active/done/not_done/cancelled status. The Sidebar shows all pinned active non-archived Sessions, then the latest 10 unpinned active non-archived Sessions by `updated_at DESC`, retaining the currently open unarchived Session if needed. Opening is by `session_id`, loading its immutable origin `task_id`, full messages, approvals and Task Workspace binding; leaving the Workspace never closes the Session. Busy turns/approval execution prevent switching to a different Session. Conversation is the primary workspace, with compact metadata/Workspace controls and a bottom composer.

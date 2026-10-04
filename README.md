@@ -504,3 +504,5 @@ route 的 plan；canonical 尚未建立的旧库仍走 legacy recovery。
   一律使用 `kp_id` / `topic_id` / `route_id`；
 - `task_type='extra'` / `source='extra'` 仅剩 legacy 清理与过滤，**无生产创建入口**；
   `exploration / 额外学习 / 课外探索` 无任何生产 service / UI / prompt 入口。
+
+个人职业/学习上下文不随仓库公开。如需自定义，可复制 `docs/examples/career_context.example.json` 为 `docs/career_context.json` 后修改；该个人文件已被 Git 忽略。

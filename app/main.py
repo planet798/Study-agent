@@ -1797,6 +1797,19 @@ def main() -> int:
     if hasattr(window, "_restore_from_tray"):
         guard.restore_requested.connect(window._restore_from_tray)
     window.show()
+    from app.ai.bridge_pool import POOL, profile_bridge_key
+    if hasattr(app, "aboutToQuit"):
+        app.aboutToQuit.connect(POOL.close)
+    def prewarm_subscription():
+        try:
+            cfg = ai_config_service.get_runtime_config()
+            if cfg.is_oauth:
+                from app.ai.pi_ai_bridge import PiAIBridge
+                PiAIBridge().call({"action": "catalog"}, profile_key=profile_bridge_key(agent_db_path, cfg.profile_id))
+        except Exception:
+            pass  # 预热失败不阻止 GUI，真实请求仍报告错误。
+    import threading
+    threading.Thread(target=prewarm_subscription, daemon=True).start()
     return app.exec()
 
 

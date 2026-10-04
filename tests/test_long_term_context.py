@@ -16,11 +16,13 @@ import json
 import pytest
 
 from app.ai.long_term_context import (
-    DEFAULT_CONTEXT_PATH,
     LongTermContext,
     load_long_term_context,
     make_long_term_summary,
 )
+from pathlib import Path
+DEFAULT_CONTEXT_PATH = Path(__file__).resolve().parent / "fixtures/career_context.synthetic.json"
+
 from app.ai.planner import AIPlanner
 from app.ai.planner_context import PlanningContext
 
@@ -54,7 +56,7 @@ def _sample_data() -> dict:
         "learning_principles": ["优先学习真实 JD 高频技能", "遵守前置依赖"],
         "project_state": {
             "name": "Study Agent",
-            "repo": "planet798/Study-agent",
+            "repo": "example/study-project",
             "version": "v0.1.0",
         },
     }
@@ -75,7 +77,7 @@ class TestLoad:
         assert ctx.skill_roadmap["stages"]
         assert ctx.current_skill_state["mastered"]
         assert ctx.learning_principles
-        assert ctx.project_state["repo"] == "planet798/Study-agent"
+        assert ctx.project_state["repo"] == "example/study-project"
 
     def test_missing_file_returns_none(self, tmp_path):
         assert load_long_term_context(tmp_path / "nope.json") is None
@@ -176,4 +178,4 @@ class TestPlannerInjection:
         _, user_prompt = client.calls[0]
         assert "9/10" in user_prompt       # JD 高频技能
         assert "阶段一" in user_prompt      # 技能路线
-        assert "planet798/Study-agent" in user_prompt  # 项目状态
+        assert "example/study-project" in user_prompt  # 项目状态

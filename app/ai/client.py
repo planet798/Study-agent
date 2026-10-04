@@ -288,6 +288,7 @@ class AdaptiveAIClient(AIClient):
             )
         if getattr(cfg, "is_oauth", False):
             from .pi_ai_bridge import PiAIBridge, oauth_profile_lock
+            from .bridge_pool import profile_bridge_key
 
             lock = oauth_profile_lock(
                 getattr(self._config_service, "db_path", None), cfg.profile_id
@@ -311,6 +312,8 @@ class AdaptiveAIClient(AIClient):
                     temperature=kwargs.get("temperature", 0.3),
                     max_tokens=kwargs.get("max_tokens"),
                     on_event=persist_refresh,
+                    profile_key=profile_bridge_key(getattr(self._config_service, "db_path", None), cfg.profile_id),
+                    timeout=self.timeout,
                 )
                 refreshed = response.get("credential")
                 if refreshed and refreshed != cfg.oauth_credential and self._config_service:

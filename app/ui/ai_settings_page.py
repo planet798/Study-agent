@@ -477,6 +477,7 @@ class AIProfilesPanel(QWidget):
             timeout=10.0, parent=self,
             oauth_provider=cfg.oauth_provider_id if cfg else "",
             oauth_credential=cfg.oauth_credential if cfg else None,
+            db_path=self.service.db_path if is_oauth else None, profile_id=pid if is_oauth else None,
         )
         self._test_worker = worker
         self._test_profile_id = pid
@@ -486,7 +487,7 @@ class AIProfilesPanel(QWidget):
                 return
             self.test_btn.setEnabled(self._selected_id() is not None)
             self._test_worker = None
-            if result.oauth_credential and is_oauth:
+            if result.oauth_credential and is_oauth and not result.credential_persisted:
                 try:
                     self.service.save_oauth_credential(pid, result.oauth_credential)
                 except Exception as error:  # noqa: BLE001
@@ -497,7 +498,8 @@ class AIProfilesPanel(QWidget):
                 return
             if result.ok:
                 feedback(self.test_result_label,
-                         f"连接成功 · Model: {result.model} · {result.latency_ms} ms", "success")
+                         f"连接成功 · Model: {result.model} · 完整 {result.latency_ms} ms"
+                         + (f" · 首字 {result.first_token_ms} ms" if result.first_token_ms is not None else ""), "success")
             else:
                 feedback(self.test_result_label, f"连接失败：{result.message}", "error")
 

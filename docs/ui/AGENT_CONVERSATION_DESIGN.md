@@ -9,7 +9,7 @@
 - 助手正文透明、无包围边框；保留弱化的「学习助手」身份。用户消息右对齐，柔和中性背景，短内容自然收紧；隐藏重复的可见「你」，但保留 speaker、role、message_id、raw_text 和行的 accessibleName。
 - `hello` 的旧高度来自 speaker、上下内边距、QTextBrowser 全局 padding 和额外 20px slack 的叠加。现在用户隐藏 speaker、减少内边距，正文局部 padding=0；高度使用 ceil(document height) + 稳定 contentsMargins + 2px descender 余量，避免 resize 中读取尚未更新的 viewport 高度。
 - 输入初始约两行，按照实际 wrapped block 高度增长，通常上限约七行；上限同时受页面高度的 30% 约束，保留至少两行。仅触顶后出现输入内滚动条，清空即收缩。text/document/width/font/style 事件以单次 Qt timer 合并重算，不通过输入自己的高度反推可用空间。
-- Enter 换行、Ctrl+Enter 发送、16k 显示计数、20k 上限、同会话 draft 保留、换会话清空、模型和忙碌锁定全部保留。
+- Shift+Enter 换行、Enter 发送、16k 显示计数、20k 上限、同会话 draft 保留、换会话清空、模型和忙碌锁定全部保留。
 
 ## 顶部与安全状态
 

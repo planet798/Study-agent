@@ -94,34 +94,13 @@ class PiAIBridge:
         on_prompt: Callable[[dict], str] | None = None,
         timeout: float = 180.0,
         cancel_event: threading.Event | None = None,
+        profile_key: str | None = None,
     ) -> dict:
         if not self.is_installed():
             raise PiAIBridgeError(
                 ("订阅登录组件缺失，请重新安装 Study Agent。" if is_frozen() else
                  "订阅登录组件尚未安装。请在项目目录运行：cd oauth_bridge && npm ci")
             )
-        try:
-            process = subprocess.Popen(
-                [self.node, "index.mjs"], cwd=BRIDGE_DIR,
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                errors="replace", bufsize=1, **hidden_process_options(),
-            )
-        except OSError as exc:
-            raise PiAIBridgeError(
-                "未找到 Node.js（需要 Node.js 22.19 或更新版本）"
-            ) from exc
-        assert process.stdin is not None and process.stdout is not None
-        output_lines: queue.Queue[str | None] = queue.Queue()
-
-        def read_stdout() -> None:
-            try:
-                for line in process.stdout:
-                    output_lines.put(line)
-            finally:
-                output_lines.put(None)
-
-        threading.Thread(target=read_stdout, daemon=True).start()
         secrets = self._credential_strings(request.get("credential"))
         secrets.extend(self._credential_strings(request.get("credentials")))
 
@@ -149,6 +128,42 @@ class PiAIBridge:
                 return [scrub_payload(child, display_text=display_text) for child in value]
             return value
 
+        if profile_key is not None:
+            from .bridge_pool import POOL
+            from .bridge_process import BridgeProcessError
+            def forward(event):
+                if event.get("event") == "credential":
+                    secrets.extend(self._credential_strings(event.get("credential")))
+                if on_event:
+                    on_event(scrub_payload(event))
+            try:
+                return scrub_payload(POOL.call(self.node, profile_key, request, timeout=timeout,
+                                              on_event=forward, cancel_event=cancel_event))
+            except (BridgeProcessError, OSError) as exc:
+                raise PiAIBridgeError(scrub(str(exc))) from exc
+
+        try:
+            process = subprocess.Popen(
+                [self.node, "index.mjs"], cwd=BRIDGE_DIR,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                errors="replace", bufsize=1, **hidden_process_options(),
+            )
+        except OSError as exc:
+            raise PiAIBridgeError(
+                "未找到 Node.js（需要 Node.js 22.19 或更新版本）"
+            ) from exc
+        assert process.stdin is not None and process.stdout is not None
+        output_lines: queue.Queue[str | None] = queue.Queue()
+
+        def read_stdout() -> None:
+            try:
+                for line in process.stdout:
+                    output_lines.put(line)
+            finally:
+                output_lines.put(None)
+
+        threading.Thread(target=read_stdout, daemon=True).start()
         try:
             process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
             process.stdin.flush()
@@ -182,9 +197,11 @@ class PiAIBridge:
                         process.stdin.write(json.dumps(reply, ensure_ascii=False) + "\n")
                         process.stdin.flush()
                     elif on_event:
+                        if event.get("event") == "credential":
+                            secrets.extend(self._credential_strings(event.get("credential")))
                         on_event(scrub_payload(event))
                 elif "result" in event:
-                    result = event["result"]
+                    return scrub_payload(event["result"])
                 elif "error" in event:
                     raise PiAIBridgeError(scrub(str(event["error"])))
             return_code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
@@ -207,7 +224,7 @@ class PiAIBridge:
                     stream.close()
 
     def catalog(self) -> list[dict]:
-        return self.call({"action": "catalog"}).get("providers", [])
+        return self.call({"action": "catalog"}, profile_key="catalog").get("providers", [])
 
     def login(self, provider: str, **callbacks) -> dict:
         return self.call({"action": "login", "provider": provider}, **callbacks)
@@ -216,10 +233,13 @@ class PiAIBridge:
                  system_prompt: str = "", messages: list[dict] | None = None,
                  tools: list[dict] | None = None, temperature: float = 0.3,
                  max_tokens: int | None = None,
-                 on_event: Callable[[dict], None] | None = None) -> dict:
+                 on_event: Callable[[dict], None] | None = None,
+                 profile_key: str | None = None, session_id: str | None = None,
+                 timeout: float = 180.0, cancel_event=None) -> dict:
         return self.call({
             "action": "complete", "provider": provider, "model": model,
             "credential": credential, "systemPrompt": system_prompt,
             "messages": messages or [], "tools": tools or [],
             "temperature": temperature, "maxTokens": max_tokens,
-        }, on_event=on_event)
+            "sessionId": session_id,
+        }, on_event=on_event, profile_key=profile_key, timeout=timeout, cancel_event=cancel_event)
