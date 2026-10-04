@@ -7,6 +7,8 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from app.runtime_paths import data_dir
 from urllib.parse import urlparse
 
 _CONFIG_VERSION = 1
@@ -42,8 +44,7 @@ def default_mcp_config_path() -> Path:
     if override:
         return Path(override).expanduser()
     # app/agent/mcp/config.py -> repository root / data / mcp_servers.json
-    repository_root = Path(__file__).resolve().parents[3]
-    return repository_root / "data" / "mcp_servers.json"
+    return data_dir() / "mcp_servers.json"
 
 
 def load_mcp_config(path: str | Path | None = None) -> MCPConfig:

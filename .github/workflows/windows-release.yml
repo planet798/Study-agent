@@ -1,0 +1,90 @@
+name: Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version (X.Y.Z); dispatch builds artifacts only'
+        required: true
+        default: '0.2.0'
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci
+        working-directory: oauth_bridge
+      - run: npm test
+        working-directory: oauth_bridge
+      - run: python -m pytest -q --junitxml=regression.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-results
+          path: regression.xml
+
+  windows:
+    needs: regression
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Resolve version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $Version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { $env:INPUT_VERSION }
+          if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
+          "RELEASE_VERSION=$Version" >> $env:GITHUB_ENV
+      - run: python -m pip install -r packaging/windows-build.txt -r packaging/windows-test.txt
+      - run: python -m pip check
+      - name: Windows data and startup regressions
+        run: python -m pytest -q tests/test_runtime_paths.py tests/test_desktop_data_service.py tests/test_desktop_startup.py tests/test_pi_ai_bridge.py tests/test_main_cli.py tests/test_release_migration_hardening.py tests/test_migration_verifier_regression.py
+      - name: Install compiler
+        run: choco install innosetup --version=6.5.4 --yes --no-progress
+      - name: Build installer
+        run: ./scripts/build_windows.ps1 -Version $env:RELEASE_VERSION
+      - name: Verify installation, frozen runtime, upgrade and uninstall
+        run: ./scripts/verify_windows_package.ps1 -Version $env:RELEASE_VERSION
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $File = "dist/installer/StudyAgent-Setup-$env:RELEASE_VERSION-x64.exe"
+          $Hash = (Get-FileHash $File -Algorithm SHA256).Hash.ToLower()
+          "$Hash  $(Split-Path $File -Leaf)" | Set-Content -Encoding utf8NoBOM dist/installer/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: StudyAgent-Windows-${{ env.RELEASE_VERSION }}
+          path: dist/installer/*
+      - name: Create draft release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME "dist/installer/StudyAgent-Setup-$env:RELEASE_VERSION-x64.exe" dist/installer/SHA256SUMS.txt --verify-tag --draft --title "Study Agent $env:RELEASE_VERSION" --notes-file docs/WINDOWS_RELEASE_NOTES.md

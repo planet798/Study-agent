@@ -97,7 +97,7 @@ def _sqlite_backup(src_path: str, dst_path: str) -> None:
     直接 shutil.copy2 主 DB 文件会丢失仍在 WAL 中、但已提交的事务；
     backup API 读取的是一致性快照，不依赖 checkpoint。
     """
-    src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
+    src = sqlite3.connect(Path(src_path).absolute().as_uri() + "?mode=ro", uri=True)
     dst = sqlite3.connect(dst_path)
     try:
         with dst:

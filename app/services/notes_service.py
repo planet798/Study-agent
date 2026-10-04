@@ -15,7 +15,9 @@ from pathlib import Path
 
 from ..utils.date_utils import add_days
 
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "docs" / "obsidian"
+from app.runtime_paths import notes_dir
+
+DEFAULT_OUTPUT_DIR = notes_dir()
 
 _NONE = "> 今日暂无该部分记录"
 

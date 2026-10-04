@@ -15,7 +15,9 @@ from .schema import initialize_fresh_database, migrate
 
 # 项目根目录：app/database -> .. -> .. 为 study-agent/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB_DIR = PROJECT_ROOT / "data"
+from app.runtime_paths import data_dir
+
+DEFAULT_DB_DIR = data_dir()
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "study_agent.db"
 
 

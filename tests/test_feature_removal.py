@@ -64,7 +64,9 @@ class TestUiSectionsRemoved:
         texts = [l.text() for l in w.list_container.findChildren(QLabel)]
         assert not any("额外学习" in t for t in texts)
         assert not any("课外探索" in t for t in texts)
-        assert "今日学习" in texts
+        # 已验收的今日页把分区标题放在列表外，仍须验证标题和任务可见。
+        assert "任务" in texts
+        assert "今日学习" in [label.text() for label in w.findChildren(QLabel)]
 
     def test_no_extra_buttons(self, qtbot, repo, task_service, date_service):
         task_service.create_task("任务", scheduled_date=TODAY)

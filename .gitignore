@@ -9,3 +9,8 @@ data/agent_workspaces/
 .pytest_cache/
 data/logs/
 data/*.png
+
+build/
+dist/
+*.spec.bak
+.venv-build/

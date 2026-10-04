@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.runtime_paths import data_dir
 from typing import Iterator
 
 from ..tools.registry import AgentToolRegistry
@@ -30,8 +32,7 @@ class SandboxTurnScope:
 
 def default_sandbox_workspace_root() -> Path:
     """Fixed application data root; never derived from model/task text."""
-    repository_root = Path(__file__).resolve().parents[3]
-    return repository_root / "data" / "agent_workspaces"
+    return data_dir() / "agent_workspaces"
 
 
 class SandboxProvider:

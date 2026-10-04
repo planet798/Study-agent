@@ -20,7 +20,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
-BRIDGE_DIR = Path(__file__).resolve().parents[2] / "oauth_bridge"
+from app.runtime_paths import bridge_dir, hidden_process_options, is_frozen, node_executable
+
+BRIDGE_DIR = bridge_dir()
 _PROFILE_LOCKS: dict[str, threading.Lock] = {}
 _PROFILE_LOCKS_GUARD = threading.Lock()
 _DISPLAY_TEXT_KEYS = frozenset({
@@ -68,7 +70,7 @@ class PiAIBridgeError(RuntimeError):
 
 class PiAIBridge:
     def __init__(self, node: str | None = None):
-        self.node = node or os.environ.get("STUDY_AGENT_NODE") or "node"
+        self.node = node or node_executable()
 
     @staticmethod
     def is_installed() -> bool:
@@ -95,14 +97,15 @@ class PiAIBridge:
     ) -> dict:
         if not self.is_installed():
             raise PiAIBridgeError(
-                "订阅登录组件尚未安装。请在项目目录运行：cd oauth_bridge && npm ci"
+                ("订阅登录组件缺失，请重新安装 Study Agent。" if is_frozen() else
+                 "订阅登录组件尚未安装。请在项目目录运行：cd oauth_bridge && npm ci")
             )
         try:
             process = subprocess.Popen(
                 [self.node, "index.mjs"], cwd=BRIDGE_DIR,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                errors="replace", bufsize=1,
+                errors="replace", bufsize=1, **hidden_process_options(),
             )
         except OSError as exc:
             raise PiAIBridgeError(

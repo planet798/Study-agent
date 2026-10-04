@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.runtime_paths import data_dir
+
 _CONFIG_VERSION = 1
 _IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,255}$")
 DEFAULT_MAX_FILE_CHARS = 200_000
@@ -44,8 +46,7 @@ def default_sandbox_config_path() -> Path:
     override = os.environ.get("STUDY_AGENT_SANDBOX_CONFIG")
     if override:
         return Path(override).expanduser()
-    root = Path(__file__).resolve().parents[3]
-    return root / "data" / "sandbox.json"
+    return data_dir() / "sandbox.json"
 
 
 def load_sandbox_config(path: str | Path | None = None) -> SandboxConfig:

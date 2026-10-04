@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtWidgets import QApplication
 
+from app.runtime_paths import is_frozen
+
 from app.ai.client import AdaptiveAIClient, DeepSeekClient
 from app.ai.config_service import AIConfigService
 from app.ai.long_term_context import load_long_term_context
@@ -900,7 +902,7 @@ def migration_gate_status(db_path) -> dict:
     if not path.exists():
         return {"blocked": False, "version": None, "reason": "new_db"}
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
         try:
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             has_business = bool(conn.execute(
@@ -918,7 +920,10 @@ def migration_gate_status(db_path) -> dict:
             "db_path": str(path),
             "reason": "unreadable_db",
         }
-    if version >= SCHEMA_VERSION:
+    if version > SCHEMA_VERSION:
+        return {"blocked": True, "version": version, "target": SCHEMA_VERSION,
+                "db_path": str(path), "reason": "newer_schema"}
+    if version == SCHEMA_VERSION:
         return {"blocked": False, "version": version, "reason": "current"}
     if version == 0 and not has_business:
         return {"blocked": False, "version": version, "reason": "empty_db"}
@@ -933,6 +938,8 @@ def migration_gate_status(db_path) -> dict:
 
 def migration_gate_message(status: dict) -> str:
     db = status.get("db_path", "data/study_agent.db")
+    if status.get("reason") == "newer_schema":
+        return "数据库来自更新版本，请升级 Study Agent 后再打开。"
     if status.get("reason") == "unreadable_db":
         return (
             "=" * 68 + "\n"
@@ -1406,7 +1413,9 @@ def main() -> int:
     )
     qt_args = [a for a in qt_args if a != MIGRATION_GATE_ALLOW_FLAG]
     gate = migration_gate_status(resolve_db_path())
-    if gate.get("blocked") and not allow_auto_migrate:
+    if not is_frozen() and gate.get("blocked") and (
+        not allow_auto_migrate or gate.get("reason") != "old_schema"
+    ):
         print(migration_gate_message(gate))
         print("migration gate: blocked (run db-release backup/migrate/verify first)")
         return 3
@@ -1425,6 +1434,17 @@ def main() -> int:
     guard = SingleInstanceGuard()
     if not guard.acquire():
         return 0
+
+    if is_frozen():
+        from app.ui.desktop_startup import prepare_desktop_data
+        from app.version import VERSION
+        from PySide6.QtGui import QIcon
+        from app.runtime_paths import resource_root
+
+        app.setApplicationVersion(VERSION)
+        app.setWindowIcon(QIcon(str(resource_root() / "assets/study-agent.ico")))
+        if not prepare_desktop_data(resolve_db_path(), migration_gate_status):
+            return 3
 
     # 3) 组装依赖：SQLite -> Repository -> Service -> UI（UI 不直接碰 SQLite）
     conn = get_connection()

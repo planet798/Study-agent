@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONTEXT_PATH = PROJECT_ROOT / "docs" / "career_context.json"
+from app.runtime_paths import context_path
+
+DEFAULT_CONTEXT_PATH = context_path()
 
 # 必须存在的顶层字段
 _REQUIRED_KEYS = (

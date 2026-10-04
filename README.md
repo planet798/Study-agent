@@ -2,6 +2,14 @@
 
 Windows 桌面学习管理工具（Python + PySide6 + SQLite）
 
+## Windows 安装版
+
+在 [GitHub Releases](https://github.com/planet798/Study-agent/releases) 下载正式发布的 `StudyAgent-Setup-版本-x64.exe`，双击安装，可自主选择安装目录。安装器创建开始菜单和桌面快捷方式；使用时无需 Python、Node.js 或终端命令。
+
+首次启动可选择全新开始或导入源码版 `data` 目录，请先退出旧程序。安装版用户数据位于 `%LOCALAPPDATA%\StudyAgent\data`，覆盖安装和卸载均保留数据；同一 Windows 用户的系统凭据继续可用。AI 功能仍需配置 API Key 或登录账号，外部 MCP 服务与 Docker 按需自行配置。
+
+安装、导入和升级说明见 [Windows 发布说明](docs/WINDOWS_RELEASE_NOTES.md)，构建与实机验收见 [Windows 打包指南](docs/WINDOWS_PACKAGING.md)。下面的环境配置与启动命令适用于源码开发。
+
 ## 当前产品基线（S6 · Agent-11 · Workspace-1 · Learning Shell-1）
 
 静态主导航：Today、Learning Routes、Practice、Settings。核心链路：Curriculum → Planning → Today → Agent Study Session → Assessment / Practice Evidence → Mastery / Capability。Agent-1 至 Agent-11、Workspace-1 和 Learning Shell-1 已实现；canonical 边界见 [`docs/PRODUCT_BASELINE.md`](docs/PRODUCT_BASELINE.md)。
