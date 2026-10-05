@@ -168,9 +168,13 @@ class RouteDetailDialog(QDialog):
         elif structure is None:
             empty = SAEmptyState("该路线还没有学习计划", "先建立课程阶段与知识点。")
             if not route.is_archived:
-                actions = FlowWidget()
-                actions.add_widget(_secondary("创建手动学习计划", self._on_create_plan))
-                actions.add_widget(_secondary("AI 生成学习计划", self._on_ai_generate))
+                actions = QWidget()
+                actions_layout = QVBoxLayout(actions)
+                actions_layout.setContentsMargins(0, 0, 0, 0)
+                actions_layout.setSpacing(spacing.SM)
+                # 空态的居中操作区需要完整的两行高度，避免换行后裁切按钮。
+                actions_layout.addWidget(_secondary("创建手动学习计划", self._on_create_plan))
+                actions_layout.addWidget(_secondary("AI 生成学习计划", self._on_ai_generate))
                 empty.set_action(actions)
             self.body_layout.addWidget(empty)
         else:

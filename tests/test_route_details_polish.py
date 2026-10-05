@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from app.ui.route_detail_sections import RouteDetailSection, RoutePhaseSection
 from app.ui.route_overview_widgets import RouteActionsButton, RouteOverviewRow
+from app.ui.components.empty_state import SAEmptyState
+from app.ui.design.theme_manager import ThemeManager, ThemeMode
 from app.ui.routes_page import RouteDetailDialog
 from tests.test_routes_ui3 import routes_env, _clean_theme, _detail, _page
 
@@ -80,6 +82,55 @@ def test_empty_plan_has_one_creation_area_and_keeps_route_metadata(qtbot, routes
     assert '添加阶段' not in buttons
     top_menu = dialog.action_row.itemAt(0).widget().menu()
     assert not any(a.data() == 'ai' for a in top_menu.actions())
+
+
+@pytest.mark.parametrize('theme', [ThemeMode.LIGHT, ThemeMode.DARK])
+@pytest.mark.parametrize('size', [(880, 720), (680, 480), (480, 320)])
+def test_empty_plan_actions_are_unclipped_and_clickable(
+        qtbot, qapp, routes_env, monkeypatch, theme, size):
+    calls = []
+    monkeypatch.setattr(RouteDetailDialog, '_on_create_plan',
+                        lambda self: calls.append('manual'))
+    monkeypatch.setattr(RouteDetailDialog, '_on_ai_generate',
+                        lambda self: calls.append('ai'))
+    ThemeManager.instance().set_theme(theme)
+    dialog, _, _ = _manual_detail(qtbot, routes_env, planned=False)
+    dialog.resize(*size)
+    dialog.show()
+
+    def check_actions():
+        qapp.processEvents()
+        empty = next(s for s in dialog.findChildren(SAEmptyState)
+                     if s.title() == '该路线还没有学习计划')
+        actions = empty.action()
+        buttons = actions.findChildren(QPushButton)
+        assert [b.text() for b in buttons] == ['创建手动学习计划', 'AI 生成学习计划']
+        for button in buttons:
+            # 控件存在不等于可见：先检查每层父容器是否裁切按钮。
+            ancestor = button.parentWidget()
+            while ancestor is not dialog.scroll.viewport():
+                bounds = QRect(button.mapTo(ancestor, QPoint()), button.geometry().size())
+                assert ancestor.rect().contains(bounds), button.text()
+                ancestor = ancestor.parentWidget()
+            dialog.scroll.ensureWidgetVisible(button, 0, 0)
+            qapp.processEvents()
+            viewport = dialog.scroll.viewport()
+            bounds = QRect(button.mapTo(viewport, QPoint()), button.geometry().size())
+            assert viewport.rect().contains(bounds)
+            assert button.isVisible()
+            qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+        assert calls[-2:] == ['manual', 'ai']
+
+    check_actions()
+    _sections(dialog)['info'].toggle.click()
+    check_actions()
+    dialog.refresh()
+    assert _sections(dialog)['info'].toggle.isChecked()
+    check_actions()
+    _sections(dialog)['info'].toggle.click()
+    check_actions()
+    if size[1] == 320:
+        assert dialog.scroll.verticalScrollBar().value() > 0
 
 
 def test_delete_from_reopened_phase_uses_existing_service(qtbot, routes_env, monkeypatch):
