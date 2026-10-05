@@ -77,7 +77,7 @@ def test_install_failure_never_launches_partially_updated_program(upgrade_job, c
     rc, calls = execute(upgrade_job, code=code)
     assert rc == 1
     assert not any(c[0] == "launch" for c in calls)
-    failure = json.loads((upgrade_job.parent / "result.json").read_text())
+    failure = json.loads((upgrade_job.parent / "result.json").read_text(encoding="utf-8"))
     assert failure["status"] == "failed" and failure["stage"] == "install"
     assert failure["version"] == "0.2.3" and failure["error_type"] == "UpdateError"
     assert Path(validate_job(upgrade_job)["installer"]).exists()
@@ -99,7 +99,7 @@ def test_process_wait_timeout_does_not_install(upgrade_job):
 def test_installed_but_failed_startup_is_not_success(upgrade_job):
     rc, calls = execute(upgrade_job, startup_status="failed")
     assert rc == 1
-    assert json.loads((upgrade_job.parent / "result.json").read_text())["status"] == "failed"
+    assert json.loads((upgrade_job.parent / "result.json").read_text(encoding="utf-8"))["status"] == "failed"
 
 
 def test_changed_checksum_stops_before_readiness(upgrade_job):
@@ -168,4 +168,4 @@ def test_atomic_record_rewrite_does_not_depend_on_old_temporary_file(tmp_path):
     record.with_suffix(".json.tmp").write_text("abandoned")
     write_record(record, {"state": 1})
     write_record(record, {"state": 2})
-    assert json.loads(record.read_text()) == {"state": 2}
+    assert json.loads(record.read_text(encoding="utf-8")) == {"state": 2}

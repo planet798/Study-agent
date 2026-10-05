@@ -134,7 +134,7 @@ def verify(installer, helper, install, version, report):
             raise RuntimeError("Packaged updater did not complete successfully")
         if snapshot(db, task.id, session["id"]) != before:
             raise RuntimeError("Update changed historical tasks or messages")
-        if note.read_text(encoding="utf-8") != "合成学习文件" or config.read_text() != '{"synthetic": true}':
+        if note.read_text(encoding="utf-8") != "合成学习文件" or config.read_text(encoding="utf-8") != '{"synthetic": true}':
             raise RuntimeError("Update changed user files or configuration")
         report.write_text(json.dumps({"ok": True, "baseline": baseline_version, "target": version,
                                      "waited_for_exit": True, "history_preserved": True,

@@ -48,9 +48,9 @@ def test_startup_acknowledges_version_and_preserves_result_for_helper(upgrade_jo
     controller = SimpleNamespace(message="", changed=SimpleNamespace(emit=lambda: None))
     window = SimpleNamespace(statusBar=lambda: SimpleNamespace(showMessage=lambda *a: messages.append(a)),
                              ai_settings_page=SimpleNamespace(update_panel=SimpleNamespace(controller=controller)))
-    job = json.loads(upgrade_job.read_text())
+    job = json.loads(upgrade_job.read_text(encoding="utf-8"))
     startup.confirm_started(window)
-    assert json.loads((upgrade_job.parent / "result.json").read_text())["status"] == "started"
+    assert json.loads((upgrade_job.parent / "result.json").read_text(encoding="utf-8"))["status"] == "started"
     assert not Path(job["installer"]).exists()
     assert messages
     monkeypatch.setattr(startup, "_pending", None)
@@ -90,13 +90,13 @@ def test_cache_cleanup_retains_latest_failure_and_skips_links(tmp_path, monkeypa
 def test_changed_job_cannot_delete_file_outside_cache(upgrade_job, monkeypatch, tmp_path):
     outside = tmp_path / "learning-note.md"
     outside.write_text("preserve")
-    record = json.loads(upgrade_job.read_text())
+    record = json.loads(upgrade_job.read_text(encoding="utf-8"))
     record["installer"] = str(outside)
     write_record(upgrade_job, record)
     monkeypatch.setattr(startup, "_pending", upgrade_job)
     messages = []
     window = SimpleNamespace(statusBar=lambda: SimpleNamespace(showMessage=lambda *a: messages.append(a)))
     startup.confirm_started(window)
-    assert outside.read_text() == "preserve"
-    assert json.loads((upgrade_job.parent / "result.json").read_text())["status"] == "failed"
+    assert outside.read_text(encoding="utf-8") == "preserve"
+    assert json.loads((upgrade_job.parent / "result.json").read_text(encoding="utf-8"))["status"] == "failed"
     assert messages
