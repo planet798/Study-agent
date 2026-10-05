@@ -236,10 +236,14 @@ class PiAIBridge:
                  on_event: Callable[[dict], None] | None = None,
                  profile_key: str | None = None, session_id: str | None = None,
                  timeout: float = 180.0, cancel_event=None) -> dict:
-        return self.call({
+        request = {
             "action": "complete", "provider": provider, "model": model,
             "credential": credential, "systemPrompt": system_prompt,
             "messages": messages or [], "tools": tools or [],
             "temperature": temperature, "maxTokens": max_tokens,
-            "sessionId": session_id,
-        }, on_event=on_event, profile_key=profile_key, timeout=timeout, cancel_event=cancel_event)
+        }
+        # JSON null is not an absent optional string in the provider SDK.
+        if session_id is not None:
+            request["sessionId"] = session_id
+        return self.call(request, on_event=on_event, profile_key=profile_key,
+                         timeout=timeout, cancel_event=cancel_event)

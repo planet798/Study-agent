@@ -51,7 +51,8 @@ export async function completeRequest(models, credentials, request, emit, signal
     let firstTextMs = null;
     let toolRound = false;
     const started = performance.now();
-    const stream = models.stream(model, context, { ...buildCompletionOptions(model, request), signal, sessionId: request.sessionId });
+    // Older hosts send JSON null for an absent session ID; the SDK expects undefined.
+    const stream = models.stream(model, context, { ...buildCompletionOptions(model, request), signal, sessionId: request.sessionId ?? undefined });
     for await (const event of stream) {
       if (event.type === 'text_delta' && !toolRound) {
         firstTextMs ??= Math.round(performance.now() - started);

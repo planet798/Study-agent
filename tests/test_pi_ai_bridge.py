@@ -10,6 +10,28 @@ import pytest
 from app.ai.pi_ai_bridge import PiAIBridge, PiAIBridgeError
 
 
+@pytest.mark.parametrize("kwargs", [{}, {"session_id": None}, {"session_id": "session-42"}])
+def test_complete_serializes_optional_session_id(monkeypatch, kwargs):
+    captured = {}
+
+    def capture_call(self, request, **callbacks):
+        captured.update(json.loads(json.dumps(request)))
+        return {"content": "OK"}
+
+    monkeypatch.setattr(PiAIBridge, "call", capture_call)
+    result = PiAIBridge().complete(
+        provider="openai-codex", model="gpt-6-luna",
+        credential={"type": "oauth", "access": "synthetic-token"},
+        messages=[{"role": "user", "content": "Reply with OK."}], **kwargs,
+    )
+
+    assert result["content"] == "OK"
+    if kwargs.get("session_id") is None:
+        assert "sessionId" not in captured
+    else:
+        assert captured["sessionId"] == kwargs["session_id"]
+
+
 class _FakeProcess:
     def __init__(self, output: dict | list[dict]):
         self.stdin = io.StringIO()
