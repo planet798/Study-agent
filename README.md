@@ -8,6 +8,8 @@ Windows 桌面学习管理工具（Python + PySide6 + SQLite）
 
 首次启动可选择全新开始或导入源码版 `data` 目录，请先退出旧程序。安装版用户数据位于 `%LOCALAPPDATA%\StudyAgent\data`，覆盖安装和卸载均保留数据；同一 Windows 用户的系统凭据继续可用。AI 功能仍需配置 API Key 或登录账号，外部 MCP 服务与 Docker 按需自行配置。
 
+从支持应用内更新的安装版（0.2.2 起），可在 **设置 → 应用更新** 手动检查正式版本，下载校验后点击 **安装并重启**，自动沿用安装目录覆盖升级。更新前请结束后台任务并处理未保存的设置和聊天草稿。0.2.1 及更早版本需要先手动升级一次；源码运行仅检查版本，不能自动安装。
+
 安装、导入和升级说明见 [Windows 发布说明](docs/WINDOWS_RELEASE_NOTES.md)，构建与实机验收见 [Windows 打包指南](docs/WINDOWS_PACKAGING.md)。下面的环境配置与启动命令适用于源码开发。
 
 ## 当前产品基线（S6 · Agent-11 · Workspace-1 · Learning Shell-1）

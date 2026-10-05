@@ -24,3 +24,8 @@ class SettingsDrafts:
 
     def dirty(self, key: str) -> bool:
         return key in self._pending
+
+    @property
+    def has_pending(self) -> bool:
+        """包括当前未选中的编辑器草稿；供更新退出前只读检查。"""
+        return bool(self._pending)

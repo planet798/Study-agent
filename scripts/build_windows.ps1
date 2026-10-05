@@ -29,6 +29,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '许可收集失败' }
     & python -m PyInstaller --clean --noconfirm packaging/study-agent.spec
     if ($LASTEXITCODE -ne 0) { throw 'Windows 应用打包失败' }
+    & python -m PyInstaller --clean --noconfirm packaging/study-agent-updater.spec
+    if ($LASTEXITCODE -ne 0) { throw 'Windows 升级辅助程序打包失败' }
+    Copy-Item dist/StudyAgentUpdater.exe dist/StudyAgent/StudyAgentUpdater.exe -Force
     & $IsccPath "/DAppVersion=$Version" packaging/installer.iss
     if ($LASTEXITCODE -ne 0) { throw '安装器编译失败' }
 } finally { Pop-Location }

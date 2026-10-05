@@ -9,7 +9,7 @@ on:
       version:
         description: 'Version matching the verified installer (X.Y.Z)'
         required: true
-        default: '0.2.1'
+        default: '0.2.2'
 
 permissions:
   actions: read
@@ -63,6 +63,11 @@ jobs:
               assert hashlib.file_digest(stream, 'sha256').hexdigest() == checksum[0]
           report = json.loads((root / 'self-test.json').read_text())
           assert report.get('ok') is True and report['version'] == version
+          if tuple(map(int, version.split('.'))) >= (0, 2, 2):
+              update = json.loads((root / 'updater-self-test.json').read_text())
+              assert update.get('ok') is True and update['target'] == version
+              assert all(update.get(key) is True for key in
+                         ('waited_for_exit', 'history_preserved', 'files_preserved', 'automatic_restart'))
           PY
       - name: Create draft for the exact verified commit
         run: >-

@@ -76,9 +76,17 @@ def run() -> int:
     try:
         if self_check:
             return self_test(Path(sys.argv[2]))
+        from app.updates import startup
+        if not startup.initialize(sys.argv):
+            return 0
         from app.main import main
-        return main()
+        result = main()
+        if result != 0:
+            startup.fail_startup()
+        return result
     except Exception:
+        from app.updates.startup import fail_startup
+        fail_startup()
         _record_error(*sys.exc_info(), notify=not self_check)
         return 1
 

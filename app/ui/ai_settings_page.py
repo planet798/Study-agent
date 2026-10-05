@@ -835,6 +835,10 @@ class AISettingsPage(QWidget):
         )
         layout.addWidget(appearance_card)
 
+        from .app_update_panel import AppUpdatePanel
+        self.update_panel = AppUpdatePanel(self)
+        layout.addWidget(self.update_panel)
+
         hint = QLabel(
             "通过个性化设置，让 Study Agent 更符合你的学习习惯。"
             "模型与 API 用于连接模型，高级用于调整 Prompt。"

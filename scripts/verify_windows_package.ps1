@@ -16,6 +16,9 @@ try {
     New-Item -ItemType Directory -Force -Path $Work,$DataHome | Out-Null
     # 安装器覆盖路径与应用数据路径分别验证。
     $env:LOCALAPPDATA = $DataHome
+    # 独立辅助程序的真实等待/安装/启动链路；使用隔离学习库与合成会话。
+    & python scripts/verify_windows_updater.py --installer $Installer --helper (Join-Path $Root 'dist/StudyAgent/StudyAgentUpdater.exe') --install $Install --version $Version --report (Join-Path $Root 'dist/installer/updater-self-test.json')
+    if ($LASTEXITCODE -ne 0) { throw '应用内更新链路验证失败' }
     Invoke-Checked $Installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=desktopicon', "/DIR=`"$Install`"")
     $Exe = Join-Path $Install 'StudyAgent.exe'
     if (-not (Test-Path $Exe)) { throw '安装后主程序缺失' }

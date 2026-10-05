@@ -353,6 +353,13 @@ class MainWindow(QMainWindow):
             theme_settings=self.theme_settings,
             personalization_service=self.personalization_service,
         )
+        from .app_update_exit import begin_update, commit_update
+        update_panel = self.ai_settings_page.update_panel
+        update_panel.install_requested.connect(lambda: begin_update(self))
+        update_panel.controller.ready_to_exit.connect(lambda: commit_update(self))
+        update_panel.controller.preparation_failed.connect(
+            lambda: self.centralWidget().setEnabled(True)
+        )
         self.stack.addWidget(self.ai_settings_page)
         self.ai_settings_page_index = self.stack.count() - 1
         self.nav_ai_btn.setEnabled(True)
@@ -1773,6 +1780,7 @@ class MainWindow(QMainWindow):
         settings_page = getattr(self, "ai_settings_page", None)
         if settings_page is not None:
             try:
+                settings_page.update_panel.controller.stop()
                 settings_page.profiles_panel.stop_test_worker()
             except Exception:  # noqa: BLE001 - 清理失败不阻断退出
                 pass

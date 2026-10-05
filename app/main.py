@@ -1810,7 +1810,16 @@ def main() -> int:
             pass  # 预热失败不阻止 GUI，真实请求仍报告错误。
     import threading
     threading.Thread(target=prewarm_subscription, daemon=True).start()
-    return app.exec()
+    from app.updates.startup import confirm_started
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(0, lambda: confirm_started(window))
+    try:
+        return app.exec()
+    finally:
+        # 更新辅助程序必须等到这些资源释放后才能替换应用文件。
+        POOL.close()
+        guard.cleanup()
+        conn.close()
 
 
 if __name__ == "__main__":
